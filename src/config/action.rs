@@ -1,4 +1,4 @@
-use super::Item;
+use super::{is_var_name, Item};
 use std::path::PathBuf;
 
 /// The action line of a recipe
@@ -26,7 +26,10 @@ impl Action {
         if let Some(rest) = s.strip_prefix('!') {
             let addrs: Vec<String> =
                 rest.split_whitespace().map(|a| a.to_string()).collect();
-            return Action::Forward(addrs);
+            if !addrs.is_empty() {
+                return Action::Forward(addrs);
+            }
+            // Empty forward falls through to folder
         }
 
         // Pipe: [VAR=]| cmd
@@ -51,23 +54,9 @@ impl Action {
             };
         }
 
-        // Nested block: { (handled at parser level, but recognize it)
-        if s.starts_with('{') {
-            return Action::Nested(Vec::new());
-        }
-
-        // Otherwise it's a folder path
+        // Otherwise it's a folder path (nested blocks handled at parser level)
         Action::Folder(PathBuf::from(s))
     }
-}
-
-fn is_var_name(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]

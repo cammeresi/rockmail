@@ -1,4 +1,4 @@
-use super::{Action, Condition, Flags, Item, Recipe};
+use super::{is_var_name, Action, Condition, Flags, Item, Recipe};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -11,18 +11,23 @@ pub enum ParseError {
     UnclosedBlock,
     #[error("invalid recipe line: {0}")]
     Invalid(String),
+    #[error("nesting too deep (max {MAX_DEPTH})")]
+    TooDeep,
 }
+
+const MAX_DEPTH: usize = 100;
 
 /// Parser state
 pub struct Parser<'a> {
     lines: Vec<&'a str>,
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
         let lines: Vec<_> = input.lines().collect();
-        Self { lines, pos: 0 }
+        Self { lines, pos: 0, depth: 0 }
     }
 
     /// Parse entire rcfile into items
@@ -58,31 +63,32 @@ impl<'a> Parser<'a> {
     }
 
     fn next_item(&mut self) -> Result<Option<Item>, ParseError> {
-        self.skip_blank_and_comments();
-        let Some(line) = self.peek() else {
-            return Ok(None);
-        };
+        loop {
+            self.skip_blank_and_comments();
+            let Some(line) = self.peek() else {
+                return Ok(None);
+            };
 
-        let trimmed = line.trim();
+            let trimmed = line.trim();
 
-        // Recipe starts with :
-        if trimmed.starts_with(':') {
-            return self.parse_recipe().map(|r| Some(Item::Recipe(r)));
+            // Recipe starts with :
+            if trimmed.starts_with(':') {
+                return self.parse_recipe().map(|r| Some(Item::Recipe(r)));
+            }
+
+            // Closing brace: return None to end nested block
+            if trimmed.starts_with('}') {
+                return Ok(None);
+            }
+
+            // Variable assignment: NAME=value or NAME (unset)
+            self.advance();
+            if let Some(item) = self.parse_assignment(trimmed) {
+                return Ok(Some(item));
+            }
+
+            // Unrecognized line: skip and continue loop
         }
-
-        // Closing brace: return None to end nested block
-        if trimmed.starts_with('}') {
-            return Ok(None);
-        }
-
-        // Variable assignment: NAME=value or NAME (unset)
-        self.advance();
-        if let Some(item) = self.parse_assignment(trimmed) {
-            return Ok(Some(item));
-        }
-
-        // Unrecognized line: skip it (procmail ignores garbage)
-        Ok(None)
     }
 
     fn parse_assignment(&self, line: &str) -> Option<Item> {
@@ -188,10 +194,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> Result<Vec<Item>, ParseError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(ParseError::TooDeep);
+        }
+        self.depth += 1;
         let mut items = Vec::new();
         loop {
             self.skip_blank_and_comments();
             let Some(line) = self.peek() else {
+                self.depth -= 1;
                 return Err(ParseError::UnclosedBlock);
             };
             if line.trim().starts_with('}') {
@@ -201,9 +212,13 @@ impl<'a> Parser<'a> {
             if let Some(item) = self.next_item()? {
                 items.push(item);
             } else {
-                break;
+                // next_item returned None, meaning } or EOF
+                // We already checked for } above, so this is EOF
+                self.depth -= 1;
+                return Err(ParseError::UnclosedBlock);
             }
         }
+        self.depth -= 1;
         Ok(items)
     }
 
@@ -221,15 +236,6 @@ impl<'a> Parser<'a> {
 
         result
     }
-}
-
-fn is_var_name(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Convenience function to parse an rcfile
@@ -362,5 +368,24 @@ MAILDIR=/var/mail  # inline comment not supported, this goes in value
 "#;
         let items = parse(rc).unwrap();
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn skips_garbage() {
+        let rc = r#"
+MAILDIR=/var/mail
+
+garbage line here
+
+:0
+* ^From:.*test
+/dev/null
+
+more garbage
+
+VERBOSE=yes
+"#;
+        let items = parse(rc).unwrap();
+        assert_eq!(items.len(), 3); // MAILDIR, recipe, VERBOSE
     }
 }

@@ -11,8 +11,8 @@ pub enum Condition {
     Shell { cmd: String },
     /// Variable match: VAR ?? pattern
     Variable { name: String, pattern: String },
-    /// Substitution prefix ($): expand then reparse
-    Subst { inner: Box<Condition> },
+    /// Substitution prefix ($): expand then reparse, may be negated
+    Subst { inner: Box<Condition>, negate: bool },
 }
 
 impl Condition {
@@ -34,6 +34,7 @@ impl Condition {
             let inner = Self::parse_inner(rest.trim_start(), false)?;
             return Some(Condition::Subst {
                 inner: Box::new(inner),
+                negate,
             });
         }
 
@@ -155,12 +156,33 @@ mod tests {
     fn subst() {
         let c = Condition::parse("$ ^From:.*${SENDER}").unwrap();
         match c {
-            Condition::Subst { inner } => match *inner {
-                Condition::Regex { pattern, .. } => {
-                    assert_eq!(pattern, "^From:.*${SENDER}");
+            Condition::Subst { inner, negate } => {
+                assert!(!negate);
+                match *inner {
+                    Condition::Regex { pattern, .. } => {
+                        assert_eq!(pattern, "^From:.*${SENDER}");
+                    }
+                    _ => panic!("expected inner regex"),
                 }
-                _ => panic!("expected inner regex"),
-            },
+            }
+            _ => panic!("expected subst"),
+        }
+    }
+
+    #[test]
+    fn negated_subst() {
+        let c = Condition::parse("! $ ^From:.*${SENDER}").unwrap();
+        match c {
+            Condition::Subst { inner, negate } => {
+                assert!(negate);
+                match *inner {
+                    Condition::Regex { pattern, negate } => {
+                        assert_eq!(pattern, "^From:.*${SENDER}");
+                        assert!(!negate);
+                    }
+                    _ => panic!("expected inner regex"),
+                }
+            }
             _ => panic!("expected subst"),
         }
     }

@@ -62,11 +62,14 @@ impl Default for SubstCtx {
 
 /// Expand variable substitutions using real environment
 pub fn expand(s: &str, ctx: &SubstCtx) -> String {
-    expand_with_env(s, ctx, &RealEnv)
+    subst(s, ctx, &RealEnv)
 }
 
 /// Expand variable substitutions with custom environment
-pub fn expand_with_env(s: &str, ctx: &SubstCtx, env: &dyn Env) -> String {
+pub fn subst<E>(s: &str, ctx: &SubstCtx, env: &E) -> String
+where
+    E: Env,
+{
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
 
@@ -92,10 +95,12 @@ pub fn expand_with_env(s: &str, ctx: &SubstCtx, env: &dyn Env) -> String {
     out
 }
 
-fn expand_var(
-    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx,
-    env: &dyn Env, out: &mut String,
-) {
+fn expand_var<E>(
+    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx, env: &E,
+    out: &mut String,
+) where
+    E: Env,
+{
     match chars.peek() {
         None => out.push('$'),
         Some(&'{') => {
@@ -145,10 +150,12 @@ fn expand_var(
     }
 }
 
-fn expand_braced(
-    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx,
-    env: &dyn Env, out: &mut String,
-) {
+fn expand_braced<E>(
+    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx, env: &E,
+    out: &mut String,
+) where
+    E: Env,
+{
     let name = collect_name(chars);
     if name.is_empty() {
         skip_to_brace(chars);
@@ -171,7 +178,7 @@ fn expand_braced(
                     let alt = collect_to_brace(chars);
                     match val {
                         Some(ref v) if !v.is_empty() => out.push_str(v),
-                        _ => out.push_str(&expand_with_env(&alt, ctx, env)),
+                        _ => out.push_str(&subst(&alt, ctx, env)),
                     }
                 }
                 Some('+') => {
@@ -179,7 +186,7 @@ fn expand_braced(
                     if let Some(ref v) = val
                         && !v.is_empty()
                     {
-                        out.push_str(&expand_with_env(&alt, ctx, env));
+                        out.push_str(&subst(&alt, ctx, env));
                     }
                 }
                 _ => skip_to_brace(chars),
@@ -190,14 +197,14 @@ fn expand_braced(
             let alt = collect_to_brace(chars);
             match val {
                 Some(ref v) => out.push_str(v),
-                None => out.push_str(&expand_with_env(&alt, ctx, env)),
+                None => out.push_str(&subst(&alt, ctx, env)),
             }
         }
         Some(&'+') => {
             chars.next();
             let alt = collect_to_brace(chars);
             if val.is_some() {
-                out.push_str(&expand_with_env(&alt, ctx, env));
+                out.push_str(&subst(&alt, ctx, env));
             }
         }
         _ => skip_to_brace(chars),
@@ -270,8 +277,8 @@ mod tests {
         let mut env = MockEnv::new();
         env.set("TEST_VAR", "hello");
         let ctx = SubstCtx::default();
-        assert_eq!(expand_with_env("$TEST_VAR", &ctx, &env), "hello");
-        assert_eq!(expand_with_env("${TEST_VAR}", &ctx, &env), "hello");
+        assert_eq!(subst("$TEST_VAR", &ctx, &env), "hello");
+        assert_eq!(subst("${TEST_VAR}", &ctx, &env), "hello");
     }
 
     #[test]
@@ -279,20 +286,20 @@ mod tests {
         let mut env = MockEnv::new();
         let ctx = SubstCtx::default();
         assert_eq!(
-            expand_with_env("${UNSET:-fallback}", &ctx, &env),
+            subst("${UNSET:-fallback}", &ctx, &env),
             "fallback"
         );
         assert_eq!(
-            expand_with_env("${UNSET-fallback}", &ctx, &env),
+            subst("${UNSET-fallback}", &ctx, &env),
             "fallback"
         );
 
         env.set("EMPTY", "");
         assert_eq!(
-            expand_with_env("${EMPTY:-fallback}", &ctx, &env),
+            subst("${EMPTY:-fallback}", &ctx, &env),
             "fallback"
         );
-        assert_eq!(expand_with_env("${EMPTY-fallback}", &ctx, &env), ""); // -: set but empty
+        assert_eq!(subst("${EMPTY-fallback}", &ctx, &env), ""); // -: set but empty
     }
 
     #[test]
@@ -300,40 +307,42 @@ mod tests {
         let mut env = MockEnv::new();
         env.set("SET", "value");
         let ctx = SubstCtx::default();
-        assert_eq!(expand_with_env("${SET:+alt}", &ctx, &env), "alt");
-        assert_eq!(expand_with_env("${SET+alt}", &ctx, &env), "alt");
+        assert_eq!(subst("${SET:+alt}", &ctx, &env), "alt");
+        assert_eq!(subst("${SET+alt}", &ctx, &env), "alt");
 
-        assert_eq!(expand_with_env("${UNSET:+alt}", &ctx, &env), "");
-        assert_eq!(expand_with_env("${UNSET+alt}", &ctx, &env), "");
+        assert_eq!(subst("${UNSET:+alt}", &ctx, &env), "");
+        assert_eq!(subst("${UNSET+alt}", &ctx, &env), "");
     }
 
     #[test]
     fn special_vars() {
         let env = MockEnv::new();
-        let mut ctx = SubstCtx::default();
-        ctx.argv = vec!["arg1".into(), "arg2".into()];
-        ctx.last_exit = 42;
-        ctx.last_score = 100;
-        ctx.rcfile = "/etc/procmailrc".into();
-        ctx.lastfolder = "/var/mail/user".into();
+        let ctx = SubstCtx {
+            argv: vec!["arg1".into(), "arg2".into()],
+            last_exit: 42,
+            last_score: 100,
+            rcfile: "/etc/procmailrc".into(),
+            lastfolder: "/var/mail/user".into(),
+            ..Default::default()
+        };
 
-        assert_eq!(expand_with_env("$#", &ctx, &env), "2");
-        assert_eq!(expand_with_env("$1", &ctx, &env), "arg1");
-        assert_eq!(expand_with_env("$2", &ctx, &env), "arg2");
-        assert_eq!(expand_with_env("$3", &ctx, &env), "");
-        assert_eq!(expand_with_env("$?", &ctx, &env), "42");
-        assert_eq!(expand_with_env("$=", &ctx, &env), "100");
-        assert_eq!(expand_with_env("$_", &ctx, &env), "/etc/procmailrc");
-        assert_eq!(expand_with_env("$-", &ctx, &env), "/var/mail/user");
-        assert!(expand_with_env("$$", &ctx, &env).parse::<u32>().is_ok());
+        assert_eq!(subst("$#", &ctx, &env), "2");
+        assert_eq!(subst("$1", &ctx, &env), "arg1");
+        assert_eq!(subst("$2", &ctx, &env), "arg2");
+        assert_eq!(subst("$3", &ctx, &env), "");
+        assert_eq!(subst("$?", &ctx, &env), "42");
+        assert_eq!(subst("$=", &ctx, &env), "100");
+        assert_eq!(subst("$_", &ctx, &env), "/etc/procmailrc");
+        assert_eq!(subst("$-", &ctx, &env), "/var/mail/user");
+        assert!(subst("$$", &ctx, &env).parse::<u32>().is_ok());
     }
 
     #[test]
     fn escape() {
         let env = MockEnv::new();
         let ctx = SubstCtx::default();
-        assert_eq!(expand_with_env("\\$HOME", &ctx, &env), "$HOME");
-        assert_eq!(expand_with_env("\\\\", &ctx, &env), "\\");
+        assert_eq!(subst("\\$HOME", &ctx, &env), "$HOME");
+        assert_eq!(subst("\\\\", &ctx, &env), "\\");
     }
 
     #[test]
@@ -341,6 +350,6 @@ mod tests {
         let mut env = MockEnv::new();
         env.set("INNER", "nested");
         let ctx = SubstCtx::default();
-        assert_eq!(expand_with_env("${OUTER:-$INNER}", &ctx, &env), "nested");
+        assert_eq!(subst("${OUTER:-$INNER}", &ctx, &env), "nested");
     }
 }

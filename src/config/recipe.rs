@@ -59,7 +59,8 @@ impl Flags {
                 }
                 'i' => f.ignore = true,
                 'r' => f.raw = true,
-                _ => {}
+                ' ' | '\t' => {}
+                _ => log::warn!("unknown recipe flag: {c}"),
             }
         }
         f
