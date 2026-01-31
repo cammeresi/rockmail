@@ -285,20 +285,11 @@ mod tests {
     fn default_value() {
         let mut env = MockEnv::new();
         let ctx = SubstCtx::default();
-        assert_eq!(
-            subst("${UNSET:-fallback}", &ctx, &env),
-            "fallback"
-        );
-        assert_eq!(
-            subst("${UNSET-fallback}", &ctx, &env),
-            "fallback"
-        );
+        assert_eq!(subst("${UNSET:-fallback}", &ctx, &env), "fallback");
+        assert_eq!(subst("${UNSET-fallback}", &ctx, &env), "fallback");
 
         env.set("EMPTY", "");
-        assert_eq!(
-            subst("${EMPTY:-fallback}", &ctx, &env),
-            "fallback"
-        );
+        assert_eq!(subst("${EMPTY:-fallback}", &ctx, &env), "fallback");
         assert_eq!(subst("${EMPTY-fallback}", &ctx, &env), ""); // -: set but empty
     }
 
@@ -351,5 +342,42 @@ mod tests {
         env.set("INNER", "nested");
         let ctx = SubstCtx::default();
         assert_eq!(subst("${OUTER:-$INNER}", &ctx, &env), "nested");
+    }
+
+    #[test]
+    fn trailing_dollar() {
+        let env = MockEnv::new();
+        let ctx = SubstCtx::default();
+        assert_eq!(subst("price$", &ctx, &env), "price$");
+    }
+
+    #[test]
+    fn unknown_char_after_dollar() {
+        let env = MockEnv::new();
+        let ctx = SubstCtx::default();
+        assert_eq!(subst("$@foo", &ctx, &env), "$@foo");
+    }
+
+    #[test]
+    fn empty_braces() {
+        let env = MockEnv::new();
+        let ctx = SubstCtx::default();
+        assert_eq!(subst("${}", &ctx, &env), "");
+    }
+
+    #[test]
+    fn dollar_zero() {
+        let env = MockEnv::new();
+        let ctx = SubstCtx::default();
+        assert_eq!(subst("$0", &ctx, &env), "");
+    }
+
+    #[test]
+    fn other_escapes() {
+        let env = MockEnv::new();
+        let ctx = SubstCtx::default();
+        assert_eq!(subst("\\\"quoted\\\"", &ctx, &env), "\"quoted\"");
+        assert_eq!(subst("\\'single\\'", &ctx, &env), "'single'");
+        assert_eq!(subst("\\`backtick\\`", &ctx, &env), "`backtick`");
     }
 }

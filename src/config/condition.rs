@@ -198,4 +198,27 @@ mod tests {
             _ => panic!("expected regex"),
         }
     }
+
+    #[test]
+    fn size_greater() {
+        let c = Condition::parse("> 50000").unwrap();
+        match c {
+            Condition::Size { op, bytes } => {
+                assert_eq!(op, Ordering::Greater);
+                assert_eq!(bytes, 50000);
+            }
+            _ => panic!("expected size"),
+        }
+    }
+
+    #[test]
+    fn empty_returns_none() {
+        assert!(Condition::parse("").is_none());
+        assert!(Condition::parse("   ").is_none());
+    }
+
+    #[test]
+    fn invalid_size_returns_none() {
+        assert!(Condition::parse("< notanumber").is_none());
+    }
 }

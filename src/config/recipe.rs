@@ -139,4 +139,58 @@ mod tests {
         assert!(f.wait);
         assert!(f.quiet);
     }
+
+    #[test]
+    fn flags_h_resets_default() {
+        let f = Flags::parse("H");
+        assert!(f.head);
+        assert!(!f.body);
+    }
+
+    #[test]
+    fn is_delivering() {
+        use std::path::PathBuf;
+
+        let folder = Recipe::new(
+            Flags::new(),
+            None,
+            vec![],
+            Action::Folder(PathBuf::from("spam/")),
+        );
+        assert!(folder.is_delivering());
+
+        let forward = Recipe::new(
+            Flags::new(),
+            None,
+            vec![],
+            Action::Forward(vec!["a@b.com".into()]),
+        );
+        assert!(forward.is_delivering());
+
+        let pipe = Recipe::new(
+            Flags::new(),
+            None,
+            vec![],
+            Action::Pipe {
+                cmd: "cat".into(),
+                capture: None,
+            },
+        );
+        assert!(pipe.is_delivering());
+
+        let capture = Recipe::new(
+            Flags::new(),
+            None,
+            vec![],
+            Action::Pipe {
+                cmd: "cat".into(),
+                capture: Some("OUT".into()),
+            },
+        );
+        assert!(!capture.is_delivering());
+
+        let nested =
+            Recipe::new(Flags::new(), None, vec![], Action::Nested(vec![]));
+        assert!(!nested.is_delivering());
+    }
 }

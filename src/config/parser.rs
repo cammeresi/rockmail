@@ -1,18 +1,18 @@
-use super::{is_var_name, Action, Condition, Flags, Item, Recipe};
+use super::{Action, Condition, Flags, Item, Recipe, is_var_name};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("unexpected end of file")]
-    UnexpectedEof,
-    #[error("missing action line for recipe")]
-    MissingAction,
-    #[error("unclosed nested block")]
-    UnclosedBlock,
-    #[error("invalid recipe line: {0}")]
-    Invalid(String),
-    #[error("nesting too deep (max {MAX_DEPTH})")]
-    TooDeep,
+    #[error("line {0}: unexpected end of file")]
+    UnexpectedEof(usize),
+    #[error("line {0}: missing action line for recipe")]
+    MissingAction(usize),
+    #[error("line {0}: unclosed nested block")]
+    UnclosedBlock(usize),
+    #[error("line {0}: invalid recipe line: {1}")]
+    Invalid(usize, String),
+    #[error("line {0}: nesting too deep (max {MAX_DEPTH})")]
+    TooDeep(usize),
 }
 
 const MAX_DEPTH: usize = 100;
@@ -27,7 +27,11 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
         let lines: Vec<_> = input.lines().collect();
-        Self { lines, pos: 0, depth: 0 }
+        Self {
+            lines,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     /// Parse entire rcfile into items
@@ -37,6 +41,10 @@ impl<'a> Parser<'a> {
             items.push(item);
         }
         Ok(items)
+    }
+
+    fn line_num(&self) -> usize {
+        self.pos + 1
     }
 
     fn peek(&self) -> Option<&'a str> {
@@ -116,8 +124,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_recipe(&mut self) -> Result<Recipe, ParseError> {
-        let header = self.advance().ok_or(ParseError::UnexpectedEof)?;
-        let (flags, lockfile) = self.parse_recipe_header(header)?;
+        let line = self.line_num();
+        let header = self.advance().ok_or(ParseError::UnexpectedEof(line))?;
+        let (flags, lockfile) = self.parse_recipe_header(header, line)?;
 
         let mut conds = Vec::new();
         self.skip_blank_and_comments();
@@ -140,20 +149,22 @@ impl<'a> Parser<'a> {
         self.skip_blank_and_comments();
 
         // Action line
-        let action_line = self.advance().ok_or(ParseError::MissingAction)?;
-        let action = self.parse_action(action_line.trim())?;
+        let aline = self.line_num();
+        let action_line =
+            self.advance().ok_or(ParseError::MissingAction(aline))?;
+        let action = self.parse_action(action_line.trim(), aline)?;
 
         Ok(Recipe::new(flags, lockfile, conds, action))
     }
 
     fn parse_recipe_header(
-        &self, line: &str,
+        &self, line: &str, line_num: usize,
     ) -> Result<(Flags, Option<String>), ParseError> {
         // Format: :0 [flags] [ : [lockfile] ]
         let line = line.trim();
         let line = line
             .strip_prefix(':')
-            .ok_or_else(|| ParseError::Invalid(line.to_string()))?;
+            .ok_or_else(|| ParseError::Invalid(line_num, line.to_string()))?;
 
         // Skip the leading number (legacy, usually 0)
         let line = line.trim_start_matches(|c: char| c.is_ascii_digit());
@@ -177,15 +188,25 @@ impl<'a> Parser<'a> {
         Ok((flags, lockfile))
     }
 
-    fn parse_action(&mut self, line: &str) -> Result<Action, ParseError> {
+    fn parse_action(
+        &mut self, line: &str, line_num: usize,
+    ) -> Result<Action, ParseError> {
         // Handle nested block
         if let Some(rest) = line.strip_prefix('{') {
-            // Nested block
             let rest = rest.trim();
-            if !rest.is_empty() && !rest.starts_with('#') {
-                // Inline content after { is not supported, but we could handle it
+            // Check for inline block content: { ... }
+            if let Some(inner) = rest.strip_suffix('}') {
+                let inner = inner.trim();
+                if inner.is_empty() {
+                    return Ok(Action::Nested(vec![]));
+                }
+                // Parse inline content
+                let mut p = Parser::new(inner);
+                p.depth = self.depth;
+                let items = p.parse()?;
+                return Ok(Action::Nested(items));
             }
-            let items = self.parse_block()?;
+            let items = self.parse_block(line_num)?;
             return Ok(Action::Nested(items));
         }
 
@@ -193,9 +214,9 @@ impl<'a> Parser<'a> {
         Ok(Action::parse_line(&full))
     }
 
-    fn parse_block(&mut self) -> Result<Vec<Item>, ParseError> {
+    fn parse_block(&mut self, start: usize) -> Result<Vec<Item>, ParseError> {
         if self.depth >= MAX_DEPTH {
-            return Err(ParseError::TooDeep);
+            return Err(ParseError::TooDeep(start));
         }
         self.depth += 1;
         let mut items = Vec::new();
@@ -203,7 +224,7 @@ impl<'a> Parser<'a> {
             self.skip_blank_and_comments();
             let Some(line) = self.peek() else {
                 self.depth -= 1;
-                return Err(ParseError::UnclosedBlock);
+                return Err(ParseError::UnclosedBlock(start));
             };
             if line.trim().starts_with('}') {
                 self.advance();
@@ -215,7 +236,7 @@ impl<'a> Parser<'a> {
                 // next_item returned None, meaning } or EOF
                 // We already checked for } above, so this is EOF
                 self.depth -= 1;
-                return Err(ParseError::UnclosedBlock);
+                return Err(ParseError::UnclosedBlock(start));
             }
         }
         self.depth -= 1;
@@ -387,5 +408,96 @@ VERBOSE=yes
 "#;
         let items = parse(rc).unwrap();
         assert_eq!(items.len(), 3); // MAILDIR, recipe, VERBOSE
+    }
+
+    #[test]
+    fn missing_action() {
+        let rc = ":0\n* ^From:.*spam\n";
+        assert!(matches!(parse(rc), Err(ParseError::MissingAction(_))));
+    }
+
+    #[test]
+    fn unclosed_block() {
+        let rc = ":0\n{\n:0\nspam/\n";
+        assert!(matches!(parse(rc), Err(ParseError::UnclosedBlock(_))));
+    }
+
+    #[test]
+    fn line_continuation() {
+        let rc = ":0\n* ^From:.*\\\ncontinued\nspam/";
+        let items = parse(rc).unwrap();
+        match &items[0] {
+            Item::Recipe(r) => {
+                assert_eq!(r.conds.len(), 1);
+                match &r.conds[0] {
+                    Condition::Regex { pattern, .. } => {
+                        assert_eq!(pattern, "^From:.*continued");
+                    }
+                    _ => panic!("expected regex"),
+                }
+            }
+            _ => panic!("expected recipe"),
+        }
+    }
+
+    #[test]
+    fn explicit_lockfile() {
+        let rc = ":0 HB:mylock\n* ^Subject:.*\nspam/";
+        let items = parse(rc).unwrap();
+        match &items[0] {
+            Item::Recipe(r) => {
+                assert!(r.flags.head);
+                assert!(r.flags.body);
+                assert_eq!(r.lockfile.as_deref(), Some("mylock"));
+            }
+            _ => panic!("expected recipe"),
+        }
+    }
+
+    #[test]
+    fn variable_unset() {
+        let items = parse("VERBOSE").unwrap();
+        match &items[0] {
+            Item::Assign { name, value } => {
+                assert_eq!(name, "VERBOSE");
+                assert!(value.is_empty());
+            }
+            _ => panic!("expected assign"),
+        }
+    }
+
+    #[test]
+    fn inline_empty_block() {
+        let rc = ":0\n{ }";
+        let items = parse(rc).unwrap();
+        match &items[0] {
+            Item::Recipe(r) => match &r.action {
+                Action::Nested(inner) => assert!(inner.is_empty()),
+                _ => panic!("expected nested"),
+            },
+            _ => panic!("expected recipe"),
+        }
+    }
+
+    #[test]
+    fn inline_block_with_assign() {
+        let rc = ":0\n{ VAR=value }";
+        let items = parse(rc).unwrap();
+        match &items[0] {
+            Item::Recipe(r) => match &r.action {
+                Action::Nested(inner) => {
+                    assert_eq!(inner.len(), 1);
+                    match &inner[0] {
+                        Item::Assign { name, value } => {
+                            assert_eq!(name, "VAR");
+                            assert_eq!(value, "value");
+                        }
+                        _ => panic!("expected assign"),
+                    }
+                }
+                _ => panic!("expected nested"),
+            },
+            _ => panic!("expected recipe"),
+        }
     }
 }

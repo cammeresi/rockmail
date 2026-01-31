@@ -1,4 +1,4 @@
-use super::{is_var_name, Item};
+use super::{Item, is_var_name};
 use std::path::PathBuf;
 
 /// The action line of a recipe
@@ -110,6 +110,14 @@ mod tests {
     fn maildir() {
         match Action::parse_line("Maildir/") {
             Action::Folder(p) => assert_eq!(p.to_str().unwrap(), "Maildir/"),
+            _ => panic!("expected folder"),
+        }
+    }
+
+    #[test]
+    fn empty_forward_becomes_folder() {
+        match Action::parse_line("!") {
+            Action::Folder(p) => assert_eq!(p.to_str().unwrap(), "!"),
             _ => panic!("expected folder"),
         }
     }
