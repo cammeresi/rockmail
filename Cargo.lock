@@ -140,6 +140,7 @@ dependencies = [
  "env_logger",
  "log",
  "nix",
+ "regex",
  "tempfile",
  "thiserror",
 ]
