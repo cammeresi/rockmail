@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 
 use chrono::{DateTime, Local, TimeZone};
 
@@ -6,26 +6,36 @@ use chrono::{DateTime, Local, TimeZone};
 ///
 /// Format: "From sender date\n"
 /// Date is in ctime format: "Mon Jan  1 00:00:00 2024"
+///
+/// # Panics
+/// Panics if sender is empty or contains whitespace/newlines.
 pub fn generate(sender: &str) -> Vec<u8> {
     generate_with_time(sender, Local::now())
 }
 
 /// Generate From_ line with explicit timestamp.
+///
+/// # Panics
+/// Panics if sender is empty or contains whitespace/newlines.
 pub fn generate_with_time<Tz>(sender: &str, time: DateTime<Tz>) -> Vec<u8>
 where
     Tz: TimeZone,
     Tz::Offset: Display,
 {
-    let mut line = Vec::with_capacity(64);
-    line.extend_from_slice(b"From ");
-    line.extend_from_slice(sender.as_bytes());
-    line.push(b' ');
-    // ctime format: "Mon Jan  1 00:00:00 2024"
-    line.extend_from_slice(
-        time.format("%a %b %e %H:%M:%S %Y").to_string().as_bytes(),
+    assert!(!sender.is_empty(), "sender must not be empty");
+    assert!(
+        !sender.bytes().any(|b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r'),
+        "sender must not contain whitespace"
     );
-    line.push(b'\n');
-    line
+
+    // "From " (5) + sender + " " (1) + ctime (24) + "\n" (1) = 31 + sender.len()
+    let mut line = String::with_capacity(31 + sender.len());
+    line.push_str("From ");
+    line.push_str(sender);
+    line.push(' ');
+    write!(line, "{}", time.format("%a %b %e %H:%M:%S %Y")).unwrap();
+    line.push('\n');
+    line.into_bytes()
 }
 
 /// Check if data starts with a From_ line.
@@ -59,7 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn starts_with() {
+    fn starts_with_from_detects_mbox_line() {
         assert!(starts_with_from(
             b"From user@host Mon Jan 1 00:00:00 2024\n"
         ));
@@ -87,5 +97,23 @@ mod tests {
         let line = generate_with_time("test", epoch);
         let s = String::from_utf8_lossy(&line);
         assert!(s.contains("Thu Jan  1 00:00:00 1970"), "got: {}", s);
+    }
+
+    #[test]
+    #[should_panic(expected = "sender must not be empty")]
+    fn generate_empty_sender_panics() {
+        generate("");
+    }
+
+    #[test]
+    #[should_panic(expected = "sender must not contain whitespace")]
+    fn generate_sender_with_space_panics() {
+        generate("user name@host");
+    }
+
+    #[test]
+    #[should_panic(expected = "sender must not contain whitespace")]
+    fn generate_sender_with_newline_panics() {
+        generate("user\n@host");
     }
 }

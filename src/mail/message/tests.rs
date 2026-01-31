@@ -35,7 +35,14 @@ fn header_continuation() {
         b"Subject: This is a\n very long\n\tsubject line\n\nBody",
     );
     let subj = msg.get_header("Subject").unwrap();
-    assert_eq!(subj.trim(), "This is a very long subject line");
+    assert_eq!(subj.as_ref(), "This is a very long subject line");
+}
+
+#[test]
+fn header_value_trimmed() {
+    let msg = Message::parse(b"Subject: Hello\n\n");
+    let subj = msg.get_header("Subject").unwrap();
+    assert_eq!(subj.as_ref(), "Hello"); // no leading space
 }
 
 #[test]
@@ -131,4 +138,63 @@ fn envelope_sender_extraction() {
         b"From user@host Mon Jan 1 00:00:00 2024\nSubject: Test\n\nBody",
     );
     assert_eq!(msg.envelope_sender(), Some("user@host"));
+}
+
+#[test]
+fn crlf_normalized() {
+    let msg = Message::parse(b"Subject: Test\r\n\r\nBody");
+    assert_eq!(msg.header(), b"Subject: Test\n");
+    assert_eq!(msg.body(), b"Body");
+}
+
+#[test]
+fn crlf_headers() {
+    let msg = Message::parse(b"From: a@b\r\nTo: c@d\r\n\r\nBody");
+    let headers: Vec<_> = msg.headers().collect();
+    assert_eq!(headers.len(), 2);
+    assert_eq!(headers[0].0.as_ref(), "From");
+    assert_eq!(headers[1].0.as_ref(), "To");
+}
+
+#[test]
+fn from_parts_has_separator() {
+    let msg = Message::from_parts(b"Subject: Test\n", b"Body");
+    assert_eq!(msg.as_bytes(), b"Subject: Test\n\nBody");
+}
+
+#[test]
+fn many_from_lines_no_stack_overflow() {
+    let mut data = Vec::new();
+    for i in 0..1000 {
+        data.extend_from_slice(format!("From user{}\n", i).as_bytes());
+    }
+    data.extend_from_slice(b"Subject: Test\n\nBody");
+    let msg = Message::parse(&data);
+    let headers: Vec<_> = msg.headers().collect();
+    assert_eq!(headers.len(), 1);
+    assert_eq!(headers[0].0.as_ref(), "Subject");
+}
+
+#[test]
+fn malformed_header_skipped() {
+    let msg = Message::parse(b"Not-A-Header\nSubject: Test\n\nBody");
+    let headers: Vec<_> = msg.headers().collect();
+    assert_eq!(headers.len(), 1);
+    assert_eq!(headers[0].0.as_ref(), "Subject");
+}
+
+#[test]
+fn parse_owned_no_copy() {
+    let data = b"Subject: Test\n\nBody".to_vec();
+    let msg = Message::parse_owned(data);
+    assert_eq!(msg.header(), b"Subject: Test\n");
+    assert_eq!(msg.body(), b"Body");
+}
+
+#[test]
+fn parse_owned_with_leading_newlines() {
+    let data = b"\n\nSubject: Test\n\nBody".to_vec();
+    let msg = Message::parse_owned(data);
+    assert_eq!(msg.header(), b"Subject: Test\n");
+    assert_eq!(msg.body(), b"Body");
 }

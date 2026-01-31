@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
-/// Represents an email message with header/body separation.
+/// An email message parsed into headers and body.
+///
+/// Provides access to individual headers (with continuation line unfolding),
+/// the raw header block, and the message body. Handles mbox From_ lines.
 ///
 /// Stores raw bytes and tracks the boundary between headers and body.
 /// The body starts after the first blank line (two consecutive newlines).
@@ -16,34 +19,59 @@ pub struct Message {
 impl Message {
     /// Parse a message from raw bytes.
     ///
-    /// Finds the header/body boundary (first `\n\n`) and records it.
+    /// Finds the header/body boundary (first blank line) and records it.
     /// Leading blank lines before headers are skipped.
+    /// CRLF line endings are normalized to LF.
     pub fn parse(input: &[u8]) -> Self {
-        let start = skip_leading_newlines(input);
-        let input = &input[start..];
+        let data = normalize_crlf(input);
+        let start = skip_leading_newlines(&data);
+        let data = data[start..].to_vec();
 
-        let (header_end, body_start) = find_boundary(input);
+        let (header_end, body_start) = find_boundary(&data);
 
         Self {
-            data: input.to_vec(),
+            data,
+            header_end,
+            body_start,
+        }
+    }
+
+    /// Parse a message from owned bytes, avoiding a copy when possible.
+    ///
+    /// If the input contains no CRLF sequences and no leading newlines,
+    /// this avoids allocating a new buffer.
+    pub fn parse_owned(mut input: Vec<u8>) -> Self {
+        if input.contains(&b'\r') {
+            return Self::parse(&input);
+        }
+        let start = skip_leading_newlines(&input);
+        if start > 0 {
+            input.drain(..start);
+        }
+        let (header_end, body_start) = find_boundary(&input);
+        Self {
+            data: input,
             header_end,
             body_start,
         }
     }
 
     /// Create a message from pre-split header and body parts.
+    /// Inserts the RFC-mandated blank line between header and body.
     pub fn from_parts(header: &[u8], body: &[u8]) -> Self {
-        let mut data = Vec::with_capacity(header.len() + 1 + body.len());
+        let mut data = Vec::with_capacity(header.len() + 2 + body.len());
         data.extend_from_slice(header);
         if !header.is_empty() && !header.ends_with(b"\n") {
             data.push(b'\n');
         }
         let header_end = data.len();
+        data.push(b'\n'); // blank line separator
+        let body_start = data.len();
         data.extend_from_slice(body);
         Self {
             data,
             header_end,
-            body_start: header_end,
+            body_start,
         }
     }
 
@@ -131,41 +159,46 @@ impl<'a> Iterator for HeaderIter<'a> {
     type Item = (Cow<'a, str>, Cow<'a, str>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.data.len() {
-            return None;
-        }
-
-        let start = self.pos;
-        let mut end = start;
-
-        // Find end of header field (including continuation lines)
         loop {
-            // Find end of current line
-            while end < self.data.len() && self.data[end] != b'\n' {
-                end += 1;
+            if self.pos >= self.data.len() {
+                return None;
             }
-            // Skip the newline
-            if end < self.data.len() {
-                end += 1;
+
+            let start = self.pos;
+            let mut end = start;
+
+            // Find end of header field (including continuation lines)
+            loop {
+                // Find end of current line
+                while end < self.data.len() && self.data[end] != b'\n' {
+                    end += 1;
+                }
+                // Skip the newline
+                if end < self.data.len() {
+                    end += 1;
+                }
+                // Check for continuation (next line starts with space/tab)
+                if end < self.data.len()
+                    && (self.data[end] == b' ' || self.data[end] == b'\t')
+                {
+                    continue;
+                }
+                break;
             }
-            // Check for continuation (next line starts with space/tab)
-            if end < self.data.len()
-                && (self.data[end] == b' ' || self.data[end] == b'\t')
-            {
+
+            self.pos = end;
+            let field = &self.data[start..end];
+
+            // Skip From_ line (mbox envelope, not a header)
+            if field.starts_with(b"From ") {
                 continue;
             }
-            break;
+
+            // Skip malformed headers (no colon), continue to next
+            if let Some(parsed) = parse_header_field(field) {
+                return Some(parsed);
+            }
         }
-
-        self.pos = end;
-        let field = &self.data[start..end];
-
-        // Skip From_ line (mbox envelope, not a header)
-        if field.starts_with(b"From ") {
-            return self.next();
-        }
-
-        parse_header_field(field)
     }
 }
 
@@ -173,6 +206,11 @@ fn parse_header_field(field: &[u8]) -> Option<(Cow<'_, str>, Cow<'_, str>)> {
     let colon = field.iter().position(|&b| b == b':')?;
     let name = &field[..colon];
     let mut value = &field[colon + 1..];
+
+    // Trim leading whitespace after colon (RFC 5322 OWS)
+    while !value.is_empty() && (value[0] == b' ' || value[0] == b'\t') {
+        value = &value[1..];
+    }
 
     // Trim trailing newline
     if value.ends_with(b"\n") {
@@ -210,6 +248,25 @@ fn unfold_header(data: &[u8]) -> Cow<'_, str> {
     }
 
     Cow::Owned(String::from_utf8_lossy(&result).into_owned())
+}
+
+/// Normalize CRLF to LF.
+fn normalize_crlf(data: &[u8]) -> Vec<u8> {
+    if !data.contains(&b'\r') {
+        return data.to_vec();
+    }
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == b'\r' && i + 1 < data.len() && data[i + 1] == b'\n' {
+            out.push(b'\n');
+            i += 2;
+        } else {
+            out.push(data[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Skip leading blank lines.
