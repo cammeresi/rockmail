@@ -1,24 +1,17 @@
-use crate::util::LockError;
-use nix::unistd::{Pid, getpid};
-use std::ffi::OsString;
-use std::fs::{self, OpenOptions};
+use crate::util::{LockError, now_secs};
+use nix::unistd::getpid;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::thread::sleep;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::OnceLock;
+use std::time::UNIX_EPOCH;
 
 const LOCK_PERM: u32 = 0o444;
-const RETRY_UNIQUE: u32 = 8;
 
-fn hostname() -> String {
-    nix::unistd::gethostname()
-        .ok()
-        .and_then(|h: OsString| h.into_string().ok())
-        .unwrap_or_default()
-}
-
-fn safe_hostname() -> String {
-    let h = hostname();
+fn compute_safe_hostname() -> String {
+    let h = nix::unistd::gethostname().expect("gethostname");
+    let h = h.into_string().expect("hostname not utf-8");
     let mut out = String::with_capacity(h.len());
     for c in h.chars() {
         match c {
@@ -35,55 +28,59 @@ fn safe_hostname() -> String {
     out
 }
 
-fn unique_name(dir: &Path, pid: Pid) -> Option<PathBuf> {
-    let chars = ['.', ',', '+', '%'];
+fn safe_hostname() -> &'static str {
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE.get_or_init(compute_safe_hostname)
+}
+
+fn random_u64() -> u64 {
+    let mut buf = [0u8; 8];
+    File::open("/dev/urandom")
+        .expect("failed to open /dev/urandom")
+        .read_exact(&mut buf)
+        .expect("failed to read /dev/urandom");
+    u64::from_ne_bytes(buf)
+}
+
+fn unique_name(dir: &Path) -> PathBuf {
     let host = safe_hostname();
-    let mut serial = 0usize;
-    let mut t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let pid = getpid();
+    let t = now_secs();
+    let r = random_u64();
+    let name = format!("_{}.{}.{:x}.{}", pid, t, r, host);
+    dir.join(&name)
+}
 
-    for _ in 0..RETRY_UNIQUE {
-        let suffix = if serial < chars.len() {
-            chars[serial]
-        } else {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            if now == t {
-                sleep(Duration::from_secs(1));
-                t = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-            } else {
-                t = now;
-            }
-            serial = 0;
-            chars[0]
-        };
+struct TmpGuard<'a> {
+    path: &'a Path,
+    disarm: bool,
+}
 
-        let name = format!("_{}{}{}.{}", pid, suffix, t, host);
-        let path = dir.join(&name);
-
-        if !path.exists() {
-            return Some(path);
+impl<'a> TmpGuard<'a> {
+    fn new(path: &'a Path) -> Self {
+        Self {
+            path,
+            disarm: false,
         }
-        serial += 1;
     }
-    None
+
+    fn disarm(&mut self) {
+        self.disarm = true;
+    }
+}
+
+impl Drop for TmpGuard<'_> {
+    fn drop(&mut self) {
+        if !self.disarm {
+            let _ = fs::remove_file(self.path);
+        }
+    }
 }
 
 /// Create a lockfile using NFS-safe technique: create unique file, then rename.
 pub fn create_lock(target: &Path) -> Result<(), LockError> {
-    use std::io::Write;
-
     let dir = target.parent().unwrap_or(Path::new("."));
-    let pid = getpid();
-
-    let tmp = unique_name(dir, pid).ok_or(LockError::Unavailable)?;
+    let tmp = unique_name(dir);
 
     // Create with write permission, write content, then set final permissions
     let mut file = OpenOptions::new()
@@ -97,6 +94,8 @@ pub fn create_lock(target: &Path) -> Result<(), LockError> {
             _ => LockError::Io(e),
         })?;
 
+    let mut guard = TmpGuard::new(&tmp);
+
     // Write "0" to the file (pid 0 works across networks)
     file.write_all(b"0").map_err(LockError::Io)?;
     drop(file);
@@ -108,18 +107,19 @@ pub fn create_lock(target: &Path) -> Result<(), LockError> {
     // Hard link to target - this is atomic on POSIX
     match fs::hard_link(&tmp, target) {
         Ok(()) => {
+            guard.disarm();
             let _ = fs::remove_file(&tmp);
             Ok(())
         }
         Err(e) => {
             // Check if link succeeded despite error (NFS issue)
-            if let Ok(meta) = fs::metadata(&tmp) {
-                if meta.nlink() > 1 {
-                    let _ = fs::remove_file(&tmp);
-                    return Ok(());
-                }
+            if let Ok(meta) = fs::metadata(&tmp)
+                && meta.nlink() > 1
+            {
+                guard.disarm();
+                let _ = fs::remove_file(&tmp);
+                return Ok(());
             }
-            let _ = fs::remove_file(&tmp);
             if e.kind() == std::io::ErrorKind::AlreadyExists {
                 Err(LockError::Exists)
             } else {
@@ -146,32 +146,90 @@ pub fn lock_mtime(target: &Path) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
     use tempfile::tempdir;
 
     #[test]
-    fn test_create_and_remove() {
+    fn create_and_remove() {
         let dir = tempdir().unwrap();
         let lock = dir.path().join("test.lock");
 
         assert!(create_lock(&lock).is_ok());
         assert!(lock.exists());
-
-        // Second create should fail
         assert!(matches!(create_lock(&lock), Err(LockError::Exists)));
-
         assert!(remove_lock(&lock).is_ok());
         assert!(!lock.exists());
     }
 
     #[test]
-    fn test_lock_mtime() {
+    fn mtime() {
         let dir = tempdir().unwrap();
         let lock = dir.path().join("test.lock");
 
         create_lock(&lock).unwrap();
         let mtime = lock_mtime(&lock);
         assert!(mtime.is_some());
-
         remove_lock(&lock).unwrap();
+    }
+
+    #[test]
+    fn mtime_nonexistent() {
+        let dir = tempdir().unwrap();
+        let lock = dir.path().join("nonexistent.lock");
+        assert!(lock_mtime(&lock).is_none());
+    }
+
+    #[test]
+    fn remove_nonexistent() {
+        let dir = tempdir().unwrap();
+        let lock = dir.path().join("nonexistent.lock");
+        assert!(matches!(remove_lock(&lock), Err(LockError::Io(_))));
+    }
+
+    #[test]
+    fn missing_directory() {
+        let lock = Path::new("/nonexistent/dir/test.lock");
+        assert!(matches!(create_lock(lock), Err(LockError::Unavailable)));
+    }
+
+    #[test]
+    fn concurrent() {
+        let dir = tempdir().unwrap();
+        let lock = dir.path().join("race.lock");
+        let n = 10;
+
+        let handles: Vec<_> = (0..n)
+            .map(|_| {
+                let p = lock.clone();
+                thread::spawn(move || create_lock(&p).is_ok())
+            })
+            .collect();
+
+        let wins: usize = handles
+            .into_iter()
+            .map(|h| h.join().unwrap() as usize)
+            .sum();
+        assert_eq!(wins, 1);
+    }
+
+    #[test]
+    fn lock_permissions() {
+        let dir = tempdir().unwrap();
+        let lock = dir.path().join("perm.lock");
+
+        create_lock(&lock).unwrap();
+        let meta = fs::metadata(&lock).unwrap();
+        assert_eq!(meta.permissions().mode() & 0o777, LOCK_PERM);
+        remove_lock(&lock).unwrap();
+    }
+
+    #[test]
+    fn special_chars_in_path() {
+        let dir = tempdir().unwrap();
+        let lock = dir.path().join("test with spaces.lock");
+
+        assert!(create_lock(&lock).is_ok());
+        assert!(lock.exists());
+        assert!(remove_lock(&lock).is_ok());
     }
 }

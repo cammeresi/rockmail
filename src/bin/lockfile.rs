@@ -1,17 +1,18 @@
 use clap::Parser;
 use corpmail::locking::{create_lock, lock_mtime, remove_lock};
-use corpmail::util::{LockError, exit, *};
-use std::path::PathBuf;
+use corpmail::util::{LockError, exit, now_secs, *};
+use nix::sys::signal::{SigHandler, Signal, signal};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 static SIGNAL_FLAG: AtomicBool = AtomicBool::new(false);
 
 const DEF_LOCKSLEEP: u64 = 8;
 const DEF_SUSPEND: u64 = 16;
-const NFS_TRY: u32 = 7;
+const NFS_RETRIES: u32 = 7;
 
 #[derive(Parser)]
 #[command(name = "lockfile")]
@@ -56,26 +57,23 @@ struct Args {
 }
 
 fn setup_signals() {
-    use nix::sys::signal::{SigHandler, Signal, signal};
     let handler = SigHandler::Handler(handle_signal);
     unsafe {
-        let _ = signal(Signal::SIGHUP, handler);
-        let _ = signal(Signal::SIGINT, handler);
-        let _ = signal(Signal::SIGQUIT, handler);
-        let _ = signal(Signal::SIGTERM, handler);
-        let _ = signal(Signal::SIGPIPE, SigHandler::SigIgn);
+        for sig in [
+            Signal::SIGHUP,
+            Signal::SIGINT,
+            Signal::SIGQUIT,
+            Signal::SIGTERM,
+        ] {
+            signal(sig, handler).expect("couldn't set {sig}");
+        }
+        signal(Signal::SIGPIPE, SigHandler::SigIgn)
+            .expect("couldn't ignore SIGPIPE");
     }
 }
 
 extern "C" fn handle_signal(_: i32) {
-    SIGNAL_FLAG.store(true, Ordering::SeqCst);
-}
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+    SIGNAL_FLAG.store(true, Ordering::Release);
 }
 
 fn main() -> ExitCode {
@@ -84,7 +82,7 @@ fn main() -> ExitCode {
 
     let invert = args.invert % 2 == 1;
     let mut retries = args.retries;
-    let mut acquired: Vec<PathBuf> = Vec::new();
+    let mut acquired: Vec<PathBuf> = Vec::with_capacity(args.files.len());
     let mut retval = EX_OK;
 
     if args.unlock_mail {
@@ -147,8 +145,8 @@ fn main() -> ExitCode {
     maybe_invert(retval, invert)
 }
 
-fn check_signal(path: &PathBuf) -> Result<(), u8> {
-    if SIGNAL_FLAG.load(Ordering::SeqCst) {
+fn check_signal(path: &Path) -> Result<(), u8> {
+    if SIGNAL_FLAG.load(Ordering::Acquire) {
         eprintln!(
             "lockfile: Signal received, giving up on \"{}\"",
             path.display()
@@ -159,7 +157,7 @@ fn check_signal(path: &PathBuf) -> Result<(), u8> {
     }
 }
 
-fn try_force_unlock(path: &PathBuf, force: u64, suspend: u64) -> bool {
+fn try_force_unlock(path: &Path, force: u64, suspend: u64) -> bool {
     if force == 0 {
         return false;
     }
@@ -181,7 +179,7 @@ fn try_force_unlock(path: &PathBuf, force: u64, suspend: u64) -> bool {
 }
 
 fn handle_exists(
-    path: &PathBuf, sleepsec: u64, retries: &mut i64, force: u64, suspend: u64,
+    path: &Path, sleepsec: u64, retries: &mut i64, force: u64, suspend: u64,
 ) -> Result<bool, u8> {
     if try_force_unlock(path, force, suspend) {
         return Ok(true); // retry immediately
@@ -201,11 +199,11 @@ fn handle_exists(
 }
 
 fn handle_nfs_error(
-    path: &PathBuf, sleepsec: u64, nfs_retry: &mut u32,
+    path: &Path, sleepsec: u64, nfs_retry: &mut u32,
 ) -> Result<(), u8> {
-    *nfs_retry -= 1;
+    *nfs_retry = nfs_retry.saturating_sub(1);
     if *nfs_retry == 0 {
-        eprintln!("lockfile: Try praying, giving up on \"{}\"", path.display());
+        eprintln!("lockfile: Retries exhausted on \"{}\"", path.display());
         return Err(EX_UNAVAILABLE);
     }
     if sleepsec > 0 {
@@ -215,17 +213,17 @@ fn handle_nfs_error(
 }
 
 fn try_lock(
-    path: &PathBuf, sleepsec: u64, retries: &mut i64, force: u64, suspend: u64,
+    path: &Path, sleepsec: u64, retries: &mut i64, force: u64, suspend: u64,
     acquired: &mut Vec<PathBuf>,
 ) -> Result<(), u8> {
-    let mut nfs_retry = NFS_TRY;
+    let mut nfs_retry = NFS_RETRIES;
 
     loop {
         check_signal(path)?;
 
         match create_lock(path) {
             Ok(()) => {
-                acquired.push(path.clone());
+                acquired.push(path.to_path_buf());
                 return Ok(());
             }
             Err(LockError::Exists) => {
@@ -234,20 +232,19 @@ fn try_lock(
             Err(LockError::Unavailable | LockError::Io(_)) => {
                 handle_nfs_error(path, sleepsec, &mut nfs_retry)?;
             }
-            Err(_) => {
-                eprintln!(
-                    "lockfile: Try praying, giving up on \"{}\"",
-                    path.display()
-                );
-                return Err(EX_UNAVAILABLE);
-            }
         }
     }
 }
 
 fn cleanup(acquired: &[PathBuf]) {
     for path in acquired {
-        let _ = remove_lock(path);
+        if let Err(e) = remove_lock(path) {
+            eprintln!(
+                "lockfile: warning: cleanup failed for \"{}\": {}",
+                path.display(),
+                e
+            );
+        }
     }
 }
 

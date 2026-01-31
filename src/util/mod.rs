@@ -3,6 +3,7 @@ mod error;
 pub use error::*;
 
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const EX_OK: u8 = 0;
 pub const EX_USAGE: u8 = 64;
@@ -13,4 +14,11 @@ pub const EX_CANTCREAT: u8 = 73;
 
 pub fn exit(code: u8) -> ExitCode {
     ExitCode::from(code)
+}
+
+pub fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is before 1970")
+        .as_secs()
 }

@@ -9,18 +9,6 @@ pub enum LockError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
-    #[error("out of memory")]
-    OutOfMemory,
-
-    #[error("signal received")]
-    Signal,
-
-    #[error("retries exhausted")]
-    RetriesExhausted,
-
-    #[error("filename too long")]
-    NameTooLong,
-
     #[error("permission denied or missing directory")]
     Unavailable,
 }
