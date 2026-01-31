@@ -2,24 +2,20 @@
 name = "corpmail"
 version = "0.1.0"
 edition = "2024"
-description = "A Rust reimplementation of procmail - mail filtering and delivery"
-license = "MIT OR Apache-2.0"
+description = "Rust translation of procmail (mail filtering and delivery)"
+license = "GPL-2.0-only"
 keywords = ["email", "mail", "filter", "procmail"]
 categories = ["email", "command-line-utilities"]
 
 [dependencies]
-thiserror = "1"
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-nix = { version = "0.29", features = ["user", "fs", "process", "signal", "hostname"] }
-log = "0.4"
-env_logger = "0.11"
-regex = "1"
 chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+nix = { version = "0.29", features = ["user", "fs", "process", "signal", "hostname"] }
+regex = "1"
+thiserror = "1"
 
 [dev-dependencies]
 tempfile = "3"
-
-[[bin]]
-name = "lockfile"
-path = "src/bin/lockfile.rs"
