@@ -1,3 +1,3 @@
-mod compiler;
+mod matcher;
 
-pub use compiler::{MatchResult, Matcher};
+pub use matcher::{MatchResult, Matcher, PatternError};
