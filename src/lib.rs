@@ -1,5 +1,6 @@
 pub mod config;
 pub mod delivery;
+pub mod formail;
 pub mod locking;
 pub mod mail;
 pub mod re;

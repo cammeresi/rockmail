@@ -321,7 +321,6 @@ fn parse_rest(rest: &[String]) -> (Vec<(String, String)>, Vec<String>) {
     (assigns, files)
 }
 
-
 fn collect_trailing_args(rest: &[String]) -> Vec<String> {
     let mut args = Vec::new();
     let mut past_rcfile = false;

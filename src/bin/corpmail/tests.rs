@@ -161,7 +161,9 @@ fn deliver_default_to_mbox() {
     };
     let env = MockEnv::new();
 
-    let msg = Message::parse(b"From sender@test Mon Jan 1 00:00:00 2024\nSubject: Test\n\nBody\n");
+    let msg = Message::parse(
+        b"From sender@test Mon Jan 1 00:00:00 2024\nSubject: Test\n\nBody\n",
+    );
     deliver_default_with_env(&penv, &msg, &env).unwrap();
 
     let content = std::fs::read_to_string(&mbox).unwrap();
