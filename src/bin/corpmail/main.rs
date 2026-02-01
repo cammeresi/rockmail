@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
-use corpmail::config;
+use corpmail::config::{self, is_var_name};
 use corpmail::mail::Message;
 use corpmail::recipe::{Engine, Outcome};
 use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE};
-use corpmail::variables::{RealEnv, SubstCtx};
+use corpmail::variables::{Env, RealEnv, SubstCtx};
 use nix::unistd::{Uid, User};
 
 #[cfg(test)]
@@ -51,10 +51,6 @@ struct Args {
     #[arg(short = 'o')]
     override_from: bool,
 
-    /// Berkeley format (ignore Content-Length)
-    #[arg(short = 'Y', short_alias = 'y')]
-    berkeley: bool,
-
     /// Positional argument ($1, $2, ...)
     #[arg(short = 'a', action = clap::ArgAction::Append, value_name = "ARG")]
     args: Vec<String>,
@@ -73,8 +69,6 @@ struct Args {
 }
 
 fn main() -> ExitCode {
-    env_logger::init();
-
     let args = match Args::try_parse() {
         Ok(a) => a,
         Err(e) => {
@@ -90,7 +84,7 @@ fn main() -> ExitCode {
 
     if args.help {
         print_help();
-        return ExitCode::from(EX_USAGE);
+        return ExitCode::SUCCESS;
     }
 
     if args.deliver.is_some() && (args.preserve || args.mailfilter) {
@@ -100,6 +94,7 @@ fn main() -> ExitCode {
 
     if args.mailfilter && !args.args.is_empty() && !args.rest.is_empty() {
         eprintln!("corpmail: -m with -a: use trailing args instead");
+        return ExitCode::from(EX_USAGE);
     }
 
     let fail_code = if args.tempfail {
@@ -108,7 +103,18 @@ fn main() -> ExitCode {
         EX_CANTCREAT
     };
 
-    match run(args) {
+    // Set up environment before spawning any threads (env_logger may spawn)
+    let penv = match init_env(&args) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("corpmail: {e}");
+            return ExitCode::from(fail_code);
+        }
+    };
+
+    env_logger::init();
+
+    match run(args, penv) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("corpmail: {e}");
@@ -117,21 +123,33 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
     let mail = read_mail()?;
     let mut msg = Message::parse(&mail);
+
+    // Handle -f (set sender) and -o (override fake From_)
+    if let Some(ref sender) = args.from {
+        let dominated = args.override_from || msg.from_line().is_none();
+        if dominated {
+            msg.set_envelope_sender(sender);
+        }
+    }
+
+    // -d: delivery mode - deliver directly to recipient
+    if let Some(ref recip) = args.deliver {
+        return deliver_to_recipient(&penv, &msg, recip);
+    }
 
     let argv = if args.mailfilter {
         collect_trailing_args(&args.rest)
     } else {
-        args.args.clone()
+        args.args
     };
     let ctx = SubstCtx {
         argv,
         ..Default::default()
     };
 
-    let penv = build_env(&args)?;
     let mut engine = Engine::new(RealEnv, ctx);
 
     if getenv("VERBOSE").is_some_and(|v| v == "on" || v == "yes" || v == "1") {
@@ -143,9 +161,8 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // Process assignments and find rcfiles
     let (assignments, rcfiles) = parse_rest(&args.rest);
 
-    for (name, value) in assignments {
-        engine.set_var(&name, &value);
-        setenv(&name, &value);
+    for (name, value) in &assignments {
+        engine.set_var(name, value);
     }
 
     // Find rcfile to use
@@ -169,9 +186,27 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Delivery mode: deliver to named recipient's mailbox
+fn deliver_to_recipient(
+    env: &ProcEnv, msg: &Message, recip: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let dest = format!("/var/mail/{}", recip);
+    let sender = msg.envelope_sender().unwrap_or(&env.logname);
+    corpmail::delivery::mbox(Path::new(&dest), msg, sender)?;
+    Ok(())
+}
+
+const MAX_MAIL_SIZE: u64 = 1024 * 1024 * 1024; // 1 GB
+
 fn read_mail() -> io::Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    io::stdin().read_to_end(&mut buf)?;
+    let mut buf = Vec::with_capacity(64 * 1024);
+    io::stdin().take(MAX_MAIL_SIZE + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > MAX_MAIL_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("mail exceeds {} byte limit", MAX_MAIL_SIZE),
+        ));
+    }
     Ok(buf)
 }
 
@@ -180,8 +215,21 @@ fn getenv(name: &str) -> Option<String> {
 }
 
 fn setenv(name: &str, value: &str) {
-    // SAFETY: single-threaded at startup
+    // SAFETY: called only from init_env before env_logger::init spawns threads
     unsafe { std::env::set_var(name, value) }
+}
+
+/// Initialize process environment. Must be called before any threads spawn.
+fn init_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
+    let penv = build_env(args)?;
+
+    // Set user variable assignments into environment
+    let (assignments, _) = parse_rest(&args.rest);
+    for (name, value) in assignments {
+        setenv(&name, &value);
+    }
+
+    Ok(penv)
 }
 
 fn build_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
@@ -201,7 +249,6 @@ fn build_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
 
     e.maildir = format!("{}/Mail", e.home);
     e.orgmail = format!("/var/mail/{}", e.logname);
-    e.default = e.orgmail.clone();
 
     // Set hostname
     if let Ok(name) = nix::unistd::gethostname() {
@@ -216,23 +263,30 @@ fn build_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
     }
     setenv("MAILDIR", &e.maildir);
     setenv("ORGMAIL", &e.orgmail);
-    setenv("DEFAULT", &e.default);
+    setenv("DEFAULT", &e.orgmail);
     setenv("HOST", &e.host);
 
     Ok(e)
 }
 
+/// Process environment for mail delivery.
 #[derive(Default)]
 struct ProcEnv {
+    /// User's login name.
     logname: String,
+    /// User's home directory.
     home: String,
+    /// User's shell.
     shell: String,
+    /// User's mail directory (~/Mail).
     maildir: String,
+    /// System mailbox (/var/mail/$LOGNAME).
     orgmail: String,
-    default: String,
+    /// System hostname.
     host: String,
 }
 
+/// User information from passwd database.
 struct UserInfo {
     name: String,
     home: String,
@@ -267,14 +321,6 @@ fn parse_rest(rest: &[String]) -> (Vec<(String, String)>, Vec<String>) {
     (assigns, files)
 }
 
-fn is_var_name(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
 
 fn collect_trailing_args(rest: &[String]) -> Vec<String> {
     let mut args = Vec::new();
@@ -282,11 +328,19 @@ fn collect_trailing_args(rest: &[String]) -> Vec<String> {
     for arg in rest {
         if past_rcfile {
             args.push(arg.clone());
-        } else if !arg.contains('=') {
+        } else if !is_assignment(arg) {
             past_rcfile = true;
         }
     }
     args
+}
+
+fn is_assignment(arg: &str) -> bool {
+    if let Some(eq) = arg.find('=') {
+        is_var_name(&arg[..eq])
+    } else {
+        false
+    }
 }
 
 fn find_rcfile(
@@ -325,18 +379,27 @@ fn resolve_rcpath(path: &str, env: &ProcEnv, mailfilter: bool) -> PathBuf {
 }
 
 fn deliver_default(
-    env: &ProcEnv, msg: &Message,
+    penv: &ProcEnv, msg: &Message,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let default = getenv("DEFAULT").unwrap_or_else(|| env.default.clone());
+    deliver_default_with_env(penv, msg, &RealEnv)
+}
+
+fn deliver_default_with_env<E>(
+    penv: &ProcEnv, msg: &Message, env: &E,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    E: Env,
+{
+    let default = env.get("DEFAULT").unwrap_or_else(|| penv.orgmail.clone());
+    let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
+
     if !default.is_empty() {
-        let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
         corpmail::delivery::mbox(Path::new(&default), msg, sender)?;
         return Ok(());
     }
 
-    let orgmail = getenv("ORGMAIL").unwrap_or_else(|| env.orgmail.clone());
-    if !orgmail.is_empty() && orgmail != default {
-        let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
+    let orgmail = env.get("ORGMAIL").unwrap_or_else(|| penv.orgmail.clone());
+    if !orgmail.is_empty() {
         corpmail::delivery::mbox(Path::new(&orgmail), msg, sender)?;
         return Ok(());
     }
@@ -351,9 +414,9 @@ fn print_version() {
 
 fn print_help() {
     println!(
-        "Usage: corpmail [-ptoy] [-f sender] [parameter=value | rcfile] ...
-       corpmail [-toy] [-f sender] [-a arg] ... -d recipient ...
-       corpmail [-pty] -m [parameter=value] ... rcfile [arg] ...
+        "Usage: corpmail [-pto] [-f sender] [parameter=value | rcfile] ...
+       corpmail [-to] [-f sender] [-a arg] ... -d recipient ...
+       corpmail [-pt] -m [parameter=value] ... rcfile [arg] ...
        corpmail -v
 
 Options:
@@ -363,7 +426,6 @@ Options:
   -t          Return EX_TEMPFAIL on error
   -f sender   Regenerate From_ line with sender
   -o          Override fake From_ lines
-  -Y, -y      Berkeley format (ignore Content-Length)
   -a arg      Set $1, $2, ... (can be repeated)
   -d recip    Delivery mode to named recipient
   -m          General mail filter mode

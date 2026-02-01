@@ -1,4 +1,5 @@
 use super::*;
+use corpmail::variables::MockEnv;
 
 #[test]
 fn parse_rest_assignments() {
@@ -100,4 +101,85 @@ fn resolve_rcpath_mailfilter_mode() {
     };
     let p = resolve_rcpath("filter.rc", &env, true);
     assert_eq!(p, PathBuf::from("filter.rc"));
+}
+
+#[test]
+fn find_rcfile_explicit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rc = tmp.path().join("test.rc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let files = vec![rc.to_string_lossy().into()];
+    let result = find_rcfile(&files, &env, false).unwrap();
+    assert_eq!(result, Some(rc));
+}
+
+#[test]
+fn find_rcfile_missing_mailfilter() {
+    let env = ProcEnv::default();
+    let result = find_rcfile(&[], &env, true);
+    assert!(result.is_err());
+}
+
+#[test]
+fn find_rcfile_default_procmailrc() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rc = tmp.path().join(".procmailrc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let result = find_rcfile(&[], &env, false).unwrap();
+    assert_eq!(result, Some(rc));
+}
+
+#[test]
+fn find_rcfile_no_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let result = find_rcfile(&[], &env, false).unwrap();
+    assert_eq!(result, None);
+}
+
+#[test]
+fn deliver_default_to_mbox() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mbox = tmp.path().join("inbox");
+
+    let penv = ProcEnv {
+        orgmail: mbox.to_string_lossy().into(),
+        ..Default::default()
+    };
+    let env = MockEnv::new();
+
+    let msg = Message::parse(b"From sender@test Mon Jan 1 00:00:00 2024\nSubject: Test\n\nBody\n");
+    deliver_default_with_env(&penv, &msg, &env).unwrap();
+
+    let content = std::fs::read_to_string(&mbox).unwrap();
+    assert!(content.contains("Subject: Test"));
+    assert!(content.contains("Body"));
+}
+
+#[test]
+fn is_assignment_valid() {
+    assert!(is_assignment("FOO=bar"));
+    assert!(is_assignment("_x=1"));
+    assert!(is_assignment("A="));
+}
+
+#[test]
+fn is_assignment_invalid() {
+    assert!(!is_assignment("123=bad"));
+    assert!(!is_assignment("foo-bar=x"));
+    assert!(!is_assignment("noequals"));
+    assert!(!is_assignment(""));
 }

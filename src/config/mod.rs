@@ -10,7 +10,7 @@ pub use recipe::{Flags, Item, Recipe};
 
 /// Check if a string is a valid variable name (letters, digits, underscore,
 /// starting with letter or underscore)
-pub(crate) fn is_var_name(s: &str) -> bool {
+pub fn is_var_name(s: &str) -> bool {
     let mut chars = s.chars();
     match chars.next() {
         Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
