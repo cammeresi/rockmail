@@ -31,13 +31,11 @@ pub fn deliver(
 
     let data = msg.as_bytes();
 
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(data) {
-            // Broken pipe is expected if command exits early
-            if e.kind() != ErrorKind::BrokenPipe {
-                return Err(e.into());
-            }
-        }
+    if let Some(mut stdin) = child.stdin.take()
+        && let Err(e) = stdin.write_all(data)
+        && e.kind() != ErrorKind::BrokenPipe
+    {
+        return Err(e.into());
     }
 
     let output = child.wait_with_output()?;

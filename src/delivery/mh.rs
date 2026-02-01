@@ -45,7 +45,9 @@ pub fn deliver_with(
     })
 }
 
-fn create_unique(namer: &mut Namer, path: &Path) -> Result<(File, PathBuf), DeliveryError> {
+fn create_unique(
+    namer: &mut Namer, path: &Path,
+) -> Result<(File, PathBuf), DeliveryError> {
     if namer.next == 0 {
         namer.next = scan_max(path)? + 1;
     }

@@ -47,7 +47,10 @@ impl Namer {
             self.serial = 0;
         }
         let serial = self.serial;
-        self.serial = self.serial.checked_add(1).ok_or(DeliveryError::UniqueFile)?;
+        self.serial = self
+            .serial
+            .checked_add(1)
+            .ok_or(DeliveryError::UniqueFile)?;
 
         Ok(format!("{}.{}_{}.{}", t, pid, serial, self.host))
     }
