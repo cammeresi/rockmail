@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::process::{Command, Stdio};
 
 use super::{DeliveryError, DeliveryResult};
@@ -31,10 +31,13 @@ pub fn deliver(
 
     let data = msg.as_bytes();
 
-    // Write message to stdin
     if let Some(mut stdin) = child.stdin.take() {
-        // Ignore broken pipe - command may exit early
-        let _ = stdin.write_all(data);
+        if let Err(e) = stdin.write_all(data) {
+            // Broken pipe is expected if command exits early
+            if e.kind() != ErrorKind::BrokenPipe {
+                return Err(e.into());
+            }
+        }
     }
 
     let output = child.wait_with_output()?;

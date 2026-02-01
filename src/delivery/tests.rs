@@ -1,4 +1,9 @@
 use super::*;
+use crate::mail::Message;
+
+pub fn msg(s: &str) -> Message {
+    Message::parse(s.as_bytes())
+}
 
 #[test]
 fn parse_mbox() {

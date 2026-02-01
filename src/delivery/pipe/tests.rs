@@ -1,8 +1,5 @@
 use super::*;
-
-fn msg(s: &str) -> Message {
-    Message::parse(s.as_bytes())
-}
+use crate::delivery::tests::msg;
 
 #[test]
 fn pipe_to_cat() {

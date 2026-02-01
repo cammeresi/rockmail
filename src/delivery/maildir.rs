@@ -4,10 +4,54 @@ mod tests;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{DeliveryError, DeliveryResult};
 use crate::mail::{Message, skip_from_lines};
+
+/// State for unique filename generation (preserves serial across calls).
+#[derive(Debug)]
+pub struct Namer {
+    last_time: u64,
+    serial: u32,
+    host: String,
+}
+
+impl Default for Namer {
+    fn default() -> Self {
+        Self {
+            last_time: 0,
+            serial: 0,
+            host: hostname(),
+        }
+    }
+}
+
+impl Namer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Generate unique filename in Maildir format: time.pid_serial.hostname
+    pub fn next(&mut self) -> Result<String, DeliveryError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| DeliveryError::UniqueFile)?;
+
+        let t = now.as_secs();
+        let pid = process::id();
+
+        if t != self.last_time {
+            self.last_time = t;
+            self.serial = 0;
+        }
+        let serial = self.serial;
+        self.serial = self.serial.checked_add(1).ok_or(DeliveryError::UniqueFile)?;
+
+        Ok(format!("{}.{}_{}.{}", t, pid, serial, self.host))
+    }
+}
 
 /// Deliver a message to a Maildir folder.
 ///
@@ -16,21 +60,24 @@ use crate::mail::{Message, skip_from_lines};
 pub fn deliver(
     path: &Path, msg: &Message,
 ) -> Result<DeliveryResult, DeliveryError> {
+    deliver_with(&mut Namer::new(), path, msg)
+}
+
+/// Deliver with explicit namer (for preserving serial across deliveries).
+pub fn deliver_with(
+    namer: &mut Namer, path: &Path, msg: &Message,
+) -> Result<DeliveryResult, DeliveryError> {
     ensure_dirs(path)?;
 
-    let name = unique_name()?;
+    let name = namer.next()?;
     let tmp = path.join("tmp").join(&name);
     let new = path.join("new").join(&name);
 
-    // Write to tmp
     let bytes = write_msg(&tmp, msg)?;
 
-    // Link to new (atomic)
     if fs::hard_link(&tmp, &new).is_err() {
-        // Fall back to rename if hard link fails (e.g., cross-filesystem)
-        fs::rename(&tmp, &new).map_err(|_| DeliveryError::Link)?;
+        fs::rename(&tmp, &new)?;
     } else {
-        // Remove tmp file after successful link
         let _ = fs::remove_file(&tmp);
     }
 
@@ -45,25 +92,6 @@ fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
         fs::create_dir_all(path.join(sub))?;
     }
     Ok(())
-}
-
-fn unique_name() -> Result<String, DeliveryError> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| DeliveryError::UniqueFile)?;
-
-    let pid = std::process::id();
-    let host = hostname();
-
-    // Format: time.pid.hostname
-    // Add microseconds for uniqueness
-    Ok(format!(
-        "{}.M{}P{}.{}",
-        now.as_secs(),
-        now.subsec_micros(),
-        pid,
-        host
-    ))
 }
 
 fn hostname() -> String {
@@ -97,10 +125,7 @@ fn write_msg(path: &Path, msg: &Message) -> Result<usize, DeliveryError> {
     };
 
     w.flush()?;
-    drop(w);
-
-    // fsync for durability
-    let file = File::open(path)?;
+    let file = w.into_inner().map_err(|e| e.into_error())?;
     file.sync_all()?;
 
     Ok(bytes + extra)

@@ -3,18 +3,36 @@ mod tests;
 
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{DeliveryError, DeliveryResult};
+use crate::locking;
 use crate::mail::{Message, generate as from_line};
+
+fn lock_path(path: &Path) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(".lock");
+    PathBuf::from(s)
+}
 
 /// Deliver a message to an mbox file.
 ///
 /// Appends the message with proper From_ escaping. A From_ line is
 /// prepended if the message doesn't start with one.
-///
-/// The message is followed by a blank line separator.
+/// Acquires dotlock before writing for concurrent safety.
 pub fn deliver(
+    path: &Path, msg: &Message, sender: &str,
+) -> Result<DeliveryResult, DeliveryError> {
+    let lock = lock_path(path);
+    locking::create_lock(&lock)?;
+
+    let result = deliver_inner(path, msg, sender);
+
+    let _ = locking::remove_lock(&lock);
+    result
+}
+
+fn deliver_inner(
     path: &Path, msg: &Message, sender: &str,
 ) -> Result<DeliveryResult, DeliveryError> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
@@ -24,13 +42,11 @@ pub fn deliver(
 
     // From_ line (either existing or generated)
     let header = msg.header();
-    let header_to_escape = if let Some(fl) = msg.from_line() {
-        // Write existing From_ line as-is (with newline)
+    let hdr = if let Some(fl) = msg.from_line() {
         w.write_all(fl)?;
         w.write_all(b"\n")?;
         bytes += fl.len() + 1;
-        // Escape remaining headers (after the From_ line)
-        &header[fl.len() + 1..]
+        header.get(fl.len() + 1..).unwrap_or(&[])
     } else {
         // Generate a From_ line
         let line = from_line(sender);
@@ -40,7 +56,7 @@ pub fn deliver(
     };
 
     // Headers with From escaping
-    bytes += write_escaped(&mut w, header_to_escape)?;
+    bytes += write_escaped(&mut w, hdr)?;
 
     // Blank line separator
     w.write_all(b"\n")?;
@@ -60,10 +76,7 @@ pub fn deliver(
     bytes += 1;
 
     w.flush()?;
-    drop(w);
-
-    // fsync for durability
-    let file = OpenOptions::new().read(true).open(path)?;
+    let file = w.into_inner().map_err(|e| e.into_error())?;
     file.sync_all()?;
 
     Ok(DeliveryResult {

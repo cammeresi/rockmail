@@ -3,10 +3,7 @@ use std::fs;
 use tempfile::tempdir;
 
 use super::*;
-
-fn msg(s: &str) -> Message {
-    Message::parse(s.as_bytes())
-}
+use crate::delivery::tests::msg;
 
 #[test]
 fn deliver_creates_dirs() {
@@ -56,8 +53,18 @@ fn strips_from_line() {
 
 #[test]
 fn unique_names() {
-    let n1 = unique_name().unwrap();
-    std::thread::sleep(std::time::Duration::from_micros(10));
-    let n2 = unique_name().unwrap();
+    let mut namer = Namer::new();
+    let n1 = namer.next().unwrap();
+    let n2 = namer.next().unwrap();
     assert_ne!(n1, n2);
+}
+
+#[test]
+fn serial_increments_same_second() {
+    let mut namer = Namer::new();
+    let n1 = namer.next().unwrap();
+    let n2 = namer.next().unwrap();
+    // Both in same second, serial should differ
+    assert!(n1.contains("_0."));
+    assert!(n2.contains("_1."));
 }

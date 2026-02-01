@@ -3,10 +3,7 @@ use std::fs;
 use tempfile::tempdir;
 
 use super::*;
-
-fn msg(s: &str) -> Message {
-    Message::parse(s.as_bytes())
-}
+use crate::delivery::tests::msg;
 
 #[test]
 fn deliver_creates_folder() {

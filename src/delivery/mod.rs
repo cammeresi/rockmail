@@ -7,7 +7,6 @@ mod mh;
 mod pipe;
 
 use std::io;
-use std::path::Path;
 
 pub use maildir::deliver as maildir;
 pub use mbox::deliver as mbox;
@@ -23,7 +22,7 @@ pub enum FolderType {
     Maildir,
     /// MH folder (path ends with /.).
     Mh,
-    /// Directory with msgprefix (path ends with //).
+    /// TODO: Directory with msgprefix (path ends with //).
     Dir,
 }
 
@@ -81,17 +80,12 @@ pub enum DeliveryError {
     #[error("failed to link to final location")]
     Link,
 
+    #[error("failed to acquire lock: {0}")]
+    Lock(#[from] crate::util::LockError),
+
     #[error("pipe command failed with exit code {0}")]
     PipeExit(i32),
 
     #[error("pipe command killed by signal {0}")]
     PipeSignal(i32),
-
-    #[error("folder path too long")]
-    PathTooLong,
-}
-
-/// Determine if a path represents an existing directory.
-pub fn is_dir(path: &Path) -> bool {
-    path.is_dir()
 }
