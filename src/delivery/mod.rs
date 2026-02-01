@@ -8,7 +8,7 @@ mod pipe;
 
 use std::io;
 
-pub use maildir::deliver as maildir;
+pub use maildir::{deliver as maildir, deliver_dir as dir};
 pub use mbox::deliver as mbox;
 pub use mh::deliver as mh;
 pub use pipe::deliver as pipe;
@@ -22,7 +22,7 @@ pub enum FolderType {
     Maildir,
     /// MH folder (path ends with /.).
     Mh,
-    /// TODO: Directory with msgprefix (path ends with //).
+    /// Directory with msgprefix (path ends with //).
     Dir,
 }
 

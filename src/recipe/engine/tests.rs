@@ -6,7 +6,7 @@ use crate::config::{Action, Condition, Flags, Item, Recipe};
 use crate::mail::Message;
 use crate::variables::{MockEnv, SubstCtx};
 
-use super::{Engine, Outcome};
+use super::{Engine, EngineError, Outcome};
 
 struct Test {
     tmp: TempDir,
@@ -35,8 +35,12 @@ impl Test {
         format!("{}/", self.folder(name).display())
     }
 
+    fn try_process(&mut self, items: &[Item]) -> Result<Outcome, EngineError> {
+        self.engine.process(items, &mut self.msg)
+    }
+
     fn process(&mut self, items: &[Item]) -> Outcome {
-        self.engine.process(items, &mut self.msg).unwrap()
+        self.try_process(items).unwrap()
     }
 }
 
@@ -242,4 +246,54 @@ fn nested_block() {
     assert!(
         matches!(t.process(&items), Outcome::Delivered(p) if p.contains("inner"))
     );
+}
+
+#[test]
+fn invalid_regex_returns_error() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "[invalid".to_string(),
+            negate: false,
+        }],
+        action: Action::Folder(PathBuf::from(t.maildir("inbox"))),
+    })];
+    assert!(matches!(t.try_process(&items), Err(EngineError::Regex(_))));
+}
+
+#[test]
+fn delivery_to_unwritable_path_returns_error() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![],
+        action: Action::Folder(PathBuf::from(
+            "/nonexistent/deeply/nested/path/",
+        )),
+    })];
+    assert!(matches!(
+        t.try_process(&items),
+        Err(EngineError::Delivery(_))
+    ));
+}
+
+#[test]
+fn subst_negation_inverts_match() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Subst {
+            inner: Box::new(Condition::Regex {
+                pattern: "X-NotPresent:".to_string(),
+                negate: false,
+            }),
+            negate: true,
+        }],
+        action: Action::Folder(PathBuf::from(t.maildir("negated"))),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }

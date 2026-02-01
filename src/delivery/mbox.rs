@@ -2,7 +2,7 @@
 mod tests;
 
 use std::fs::OpenOptions;
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use super::{DeliveryError, DeliveryResult};
@@ -88,7 +88,10 @@ fn deliver_inner(
 /// Write data with From_ escaping.
 ///
 /// Lines starting with "From " are escaped by prepending ">".
-fn write_escaped<W: Write>(w: &mut W, data: &[u8]) -> std::io::Result<usize> {
+fn write_escaped<W>(w: &mut W, data: &[u8]) -> io::Result<usize>
+where
+    W: Write,
+{
     let mut bytes = 0;
     let mut start = 0;
     let mut at_line_start = true;

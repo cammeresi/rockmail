@@ -66,6 +66,25 @@ pub fn deliver(
     deliver_with(&mut Namer::new(), path, msg)
 }
 
+/// Deliver a message directly to a directory (procmail // mode).
+///
+/// Unlike Maildir, writes directly without tmp/new/cur structure.
+pub fn deliver_dir(
+    path: &Path, msg: &Message,
+) -> Result<DeliveryResult, DeliveryError> {
+    fs::create_dir_all(path)?;
+
+    let name = Namer::new().next()?;
+    let dest = path.join(format!("msg.{}", name));
+
+    let bytes = write_msg(&dest, msg)?;
+
+    Ok(DeliveryResult {
+        bytes,
+        path: dest.display().to_string(),
+    })
+}
+
 /// Deliver with explicit namer (for preserving serial across deliveries).
 pub fn deliver_with(
     namer: &mut Namer, path: &Path, msg: &Message,

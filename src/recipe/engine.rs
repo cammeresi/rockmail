@@ -1,8 +1,9 @@
 //! Recipe evaluation engine.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -51,8 +52,6 @@ pub struct State {
     pub prev_cond: bool,
     /// Current score (for weighted conditions).
     pub score: f64,
-    /// MATCH variable from `\/` capture.
-    pub match_var: String,
 }
 
 impl Default for State {
@@ -62,7 +61,6 @@ impl Default for State {
             last_succ: false,
             prev_cond: false,
             score: 0.0,
-            match_var: String::new(),
         }
     }
 }
@@ -96,8 +94,12 @@ where
     }
 
     /// Get a variable (local vars override env).
-    fn get_var(&self, name: &str) -> Option<String> {
-        self.vars.get(name).cloned().or_else(|| self.env.get(name))
+    fn get_var(&self, name: &str) -> Option<Cow<'_, str>> {
+        if let Some(v) = self.vars.get(name) {
+            Some(Cow::Borrowed(v))
+        } else {
+            self.env.get(name).map(Cow::Owned)
+        }
     }
 
     /// Set a local variable.
@@ -142,7 +144,7 @@ where
             return Ok(Outcome::Default);
         }
 
-        let (matched, score) = self.eval_conditions(recipe, msg, state)?;
+        let (matched, score) = self.eval_conditions(recipe, msg)?;
 
         // Update state for next recipe
         if !recipe.flags.chain && !recipe.flags.succ {
@@ -193,7 +195,7 @@ where
 
     /// Evaluate all conditions, returns (matched, score).
     fn eval_conditions(
-        &mut self, recipe: &Recipe, msg: &Message, state: &mut State,
+        &mut self, recipe: &Recipe, msg: &Message,
     ) -> EngineResult<(bool, f64)> {
         if recipe.conds.is_empty() {
             return Ok((true, 0.0));
@@ -203,8 +205,7 @@ where
         let mut has_score = false;
 
         for cond in &recipe.conds {
-            let (ok, s, scored) =
-                self.eval_condition(cond, recipe, msg, state)?;
+            let (ok, s, scored) = self.eval_condition(cond, recipe, msg)?;
             if scored {
                 score += s;
                 has_score = true;
@@ -224,11 +225,10 @@ where
     /// Evaluate a single condition. Returns (matched, score_delta, is_scored).
     fn eval_condition(
         &mut self, cond: &Condition, recipe: &Recipe, msg: &Message,
-        state: &mut State,
     ) -> EngineResult<(bool, f64, bool)> {
         match cond {
             Condition::Regex { pattern, negate } => {
-                self.eval_regex(pattern, *negate, recipe, msg, state)
+                self.eval_regex(pattern, *negate, recipe, msg)
             }
             Condition::Size { op, bytes } => {
                 let size = msg.len() as u64;
@@ -266,11 +266,12 @@ where
                 Ok((ok, 0.0, false))
             }
             Condition::Variable { name, pattern } => {
-                self.eval_variable(name, pattern, recipe, msg, state)
+                self.eval_variable(name, pattern, recipe, msg)
             }
             Condition::Subst { inner, negate } => {
                 let (ok, score, scored) =
-                    self.eval_condition(inner, recipe, msg, state)?;
+                    self.eval_condition(inner, recipe, msg)?;
+                // Negation applies to boolean result only, not score
                 Ok((ok ^ negate, score, scored))
             }
         }
@@ -278,7 +279,6 @@ where
 
     fn eval_regex(
         &mut self, pattern: &str, negate: bool, recipe: &Recipe, msg: &Message,
-        state: &mut State,
     ) -> EngineResult<(bool, f64, bool)> {
         let text = self.grep_text(msg, &recipe.flags);
         let expanded = self.expand(pattern);
@@ -289,7 +289,6 @@ where
         if result.matched
             && let Some(cap) = result.capture
         {
-            state.match_var = cap.to_string();
             self.set_var("MATCH", cap);
         }
 
@@ -306,9 +305,8 @@ where
 
     fn eval_variable(
         &mut self, name: &str, pattern: &str, recipe: &Recipe, msg: &Message,
-        state: &mut State,
     ) -> EngineResult<(bool, f64, bool)> {
-        let text = self.get_variable_text(name, msg);
+        let text = self.get_variable_text(name, msg).into_owned();
         let expanded = self.expand(pattern);
         let case_insens = !recipe.flags.case;
         let matcher = Matcher::new(&expanded, case_insens)?;
@@ -317,7 +315,6 @@ where
         if result.matched
             && let Some(cap) = result.capture
         {
-            state.match_var = cap.to_string();
             self.set_var("MATCH", cap);
         }
 
@@ -333,30 +330,32 @@ where
     }
 
     /// Get text to grep based on H/B flags.
-    fn grep_text(&self, msg: &Message, flags: &Flags) -> String {
+    fn grep_text<'a>(&self, msg: &'a Message, flags: &Flags) -> Cow<'a, str> {
         let bytes = match (flags.head, flags.body) {
             (true, true) => msg.as_bytes(),
             (true, false) => msg.header(),
             (false, true) => msg.body(),
             (false, false) => msg.header(),
         };
-        String::from_utf8_lossy(bytes).into_owned()
+        String::from_utf8_lossy(bytes)
     }
 
     /// Get text for variable condition (VAR ?? pattern).
-    fn get_variable_text(&self, name: &str, msg: &Message) -> String {
+    fn get_variable_text<'a>(
+        &'a self, name: &str, msg: &'a Message,
+    ) -> Cow<'a, str> {
         match name {
-            "H" => String::from_utf8_lossy(msg.header()).into_owned(),
-            "B" => String::from_utf8_lossy(msg.body()).into_owned(),
-            "HB" | "BH" => String::from_utf8_lossy(msg.as_bytes()).into_owned(),
+            "H" => String::from_utf8_lossy(msg.header()),
+            "B" => String::from_utf8_lossy(msg.body()),
+            "HB" | "BH" => String::from_utf8_lossy(msg.as_bytes()),
             _ => self.get_var(name).unwrap_or_default(),
         }
     }
 
     /// Run a shell command with message as stdin.
     fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<bool> {
-        let shell = self.get_var("SHELL").unwrap_or_else(|| "/bin/sh".into());
-        let mut child = Command::new(&shell)
+        let shell = self.get_var("SHELL").unwrap_or(Cow::Borrowed("/bin/sh"));
+        let mut child = Command::new(&*shell)
             .arg("-c")
             .arg(cmd)
             .stdin(Stdio::piped())
@@ -364,8 +363,11 @@ where
             .stderr(Stdio::null())
             .spawn()?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(input);
+        if let Some(mut stdin) = child.stdin.take()
+            && let Err(e) = stdin.write_all(input)
+            && e.kind() != ErrorKind::BrokenPipe
+        {
+            return Err(e.into());
         }
 
         let status = child.wait()?;
@@ -410,7 +412,7 @@ where
             }
             FolderType::Maildir => delivery::maildir(Path::new(path), &msg)?,
             FolderType::Mh => delivery::mh(Path::new(path), &msg)?,
-            FolderType::Dir => delivery::maildir(Path::new(path), &msg)?,
+            FolderType::Dir => delivery::dir(Path::new(path), &msg)?,
         };
 
         self.set_var("LASTFOLDER", &result.path);
@@ -460,25 +462,32 @@ where
     ) -> EngineResult<Outcome> {
         let sendmail = self
             .get_var("SENDMAIL")
-            .unwrap_or_else(|| "/usr/sbin/sendmail".into());
+            .unwrap_or(Cow::Borrowed("/usr/sbin/sendmail"));
         let msg = self.message_for_delivery(recipe, msg);
 
         // Skip From_ line for forwarding
         let data = skip_from_line(msg.as_bytes());
 
-        let mut child = Command::new(&sendmail)
+        let mut child = Command::new(&*sendmail)
             .args(addrs)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(data);
+        if let Some(mut stdin) = child.stdin.take()
+            && let Err(e) = stdin.write_all(data)
+            && e.kind() != ErrorKind::BrokenPipe
+        {
+            return Err(e.into());
         }
 
         let status = child.wait()?;
         self.ctx.last_exit = status.code().unwrap_or(-1);
+
+        if !status.success() {
+            return Err(DeliveryError::PipeExit(self.ctx.last_exit).into());
+        }
 
         let dest = addrs.join(" ");
         self.set_var("LASTFOLDER", &dest);
@@ -492,12 +501,14 @@ where
     }
 
     /// Create message for delivery based on h/b flags.
-    fn message_for_delivery(&self, recipe: &Recipe, msg: &Message) -> Message {
+    fn message_for_delivery<'a>(
+        &self, recipe: &Recipe, msg: &'a Message,
+    ) -> Cow<'a, Message> {
         match (recipe.flags.pass_head, recipe.flags.pass_body) {
-            (true, true) => msg.clone(),
-            (true, false) => Message::from_parts(msg.header(), &[]),
-            (false, true) => Message::from_parts(&[], msg.body()),
-            (false, false) => Message::from_parts(&[], &[]),
+            (true, true) => Cow::Borrowed(msg),
+            (true, false) => Cow::Owned(Message::from_parts(msg.header(), &[])),
+            (false, true) => Cow::Owned(Message::from_parts(&[], msg.body())),
+            (false, false) => Cow::Owned(Message::from_parts(&[], &[])),
         }
     }
 
@@ -520,7 +531,7 @@ where
     E: Env,
 {
     fn get(&self, name: &str) -> Option<String> {
-        self.engine.get_var(name)
+        self.engine.get_var(name).map(|c| c.into_owned())
     }
 }
 
