@@ -51,6 +51,7 @@ fn regex_recipe(pattern: &str, folder: &str) -> Item {
         conds: vec![Condition::Regex {
             pattern: pattern.to_string(),
             negate: false,
+            weight: None,
         }],
         action: Action::Folder(PathBuf::from(folder)),
     })
@@ -87,6 +88,7 @@ fn negated_regex() {
         conds: vec![Condition::Regex {
             pattern: "X-Spam:".to_string(),
             negate: true,
+            weight: None,
         }],
         action: Action::Folder(PathBuf::from(t.maildir("inbox"))),
     })];
@@ -102,6 +104,7 @@ fn size_condition_less() {
         conds: vec![Condition::Size {
             op: std::cmp::Ordering::Less,
             bytes: 1000,
+            weight: None,
         }],
         action: Action::Folder(PathBuf::from(t.maildir("small"))),
     })];
@@ -117,6 +120,7 @@ fn size_condition_greater_fails() {
         conds: vec![Condition::Size {
             op: std::cmp::Ordering::Greater,
             bytes: 1000,
+            weight: None,
         }],
         action: Action::Folder(PathBuf::from(t.maildir("large"))),
     })];
@@ -137,6 +141,7 @@ fn variable_assignment() {
             conds: vec![Condition::Variable {
                 name: "FOO".to_string(),
                 pattern: "bar".to_string(),
+                weight: None,
             }],
             action: Action::Folder(PathBuf::from(t.maildir("matched"))),
         }),
@@ -195,6 +200,7 @@ fn body_flag_greps_body() {
         conds: vec![Condition::Regex {
             pattern: "body".to_string(),
             negate: false,
+            weight: None,
         }],
         action: Action::Folder(PathBuf::from(t.maildir("body"))),
     })];
@@ -235,6 +241,7 @@ fn nested_block() {
         conds: vec![Condition::Regex {
             pattern: "Subject:".to_string(),
             negate: false,
+            weight: None,
         }],
         action: Action::Nested(vec![Item::Recipe(Recipe {
             flags: Flags::new(),
@@ -257,6 +264,7 @@ fn invalid_regex_returns_error() {
         conds: vec![Condition::Regex {
             pattern: "[invalid".to_string(),
             negate: false,
+            weight: None,
         }],
         action: Action::Folder(PathBuf::from(t.maildir("inbox"))),
     })];
@@ -290,6 +298,7 @@ fn subst_negation_inverts_match() {
             inner: Box::new(Condition::Regex {
                 pattern: "X-NotPresent:".to_string(),
                 negate: false,
+                weight: None,
             }),
             negate: true,
         }],

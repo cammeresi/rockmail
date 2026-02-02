@@ -4,7 +4,7 @@ mod parser;
 mod recipe;
 
 pub use action::Action;
-pub use condition::Condition;
+pub use condition::{Condition, Weight};
 pub use parser::{ParseError, Parser, parse};
 pub use recipe::{Flags, Item, Recipe};
 

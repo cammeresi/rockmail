@@ -49,6 +49,16 @@ fn print_item(item: &Item, num: usize, depth: usize) {
             println!("{}{:3}. [RECIPE]", indent, num);
             print_recipe(r, depth + 1);
         }
+        Item::Include(path) => {
+            println!("{}{:3}. [INCLUDERC] {:?}", indent, num, path);
+        }
+        Item::Switch(path) => {
+            if path.is_empty() {
+                println!("{}{:3}. [SWITCHRC] (abort)", indent, num);
+            } else {
+                println!("{}{:3}. [SWITCHRC] {:?}", indent, num, path);
+            }
+        }
     }
     println!();
 }
@@ -149,26 +159,42 @@ fn format_flags(f: &Flags) -> String {
 
 fn format_condition(c: &Condition) -> String {
     match c {
-        Condition::Regex { pattern, negate } => {
+        Condition::Regex {
+            pattern,
+            negate,
+            weight,
+        } => {
+            let prefix =
+                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
             if *negate {
-                format!("NOT regex {:?}", pattern)
+                format!("{}NOT regex {:?}", prefix, pattern)
             } else {
-                format!("regex {:?}", pattern)
+                format!("{}regex {:?}", prefix, pattern)
             }
         }
-        Condition::Size { op, bytes } => {
+        Condition::Size { op, bytes, weight } => {
+            let prefix =
+                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
             let cmp = match op {
                 Ordering::Less => "<",
                 Ordering::Greater => ">",
                 Ordering::Equal => "=",
             };
-            format!("size {} {} bytes", cmp, bytes)
+            format!("{}size {} {} bytes", prefix, cmp, bytes)
         }
-        Condition::Shell { cmd } => {
-            format!("shell {:?}", cmd)
+        Condition::Shell { cmd, weight } => {
+            let prefix =
+                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
+            format!("{}shell {:?}", prefix, cmd)
         }
-        Condition::Variable { name, pattern } => {
-            format!("${} matches {:?}", name, pattern)
+        Condition::Variable {
+            name,
+            pattern,
+            weight,
+        } => {
+            let prefix =
+                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
+            format!("{}${} matches {:?}", prefix, name, pattern)
         }
         Condition::Subst { inner, negate } => {
             let inner_str = format_condition(inner);
@@ -261,6 +287,16 @@ fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
                 format_action(&r.action, depth + 1)
             ));
             out
+        }
+        Item::Include(path) => {
+            format!("{}{:3}. [INCLUDERC] {:?}\n", indent, num, path)
+        }
+        Item::Switch(path) => {
+            if path.is_empty() {
+                format!("{}{:3}. [SWITCHRC] (abort)\n", indent, num)
+            } else {
+                format!("{}{:3}. [SWITCHRC] {:?}\n", indent, num, path)
+            }
         }
     }
 }

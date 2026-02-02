@@ -3,12 +3,14 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::config::{Action, Condition, Flags, Item, Recipe};
+use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
 use crate::delivery::{self, DeliveryError, FolderType};
+use crate::locking;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{Env, SubstCtx};
@@ -131,9 +133,55 @@ where
                         Outcome::Continue | Outcome::Default => {}
                     }
                 }
+                Item::Include(path) => {
+                    let expanded = self.expand(path);
+                    if let Some(items) = self.load_rcfile(&expanded) {
+                        let outcome = self.process_items(&items, msg, state)?;
+                        if matches!(outcome, Outcome::Delivered(_)) {
+                            return Ok(outcome);
+                        }
+                    }
+                }
+                Item::Switch(path) => {
+                    if path.is_empty() {
+                        // Empty SWITCHRC aborts current rcfile
+                        return Ok(Outcome::Default);
+                    }
+                    let expanded = self.expand(path);
+                    if let Some(items) = self.load_rcfile(&expanded) {
+                        return self.process_items(&items, msg, state);
+                    }
+                }
             }
         }
         Ok(Outcome::Default)
+    }
+
+    /// Load and parse an rcfile. Returns None if file doesn't exist or fails to parse.
+    fn load_rcfile(&self, path: &str) -> Option<Vec<Item>> {
+        let p = Path::new(path);
+        if !p.exists() || !p.is_file() {
+            if path != "/dev/null" {
+                log::warn!("rcfile not found: {}", path);
+            }
+            return None;
+        }
+
+        let content = match fs::read_to_string(p) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("failed to read rcfile {}: {}", path, e);
+                return None;
+            }
+        };
+
+        match crate::config::parse(&content) {
+            Ok(items) => Some(items),
+            Err(e) => {
+                log::warn!("failed to parse rcfile {}: {}", path, e);
+                None
+            }
+        }
     }
 
     /// Evaluate a single recipe.
@@ -227,106 +275,173 @@ where
         &mut self, cond: &Condition, recipe: &Recipe, msg: &Message,
     ) -> EngineResult<(bool, f64, bool)> {
         match cond {
-            Condition::Regex { pattern, negate } => {
-                self.eval_regex(pattern, *negate, recipe, msg)
+            Condition::Regex {
+                pattern,
+                negate,
+                weight,
+            } => self.eval_regex(pattern, *negate, *weight, recipe, msg),
+            Condition::Size { op, bytes, weight } => {
+                self.eval_size(*op, *bytes, *weight, msg)
             }
-            Condition::Size { op, bytes } => {
-                let size = msg.len() as u64;
-                let matched = match op {
-                    Ordering::Less => size < *bytes,
-                    Ordering::Greater => size > *bytes,
-                    Ordering::Equal => size == *bytes,
-                };
-                if self.verbose {
-                    let sym = match op {
-                        Ordering::Less => '<',
-                        Ordering::Greater => '>',
-                        Ordering::Equal => '=',
-                    };
-                    log::info!(
-                        "{} on {}{}",
-                        if matched { "Match" } else { "No match" },
-                        sym,
-                        bytes
-                    );
-                }
-                Ok((matched, 0.0, false))
+            Condition::Shell { cmd, weight } => {
+                self.eval_shell(cmd, *weight, recipe, msg)
             }
-            Condition::Shell { cmd } => {
-                let expanded = self.expand(cmd);
-                let text = self.grep_text(msg, &recipe.flags);
-                let ok = self.run_shell(&expanded, text.as_bytes())?;
-                if self.verbose {
-                    log::info!(
-                        "{} on ?{}",
-                        if ok { "Match" } else { "No match" },
-                        cmd
-                    );
-                }
-                Ok((ok, 0.0, false))
-            }
-            Condition::Variable { name, pattern } => {
-                self.eval_variable(name, pattern, recipe, msg)
-            }
+            Condition::Variable {
+                name,
+                pattern,
+                weight,
+            } => self.eval_variable(name, pattern, *weight, recipe, msg),
             Condition::Subst { inner, negate } => {
                 let (ok, score, scored) =
                     self.eval_condition(inner, recipe, msg)?;
-                // Negation applies to boolean result only, not score
                 Ok((ok ^ negate, score, scored))
             }
         }
     }
 
+    fn eval_size(
+        &self, op: Ordering, bytes: u64, weight: Option<Weight>, msg: &Message,
+    ) -> EngineResult<(bool, f64, bool)> {
+        let size = msg.len() as u64;
+        let matched = match op {
+            Ordering::Less => size < bytes,
+            Ordering::Greater => size > bytes,
+            Ordering::Equal => size == bytes,
+        };
+
+        if self.verbose {
+            let sym = match op {
+                Ordering::Less => '<',
+                Ordering::Greater => '>',
+                Ordering::Equal => '=',
+            };
+            log::info!(
+                "{} on {}{}",
+                if matched { "Match" } else { "No match" },
+                sym,
+                bytes
+            );
+        }
+
+        let Some(wt) = weight else {
+            return Ok((matched, 0.0, false));
+        };
+
+        // Weighted size: w * (M/L)^x or w * (L/M)^x
+        let ratio = match op {
+            Ordering::Greater => size as f64 / bytes as f64,
+            Ordering::Less => bytes as f64 / size.max(1) as f64,
+            Ordering::Equal => 1.0,
+        };
+        let score = wt.w * ratio.powf(wt.x);
+        Ok((true, score, true))
+    }
+
+    fn eval_shell(
+        &mut self, cmd: &str, weight: Option<Weight>, recipe: &Recipe,
+        msg: &Message,
+    ) -> EngineResult<(bool, f64, bool)> {
+        let expanded = self.expand(cmd);
+        let text = self.grep_text(msg, &recipe.flags);
+        let ok = self.run_shell(&expanded, text.as_bytes())?;
+
+        if self.verbose {
+            log::info!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
+        }
+
+        let Some(wt) = weight else {
+            return Ok((ok, 0.0, false));
+        };
+
+        // Weighted shell: success = w, failure = x
+        let score = if ok { wt.w } else { wt.x };
+        Ok((true, score, true))
+    }
+
     fn eval_regex(
-        &mut self, pattern: &str, negate: bool, recipe: &Recipe, msg: &Message,
+        &mut self, pattern: &str, negate: bool, weight: Option<Weight>,
+        recipe: &Recipe, msg: &Message,
     ) -> EngineResult<(bool, f64, bool)> {
         let text = self.grep_text(msg, &recipe.flags);
         let expanded = self.expand(pattern);
         let case_insens = !recipe.flags.case;
         let matcher = Matcher::new(&expanded, case_insens)?;
-        let result = matcher.exec(&text);
 
-        if result.matched
-            && let Some(cap) = result.capture
-        {
-            self.set_var("MATCH", cap);
-        }
+        let Some(wt) = weight else {
+            let result = matcher.exec(&text);
+            if result.matched
+                && let Some(cap) = result.capture
+            {
+                self.set_var("MATCH", cap);
+            }
+            let matched = result.matched ^ negate;
+            if self.verbose {
+                log::info!(
+                    "{} on \"{}\"",
+                    if matched { "Match" } else { "No match" },
+                    pattern
+                );
+            }
+            return Ok((matched, 0.0, false));
+        };
 
-        let matched = result.matched ^ negate;
+        // Weighted regex: count matches and compute score
+        let count = matcher.count_matches(&text);
+        let score = compute_weighted_score(wt, count);
+
         if self.verbose {
             log::info!(
-                "{} on \"{}\"",
-                if matched { "Match" } else { "No match" },
+                "Score {} ({} matches) on \"{}\"",
+                score,
+                count,
                 pattern
             );
         }
-        Ok((matched, 0.0, false))
+
+        Ok((true, score, true))
     }
 
     fn eval_variable(
-        &mut self, name: &str, pattern: &str, recipe: &Recipe, msg: &Message,
+        &mut self, name: &str, pattern: &str, weight: Option<Weight>,
+        recipe: &Recipe, msg: &Message,
     ) -> EngineResult<(bool, f64, bool)> {
         let text = self.get_variable_text(name, msg).into_owned();
         let expanded = self.expand(pattern);
         let case_insens = !recipe.flags.case;
         let matcher = Matcher::new(&expanded, case_insens)?;
-        let result = matcher.exec(&text);
 
-        if result.matched
-            && let Some(cap) = result.capture
-        {
-            self.set_var("MATCH", cap);
-        }
+        let Some(wt) = weight else {
+            let result = matcher.exec(&text);
+            if result.matched
+                && let Some(cap) = result.capture
+            {
+                self.set_var("MATCH", cap);
+            }
+            if self.verbose {
+                log::info!(
+                    "{} on {} ?? {}",
+                    if result.matched { "Match" } else { "No match" },
+                    name,
+                    pattern
+                );
+            }
+            return Ok((result.matched, 0.0, false));
+        };
+
+        let count = matcher.count_matches(&text);
+        let score = compute_weighted_score(wt, count);
 
         if self.verbose {
             log::info!(
-                "{} on {} ?? {}",
-                if result.matched { "Match" } else { "No match" },
+                "Score {} ({} matches) on {} ?? {}",
+                score,
+                count,
                 name,
                 pattern
             );
         }
-        Ok((result.matched, 0.0, false))
+
+        Ok((true, score, true))
     }
 
     /// Get text to grep based on H/B flags.
@@ -379,6 +494,10 @@ where
     fn perform_action(
         &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
+        // Acquire lockfile if specified
+        let lockpath = self.resolve_lockfile(recipe);
+        let _guard = lockpath.as_ref().and_then(|p| LockGuard::acquire(p));
+
         match &recipe.action {
             Action::Folder(path) => {
                 let path_str = path.to_string_lossy();
@@ -395,6 +514,24 @@ where
                 self.forward(recipe, msg, &expanded)
             }
             Action::Nested(items) => self.process_items(items, msg, state),
+        }
+    }
+
+    /// Resolve the lockfile path for a recipe.
+    fn resolve_lockfile(&self, recipe: &Recipe) -> Option<String> {
+        let lock = recipe.lockfile.as_ref()?;
+        if lock.is_empty() {
+            // Auto-generate lockfile from action
+            match &recipe.action {
+                Action::Folder(path) => {
+                    let path_str = path.to_string_lossy();
+                    let expanded = self.expand(&path_str);
+                    Some(format!("{}.lock", expanded))
+                }
+                _ => None,
+            }
+        } else {
+            Some(self.expand(lock))
         }
     }
 
@@ -535,6 +672,20 @@ where
     }
 }
 
+/// Compute weighted score from count of matches.
+/// Formula: w * (x^n - 1) / (x - 1) when x != 1, or w * n when x == 1.
+fn compute_weighted_score(wt: Weight, n: usize) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    let n = n as f64;
+    if (wt.x - 1.0).abs() < 1e-10 {
+        wt.w * n
+    } else {
+        wt.w * (wt.x.powf(n) - 1.0) / (wt.x - 1.0)
+    }
+}
+
 /// Skip mbox From_ line if present.
 fn skip_from_line(data: &[u8]) -> &[u8] {
     if data.starts_with(b"From ")
@@ -543,4 +694,29 @@ fn skip_from_line(data: &[u8]) -> &[u8] {
         return &data[pos + 1..];
     }
     data
+}
+
+/// RAII guard for recipe lockfiles. Releases lock on drop.
+struct LockGuard {
+    path: String,
+}
+
+impl LockGuard {
+    fn acquire(path: &str) -> Option<Self> {
+        match locking::create_lock(Path::new(path)) {
+            Ok(()) => Some(Self {
+                path: path.to_string(),
+            }),
+            Err(e) => {
+                log::warn!("failed to acquire lock {}: {}", path, e);
+                None
+            }
+        }
+    }
+}
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        let _ = locking::remove_lock(Path::new(&self.path));
+    }
 }

@@ -106,9 +106,15 @@ impl Recipe {
     }
 }
 
-/// An rcfile item: either a variable assignment or a recipe
+/// An rcfile item: variable assignment, recipe, or include directive.
 #[derive(Debug, Clone)]
 pub enum Item {
+    /// Variable assignment (NAME=value).
     Assign { name: String, value: String },
+    /// A recipe block.
     Recipe(Recipe),
+    /// Include an rcfile (INCLUDERC assignment).
+    Include(String),
+    /// Switch to a different rcfile (SWITCHRC assignment).
+    Switch(String),
 }

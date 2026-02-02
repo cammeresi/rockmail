@@ -94,6 +94,11 @@ impl Matcher {
             capture,
         }
     }
+
+    /// Count all non-overlapping matches in text. Used for weighted scoring.
+    pub fn count_matches(&self, text: &str) -> usize {
+        self.regex.find_iter(text).count()
+    }
 }
 
 /// Compile a procmail pattern to a Rust regex pattern.

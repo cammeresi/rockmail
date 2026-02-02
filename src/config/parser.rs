@@ -108,6 +108,13 @@ impl<'a> Parser<'a> {
             let name = line[..eq].trim();
             let value = line[eq + 1..].trim();
             if is_var_name(name) {
+                // Check for special directives
+                if name == "INCLUDERC" {
+                    return Some(Item::Include(value.to_string()));
+                }
+                if name == "SWITCHRC" {
+                    return Some(Item::Switch(value.to_string()));
+                }
                 return Some(Item::Assign {
                     name: name.to_string(),
                     value: value.to_string(),
@@ -117,6 +124,10 @@ impl<'a> Parser<'a> {
             // Unset: just the variable name
             let name = line.trim();
             if is_var_name(name) {
+                // SWITCHRC without value aborts processing
+                if name == "SWITCHRC" {
+                    return Some(Item::Switch(String::new()));
+                }
                 return Some(Item::Assign {
                     name: name.to_string(),
                     value: String::new(),
