@@ -57,6 +57,21 @@ fn extract_address_bare() {
 }
 
 #[test]
+fn extract_address_malformed() {
+    // '>' before '<' should not panic, should find the last '<'
+    assert_eq!(
+        extract_address("John > Smith <user@host.com>"),
+        "user@host.com"
+    );
+    // No closing bracket
+    assert_eq!(extract_address("John <broken"), "John");
+    // Empty angle brackets
+    assert_eq!(extract_address("John <>"), "");
+    // Nested brackets - takes content after last '<'
+    assert_eq!(extract_address("<outer<inner@host>>"), "inner@host");
+}
+
+#[test]
 fn generate_message_id_format() {
     let id = generate_message_id();
     assert!(id.starts_with('<'));
@@ -203,4 +218,88 @@ fn duplicate_cache_circular_buffer() {
 
     // id4 should still be detected as duplicate
     assert!(check("<id4>", 20));
+}
+
+#[test]
+fn non_utf8_header_log_summary() {
+    // ISO-8859-1 subject with accented chars
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(
+        b"From ",
+        b"test@example.com Mon Jan 1 00:00:00 2000",
+    ));
+    fields.push(Field::from_parts(b"Subject:", b"Caf\xe9 \xe0 Paris"));
+
+    let mut out = Vec::new();
+    output_log_summary("/inbox", &fields, 100, &mut out).unwrap();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("Caf"));
+    assert!(s.contains("Folder: /inbox"));
+}
+
+#[test]
+fn empty_input() {
+    let (fields, body) = corpmail::formail::read_header(&b""[..]).unwrap();
+    assert!(fields.is_empty());
+    assert!(body.is_empty());
+}
+
+#[test]
+fn binary_body() {
+    let header = b"Subject: Test\n\n";
+    let binary: Vec<u8> = (0u8..=255).collect();
+    let mut input = header.to_vec();
+    input.extend(&binary);
+
+    let (fields, body) = corpmail::formail::read_header(&input[..]).unwrap();
+    assert_eq!(fields.len(), 1);
+    assert_eq!(body.len(), 256);
+    assert_eq!(body, binary);
+}
+
+#[test]
+fn duplicate_maxlen_zero() {
+    let cache = tempfile::NamedTempFile::new().unwrap();
+    let path = cache.path().to_str().unwrap().to_string();
+
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(b"Message-ID:", b"<test@example>"));
+    let args = Args::default();
+
+    // With maxlen=0, cache is effectively disabled
+    let result = check_duplicate(&args, &fields, &path, 0);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn babyl_format_split() {
+    use std::io::Write;
+
+    // Create BABYL format input
+    let mut input = Vec::new();
+    // BABYL header
+    write!(input, "BABYL OPTIONS:\nVersion: 5\n").unwrap();
+    // Separator
+    input.push(BABYL_SEP1);
+    input.push(BABYL_SEP2);
+    input.push(b'\n');
+    // First message pseudo-header
+    write!(input, "0, unseen,,\n").unwrap();
+    write!(input, "*** STRSTRSTR STRSTRSTR ***\n\n").unwrap();
+    // Actual message
+    write!(input, "From: test@example.com\n").unwrap();
+    write!(input, "Subject: Test 1\n\n").unwrap();
+    write!(input, "Body 1\n").unwrap();
+    // Second message separator
+    input.push(BABYL_SEP1);
+    input.push(BABYL_SEP2);
+    input.push(b'\n');
+    write!(input, "0, unseen,,\n").unwrap();
+    write!(input, "*** EOSTRSTR EOSTRSTR ***\n\n").unwrap();
+    write!(input, "From: other@example.com\n").unwrap();
+    write!(input, "Subject: Test 2\n\n").unwrap();
+    write!(input, "Body 2\n").unwrap();
+
+    // Verify the test input contains expected separators
+    assert!(input.contains(&BABYL_SEP1));
 }

@@ -3,10 +3,12 @@
 //! Converts mail to mailbox format, performs From_ escaping, generates
 //! auto-reply headers, header manipulation, and mailbox/digest splitting.
 
-use std::io::{self, BufRead, Read, Write};
-use std::process::{Command, ExitCode, Stdio};
+use std::fs::OpenOptions;
+use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
+use std::process::{Child, Command, ExitCode, Stdio};
 
 use clap::Parser;
+use nix::fcntl::{Flock, FlockArg};
 
 use corpmail::formail::{Field, FieldList, read_header};
 use corpmail::util;
@@ -66,9 +68,9 @@ struct Args {
     #[arg(short = 'm', value_name = "minfields")]
     minfields: Option<usize>,
 
-    /// Don't wait for programs (parallel split), optional max procs
-    #[arg(short = 'n', value_name = "maxprocs")]
-    nowait: Option<Option<usize>>,
+    /// Don't wait for programs (parallel split), optional max procs (default 4)
+    #[arg(short = 'n', num_args = 0..=1, default_missing_value = "4")]
+    nowait: Option<usize>,
 
     /// Quotation prefix for From_ escaping (default ">")
     #[arg(short = 'p', value_name = "prefix")]
@@ -137,7 +139,6 @@ struct Args {
 }
 
 fn main() -> ExitCode {
-    // Handle special +N and -N arguments before clap parsing
     let args: Vec<String> = std::env::args().collect();
     let (skip, total, rest) = parse_skip_total(&args);
 
@@ -184,15 +185,15 @@ fn parse_skip_total(
             i += 1;
             continue;
         }
-        if arg.starts_with('-') && !arg.starts_with("--") && arg.len() > 1 {
-            let c = arg.chars().nth(1).unwrap();
-            if c.is_ascii_digit()
-                && let Ok(v) = arg[1..].parse::<usize>()
-            {
-                total = Some(v);
-                i += 1;
-                continue;
-            }
+        if let Some(rest) = arg.strip_prefix('-')
+            && !rest.starts_with('-')
+            && let Some(c) = rest.chars().next()
+            && c.is_ascii_digit()
+            && let Ok(v) = arg[1..].parse::<usize>()
+        {
+            total = Some(v);
+            i += 1;
+            continue;
         }
         break;
     }
@@ -202,32 +203,25 @@ fn parse_skip_total(
 }
 
 fn run(args: Args) -> io::Result<i32> {
-    // Split mode handles input differently
     if args.split.is_some() {
         return run_split(args);
     }
 
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
-
-    // Read header from stdin
     let (mut fields, body) = read_header(&mut stdin)?;
 
-    // Duplicate detection
+    // 0 = duplicate, 1 = unique per procmail convention
     if let Some(ref dup_args) = args.duplicate
         && dup_args.len() >= 2
     {
         let maxlen: usize = dup_args[0].parse().unwrap_or(8192);
-        let cache_path = &dup_args[1];
-        let is_dup = check_duplicate(&args, &fields, cache_path, maxlen)?;
-        if args.split.is_none() {
-            // Not splitting - exit with status based on duplicate
-            return Ok(if is_dup { 0 } else { 1 });
-        }
-        // If splitting and duplicate, suppress output (handled elsewhere)
+        let path = &dup_args[1];
+        let dup = check_duplicate(&args, &fields, path, maxlen)?;
+        let code = if dup { util::EX_OK } else { 1 };
+        return Ok(code as i32);
     }
 
-    // Reply mode generates auto-reply headers
     if args.reply {
         let reply = generate_reply(&args, &fields);
         reply.write_to(&mut stdout)?;
@@ -246,16 +240,11 @@ fn run(args: Args) -> io::Result<i32> {
         return Ok(util::EX_OK as i32);
     }
 
-    // Apply header operations
     process_headers(&args, &mut fields)?;
 
-    // Log summary mode - output summary instead of message
     if let Some(ref folder) = args.log {
-        // Calculate total message length
         let mut total: usize = fields.iter().map(|f| f.len()).sum();
-        total += 1; // blank line after header
-        total += body.len();
-        // Read rest of stdin to get full length
+        total += 1 + body.len();
         let mut rest = Vec::new();
         stdin.read_to_end(&mut rest)?;
         total += rest.len();
@@ -264,17 +253,13 @@ fn run(args: Args) -> io::Result<i32> {
         return Ok(util::EX_OK as i32);
     }
 
-    // Determine if we need to add From_ line
     let need_from = !args.force
         && !fields.is_empty()
         && !fields.iter().next().is_some_and(|f| f.is_from_line());
 
-    // Output
     if !args.extract.is_empty() || !args.extract_keep.is_empty() {
-        // Extract mode - just output matching fields
         output_extracted(&args, &fields, &mut stdout)?;
     } else {
-        // Normal mode - output headers
         if need_from {
             let from = generate_from_line(&fields);
             stdout.write_all(&from)?;
@@ -283,7 +268,6 @@ fn run(args: Args) -> io::Result<i32> {
         fields.write_to(&mut stdout)?;
         stdout.write_all(b"\n")?;
 
-        // Output body unless extracting without -k
         if args.keep_body
             || (args.extract.is_empty() && args.extract_keep.is_empty())
         {
@@ -302,7 +286,6 @@ fn run(args: Args) -> io::Result<i32> {
 }
 
 fn process_headers(args: &Args, fields: &mut FieldList) -> io::Result<()> {
-    // -I: delete matching fields, then add new
     for h in &args.delete_insert {
         let (name, value) = parse_header_arg(h);
         fields.remove_all(name.as_bytes());
@@ -311,7 +294,6 @@ fn process_headers(args: &Args, fields: &mut FieldList) -> io::Result<()> {
         }
     }
 
-    // -i: rename matching fields to Old-*, then add new
     for h in &args.rename_insert {
         let (name, value) = parse_header_arg(h);
         fields.prepend_old(name.as_bytes());
@@ -320,29 +302,28 @@ fn process_headers(args: &Args, fields: &mut FieldList) -> io::Result<()> {
         }
     }
 
-    // -R: rename fields
-    let renames: Vec<_> = args.rename.chunks(2).collect();
-    for pair in renames {
-        if pair.len() == 2 {
-            fields.rename_all(pair[0].as_bytes(), pair[1].as_bytes());
-        }
+    if !args.rename.len().is_multiple_of(2) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "-R requires pairs of old and new field names",
+        ));
+    }
+    for pair in args.rename.chunks(2) {
+        fields.rename_all(pair[0].as_bytes(), pair[1].as_bytes());
     }
 
-    // -u: keep first occurrence
     for h in &args.first_uniq {
         fields.keep_first(h.as_bytes());
     }
 
-    // -U: keep last occurrence
     for h in &args.last_uniq {
         fields.keep_last(h.as_bytes());
     }
 
-    // -a: add if not present
     for h in &args.add_if_not {
         let (name, value) = parse_header_arg(h);
         if fields.find(name.as_bytes()).is_none() {
-            // Special case: Message-ID: with no value generates unique ID
+            // Message-ID with no value generates unique ID
             if (name.eq_ignore_ascii_case("Message-ID")
                 || name.eq_ignore_ascii_case("Resent-Message-ID"))
                 && value.is_empty()
@@ -356,20 +337,17 @@ fn process_headers(args: &Args, fields: &mut FieldList) -> io::Result<()> {
         }
     }
 
-    // -A: add always
     for h in &args.add_always {
         let (name, value) = parse_header_arg(h);
         fields.push(Field::from_parts(name.as_bytes(), value.as_bytes()));
     }
 
-    // -c: concatenate continuation lines
     if args.concatenate {
         for f in fields.iter_mut() {
             f.concatenate();
         }
     }
 
-    // -z: zap whitespace
     if args.zap {
         fields.zap_whitespace();
     }
@@ -405,72 +383,74 @@ fn output_extracted(
 }
 
 fn output_body(
-    initial: &[u8], reader: &mut impl Read, out: &mut impl Write, escape: bool,
-    prefix: &str,
+    initial: &[u8], reader: &mut impl BufRead, out: &mut impl Write,
+    escape: bool, prefix: &str,
 ) -> io::Result<()> {
-    let mut buf = initial.to_vec();
-    reader.read_to_end(&mut buf)?;
-
     if escape {
-        for line in buf.split_inclusive(|&b| b == b'\n') {
+        for line in initial.split_inclusive(|&b| b == b'\n') {
             if line.starts_with(b"From ") {
                 out.write_all(prefix.as_bytes())?;
             }
             out.write_all(line)?;
         }
     } else {
-        out.write_all(&buf)?;
+        out.write_all(initial)?;
+    }
+
+    let mut line = Vec::with_capacity(1024);
+    loop {
+        line.clear();
+        let n = reader.read_until(b'\n', &mut line)?;
+        if n == 0 {
+            break;
+        }
+        if escape && line.starts_with(b"From ") {
+            out.write_all(prefix.as_bytes())?;
+        }
+        out.write_all(&line)?;
     }
 
     Ok(())
 }
 
-/// Output log summary in procmail format.
 fn output_log_summary(
-    folder: &str, fields: &FieldList, total_len: usize, out: &mut impl Write,
+    folder: &str, fields: &FieldList, len: usize, out: &mut impl Write,
 ) -> io::Result<()> {
-    const TAB_WIDTH: usize = 8;
-    const LEN_OFFSET: usize = 64; // 8 * 8 tab stops
-    const MAX_SUBJECT: usize = 78;
+    const TAB: usize = 8;
+    const OFFSET: usize = 64;
+    const MAX_SUBJ: usize = 78;
 
-    // Output From_ line if present
     if let Some(f) = fields.iter().next()
         && f.is_from_line()
     {
         out.write_all(&f.text)?;
     }
 
-    // Output Subject (truncated)
-    if let Some(subj) = fields.find(b"Subject")
-        && let Ok(s) = std::str::from_utf8(subj.value())
-    {
+    if let Some(subj) = fields.find(b"Subject") {
+        let s = String::from_utf8_lossy(subj.value());
         let s = s.trim().replace('\t', " ");
-        let truncated = if s.len() > MAX_SUBJECT {
-            &s[..MAX_SUBJECT]
+        let s = if s.len() > MAX_SUBJ {
+            &s[..MAX_SUBJ]
         } else {
             &s
         };
         out.write_all(b" ")?;
-        out.write_all(truncated.as_bytes())?;
+        out.write_all(s.as_bytes())?;
         out.write_all(b"\n")?;
     }
 
-    // Output folder line: "  Folder: name    size"
     let prefix = "  Folder: ";
     out.write_all(prefix.as_bytes())?;
     out.write_all(folder.as_bytes())?;
 
-    // Calculate tab padding
     let mut col = prefix.len() + folder.len();
-    col -= col % TAB_WIDTH;
-    while col < LEN_OFFSET {
+    col -= col % TAB;
+    while col < OFFSET {
         out.write_all(b"\t")?;
-        col += TAB_WIDTH;
+        col += TAB;
     }
 
-    // Output size
-    writeln!(out, "{total_len}")?;
-
+    writeln!(out, "{len}")?;
     Ok(())
 }
 
@@ -516,13 +496,11 @@ fn find_sender(fields: &FieldList) -> Option<&str> {
 }
 
 fn extract_address(s: &str) -> &str {
-    // Handle "Name <addr>" format
-    if let Some(start) = s.find('<')
-        && let Some(end) = s.find('>')
+    if let Some(start) = s.rfind('<')
+        && let Some(end) = s[start..].find('>')
     {
-        return &s[start + 1..end];
+        return &s[start + 1..start + end];
     }
-    // Return first word
     s.split_whitespace().next().unwrap_or("")
 }
 
@@ -552,28 +530,24 @@ fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
 
     // Subject with Re: prefix
     if let Some(subj) = orig.find(b"Subject") {
-        let val = subj.value();
-        if let Ok(s) = std::str::from_utf8(val) {
-            let s = s.trim();
-            let new_subj = if s.to_ascii_lowercase().starts_with("re:") {
-                s.to_string()
-            } else {
-                format!("Re: {}", s)
-            };
-            reply.push(Field::from_parts(b"Subject:", new_subj.as_bytes()));
-        }
+        let s = String::from_utf8_lossy(subj.value());
+        let s = s.trim();
+        let new_subj = if s.to_ascii_lowercase().starts_with("re:") {
+            s.to_string()
+        } else {
+            format!("Re: {}", s)
+        };
+        reply.push(Field::from_parts(b"Subject:", new_subj.as_bytes()));
     }
 
     // References: combine old References + old Message-ID
     let mut refs = String::new();
-    if let Some(f) = orig.find(b"References")
-        && let Ok(s) = std::str::from_utf8(f.value())
-    {
+    if let Some(f) = orig.find(b"References") {
+        let s = String::from_utf8_lossy(f.value());
         refs.push_str(s.trim());
     }
-    if let Some(f) = orig.find(b"Message-ID")
-        && let Ok(s) = std::str::from_utf8(f.value())
-    {
+    if let Some(f) = orig.find(b"Message-ID") {
+        let s = String::from_utf8_lossy(f.value());
         if !refs.is_empty() {
             refs.push(' ');
         }
@@ -633,18 +607,16 @@ where
     let every = args.every || args.berkeley;
     let digest = args.digest || args.berkeley;
 
-    // Get FILENO width from environment
-    let fileno_base: i64 =
-        env.get("FILENO").and_then(|s| s.parse().ok()).unwrap_or(0);
-    let fileno_width = env.get("FILENO").map(|s| s.len()).unwrap_or(0);
+    let base: i64 = env.get("FILENO").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let width = env.get("FILENO").map(|s| s.len()).unwrap_or(0);
+    let mut pool = args.nowait.map(ProcessPool::new);
 
-    // Skip BABYL leader if -B
     if args.berkeley {
         skip_babyl_leader(&mut reader)?;
     }
 
     let mut msg_num = 0usize;
-    let mut output_count = 0usize;
+    let mut count = 0usize;
     let mut line = Vec::new();
     let mut msg = Vec::new();
     let mut pending_header = Vec::new();
@@ -657,18 +629,10 @@ where
         line.clear();
         let n = reader.read_until(b'\n', &mut line)?;
         if n == 0 {
-            // End of input - output last message
             if in_msg && !msg.is_empty() {
                 msg_num += 1;
-                if msg_num > skip && total.is_none_or(|t| output_count < t) {
-                    output_message(
-                        &args,
-                        cmd,
-                        &msg,
-                        output_count,
-                        fileno_base,
-                        fileno_width,
-                    )?;
+                if msg_num > skip && total.is_none_or(|t| count < t) {
+                    output_message(&mut pool, cmd, &msg, count, base, width)?;
                 }
             }
             break;
@@ -682,19 +646,12 @@ where
                 msg_num += 1;
                 if msg_num > skip {
                     if let Some(t) = total
-                        && output_count >= t
+                        && count >= t
                     {
                         break;
                     }
-                    output_message(
-                        &args,
-                        cmd,
-                        &msg,
-                        output_count,
-                        fileno_base,
-                        fileno_width,
-                    )?;
-                    output_count += 1;
+                    output_message(&mut pool, cmd, &msg, count, base, width)?;
+                    count += 1;
                 }
             }
             // Skip until end of BABYL pseudo header
@@ -729,19 +686,12 @@ where
                 msg_num += 1;
                 if msg_num > skip {
                     if let Some(t) = total
-                        && output_count >= t
+                        && count >= t
                     {
                         break;
                     }
-                    output_message(
-                        &args,
-                        cmd,
-                        &msg,
-                        output_count,
-                        fileno_base,
-                        fileno_width,
-                    )?;
-                    output_count += 1;
+                    output_message(&mut pool, cmd, &msg, count, base, width)?;
+                    count += 1;
                 }
             }
 
@@ -795,6 +745,10 @@ where
         last_blank = line == b"\n" || line == b"\r\n";
     }
 
+    if let Some(mut p) = pool {
+        p.wait_all()?;
+    }
+
     Ok(util::EX_OK as i32)
 }
 
@@ -830,20 +784,51 @@ fn skip_babyl_header<R: BufRead>(reader: &mut R) -> io::Result<()> {
     Ok(())
 }
 
+struct ProcessPool {
+    children: Vec<Child>,
+    max: usize,
+}
+
+impl ProcessPool {
+    fn new(max: usize) -> Self {
+        Self {
+            children: Vec::new(),
+            max,
+        }
+    }
+
+    fn wait_one(&mut self) -> io::Result<()> {
+        if let Some(mut child) = self.children.pop() {
+            child.wait()?;
+        }
+        Ok(())
+    }
+
+    fn wait_all(&mut self) -> io::Result<()> {
+        while !self.children.is_empty() {
+            self.wait_one()?;
+        }
+        Ok(())
+    }
+
+    fn spawn(&mut self, child: Child) -> io::Result<()> {
+        while self.children.len() >= self.max {
+            self.wait_one()?;
+        }
+        self.children.push(child);
+        Ok(())
+    }
+}
+
 fn output_message(
-    args: &Args, cmd: &[String], msg: &[u8], num: usize, fileno_base: i64,
-    fileno_width: usize,
+    pool: &mut Option<ProcessPool>, cmd: &[String], msg: &[u8], num: usize,
+    base: i64, width: usize,
 ) -> io::Result<()> {
     if cmd.is_empty() {
-        // No command - output to stdout
         io::stdout().write_all(msg)?;
     } else {
-        // Set FILENO and pipe to command
-        let fileno = format!(
-            "{:0width$}",
-            fileno_base + num as i64,
-            width = fileno_width.max(1)
-        );
+        let fileno =
+            format!("{:0width$}", base + num as i64, width = width.max(1));
         let mut child = Command::new(&cmd[0])
             .args(&cmd[1..])
             .env("FILENO", &fileno)
@@ -854,8 +839,11 @@ fn output_message(
             stdin.write_all(msg)?;
         }
 
-        if args.nowait.is_none() {
-            child.wait()?;
+        match pool {
+            Some(p) => p.spawn(child)?,
+            None => {
+                child.wait()?;
+            }
         }
     }
     Ok(())
@@ -870,10 +858,6 @@ fn output_message(
 fn check_duplicate(
     args: &Args, fields: &FieldList, cache: &str, maxlen: usize,
 ) -> io::Result<bool> {
-    use std::fs::OpenOptions;
-    use std::io::{Seek, SeekFrom};
-
-    // Get the key to check - Message-ID normally, sender address with -r
     let key = if args.reply {
         find_reply_address(args, fields).unwrap_or_default()
     } else {
@@ -884,86 +868,73 @@ fn check_duplicate(
             .unwrap_or_default()
     };
 
-    // Strip leading spaces (like original)
     let key = key.trim_start();
     if key.is_empty() {
         return Ok(false);
     }
 
-    // Open or create cache file
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .open(cache)?;
 
-    // Read existing cache, limited to maxlen
-    let mut contents = vec![0u8; maxlen];
-    let bytes_read = file.read(&mut contents)?;
-    contents.truncate(bytes_read);
+    // Lock file to prevent concurrent access corruption
+    let mut file = Flock::lock(file, FlockArg::LockExclusive)
+        .map_err(|(_, e)| io::Error::other(e))?;
 
-    // Search for key and find insertion point.
-    // The original algorithm: read entries until past maxlen quota.
-    // If we find an empty entry (end marker), record its position.
-    // If we hit maxlen without finding end marker, insert at 0.
-    let mut is_dup = false;
-    let mut insert_offset: Option<usize> = None;
+    let mut contents = vec![0u8; maxlen];
+    let n = file.read(&mut contents)?;
+    contents.truncate(n);
+
+    let mut dup = false;
+    let mut insert: Option<usize> = None;
 
     let mut pos = 0;
     while pos < contents.len() {
-        let entry_start = pos;
-        // Find end of this entry
+        let start = pos;
         while pos < contents.len() && contents[pos] != 0 {
             pos += 1;
         }
-        let entry = &contents[entry_start..pos];
+        let entry = &contents[start..pos];
 
         if entry.is_empty() {
-            // Empty entry = end of buffer marker
-            if insert_offset.is_none() {
-                insert_offset = Some(entry_start);
+            if insert.is_none() {
+                insert = Some(start);
             }
         } else if entry == key.as_bytes() {
-            is_dup = true;
+            dup = true;
             break;
         }
 
-        // Skip the null terminator
         if pos < contents.len() {
             pos += 1;
         }
     }
 
-    if !is_dup {
-        // Determine insertion position
-        let offset = if let Some(off) = insert_offset {
-            // Found end marker, insert there
+    if !dup {
+        let offset = if let Some(off) = insert {
             off
-        } else if bytes_read >= maxlen {
-            // Read full buffer but no end marker - wrap to start
+        } else if n >= maxlen {
             0
         } else {
-            // File hasn't filled up yet, append at EOF
-            bytes_read
+            n
         };
 
-        // Check if new entry would exceed maxlen, if so wrap to 0
-        let needed = key.len() + 2; // key + null + end marker
-        let final_offset = if offset + needed > maxlen { 0 } else { offset };
+        let needed = key.len() + 2;
+        let offset = if offset + needed > maxlen { 0 } else { offset };
 
-        // Write key + null + end marker (null)
-        file.seek(SeekFrom::Start(final_offset as u64))?;
+        file.seek(SeekFrom::Start(offset as u64))?;
         file.write_all(key.as_bytes())?;
-        file.write_all(b"\0")?;
-        file.write_all(b"\0")?; // End of buffer marker
+        file.write_all(b"\0\0")?;
+        file.set_len((offset + needed) as u64)?;
     }
 
-    Ok(is_dup)
+    Ok(dup)
 }
 
 fn is_header_field(line: &[u8]) -> bool {
-    // Check if line looks like a header field (has colon, valid name)
     if line.starts_with(b"From ") {
         return true;
     }
@@ -978,14 +949,12 @@ fn is_header_field(line: &[u8]) -> bool {
     false
 }
 
-/// Find address to reply to.
 fn find_reply_address(args: &Args, fields: &FieldList) -> Option<String> {
-    // With -t (trust), use header sender (Reply-To, From)
-    // Without -t, use envelope sender (Return-Path, From_)
+    // -t uses header sender (Reply-To, From), else envelope (Return-Path,
+    // From_)
     if args.trust {
-        // Header reply order
-        const HEADER_FIELDS: &[&str] = &["Reply-To", "From", "Sender"];
-        for name in HEADER_FIELDS {
+        const FIELDS: &[&str] = &["Reply-To", "From", "Sender"];
+        for name in FIELDS {
             if let Some(f) = fields.find(name.as_bytes())
                 && let Ok(s) = std::str::from_utf8(f.value())
             {
@@ -996,7 +965,6 @@ fn find_reply_address(args: &Args, fields: &FieldList) -> Option<String> {
             }
         }
     } else {
-        // Envelope reply order
         if let Some(f) = fields.find(b"Return-Path")
             && let Ok(s) = std::str::from_utf8(f.value())
         {
@@ -1005,7 +973,6 @@ fn find_reply_address(args: &Args, fields: &FieldList) -> Option<String> {
                 return Some(addr.to_string());
             }
         }
-        // Check From_ line
         if let Some(f) = fields.iter().next()
             && f.is_from_line()
             && let Ok(s) = std::str::from_utf8(f.value())
@@ -1015,7 +982,6 @@ fn find_reply_address(args: &Args, fields: &FieldList) -> Option<String> {
                 return Some(addr.to_string());
             }
         }
-        // Fall back to From:
         if let Some(f) = fields.find(b"From")
             && let Ok(s) = std::str::from_utf8(f.value())
         {

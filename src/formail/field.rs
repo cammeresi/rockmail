@@ -1,6 +1,7 @@
 //! Header field handling for formail.
 
 use std::io::{BufRead, BufReader, Read};
+use std::mem;
 
 /// A parsed email header field.
 #[derive(Debug, Clone)]
@@ -339,7 +340,7 @@ pub fn read_header<R: Read>(
             }
 
             fields.push(Field {
-                text: buf.clone(),
+                text: mem::take(&mut buf),
                 name_len,
             });
         } else {
