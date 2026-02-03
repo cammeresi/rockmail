@@ -1,3 +1,5 @@
+use std::os::unix::fs::PermissionsExt;
+
 use super::*;
 use corpmail::variables::MockEnv;
 
@@ -115,7 +117,7 @@ fn find_rcfile_explicit() {
     };
     let files = vec![rc.to_string_lossy().into()];
     let result = find_rcfile(&files, &env, false).unwrap();
-    assert_eq!(result, Some(rc));
+    assert_eq!(result.map(|r| r.path), Some(rc));
 }
 
 #[test]
@@ -136,7 +138,7 @@ fn find_rcfile_default_procmailrc() {
         ..Default::default()
     };
     let result = find_rcfile(&[], &env, false).unwrap();
-    assert_eq!(result, Some(rc));
+    assert_eq!(result.map(|r| r.path), Some(rc));
 }
 
 #[test]
@@ -147,7 +149,7 @@ fn find_rcfile_no_default() {
         ..Default::default()
     };
     let result = find_rcfile(&[], &env, false).unwrap();
-    assert_eq!(result, None);
+    assert!(result.is_none());
 }
 
 #[test]
@@ -184,4 +186,119 @@ fn is_assignment_invalid() {
     assert!(!is_assignment("foo-bar=x"));
     assert!(!is_assignment("noequals"));
     assert!(!is_assignment(""));
+}
+
+#[test]
+fn security_rejects_world_writable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rc = tmp.path().join("test.rc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o666))
+        .unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let files = vec![rc.to_string_lossy().into()];
+    let result = find_rcfile(&files, &env, false);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("world-writable"));
+}
+
+#[test]
+fn security_rejects_group_writable_default() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rc = tmp.path().join(".procmailrc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o664))
+        .unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let result = find_rcfile(&[], &env, false);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("group-writable"));
+}
+
+#[test]
+fn security_allows_group_writable_explicit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rc = tmp.path().join("test.rc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o664))
+        .unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let files = vec![rc.to_string_lossy().into()];
+    let result = find_rcfile(&files, &env, false);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn security_accepts_safe_permissions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rc = tmp.path().join("test.rc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
+        .unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let files = vec![rc.to_string_lossy().into()];
+    let result = find_rcfile(&files, &env, false);
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_some());
+}
+
+#[test]
+fn dir_security_rejects_world_writable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let subdir = tmp.path().join("unsafe");
+    std::fs::create_dir(&subdir).unwrap();
+    std::fs::set_permissions(&subdir, std::fs::Permissions::from_mode(0o777))
+        .unwrap();
+
+    let rc = subdir.join("test.rc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
+        .unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let files = vec![rc.to_string_lossy().into()];
+    let result = find_rcfile(&files, &env, false);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("directory"));
+}
+
+#[test]
+fn dir_security_allows_sticky_world_writable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let subdir = tmp.path().join("sticky");
+    std::fs::create_dir(&subdir).unwrap();
+    std::fs::set_permissions(&subdir, std::fs::Permissions::from_mode(0o1777))
+        .unwrap();
+
+    let rc = subdir.join("test.rc");
+    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
+        .unwrap();
+
+    let env = ProcEnv {
+        home: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    let files = vec![rc.to_string_lossy().into()];
+    let result = find_rcfile(&files, &env, false);
+    assert!(result.is_ok());
 }

@@ -1,6 +1,6 @@
 //! Corpmail binary - autonomous mail processor (procmail replacement).
 
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -19,6 +19,15 @@ mod tests;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const ETC_PROCMAILRC: &str = "/etc/procmailrc";
+const MAIL_SPOOL: &str = "/var/mail";
+const ROOT_UID: u32 = 0;
+
+/// A validated rcfile with an open file handle.
+#[derive(Debug)]
+struct ValidatedRcfile {
+    path: PathBuf,
+    file: File,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -184,10 +193,10 @@ fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
     // Find user rcfile to use
     let rcfile = find_rcfile(&rcfiles, &penv, args.mailfilter)?;
 
-    if let Some(path) = rcfile {
-        let content = fs::read_to_string(&path)?;
+    if let Some(rc) = rcfile {
+        let content = read_file(rc.file)?;
         let items = config::parse(&content)?;
-        engine.set_var("_", &path.display().to_string());
+        engine.set_var("_", &rc.path.display().to_string());
 
         match engine.process(&items, &mut msg)? {
             Outcome::Delivered(_) => delivered = true,
@@ -207,11 +216,16 @@ fn process_etcrc(
     engine: &mut Engine<RealEnv>, msg: &mut Message,
 ) -> Result<Option<Outcome>, Box<dyn std::error::Error>> {
     let path = Path::new(ETC_PROCMAILRC);
-    if !path.exists() {
-        return Ok(None);
-    }
 
-    let content = fs::read_to_string(path)?;
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+
+    check_etcrc_security(&file, path)?;
+
+    let content = read_file(file)?;
     let items = config::parse(&content)?;
     engine.set_var("_", ETC_PROCMAILRC);
 
@@ -219,10 +233,48 @@ fn process_etcrc(
     Ok(Some(outcome))
 }
 
+/// Check that /etc/procmailrc has safe permissions.
+fn check_etcrc_security(
+    file: &File, path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let meta = file.metadata()?;
+    let mode = meta.mode();
+    let owner = meta.uid();
+
+    // Must be owned by root
+    if owner != ROOT_UID {
+        return Err(format!(
+            "system rcfile not owned by root: {}",
+            path.display()
+        )
+        .into());
+    }
+
+    // Must not be world writable
+    if mode & 0o002 != 0 {
+        return Err(format!(
+            "system rcfile is world-writable: {}",
+            path.display()
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
 /// Delivery mode: deliver to named recipient's mailbox.
 fn deliver_to_recipient(
     env: &ProcEnv, msg: &Message, recip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Validate recipient name to prevent path traversal
+    if recip.contains('/')
+        || recip.contains('\0')
+        || recip == ".."
+        || recip == "."
+    {
+        return Err("Invalid recipient name".into());
+    }
+
     // Look up recipient in passwd database
     let Some(user) = User::from_name(recip)? else {
         return Err(format!("Unknown user: {recip}").into());
@@ -234,13 +286,27 @@ fn deliver_to_recipient(
         return Err("Insufficient privileges".into());
     }
 
-    let dest = format!("/var/mail/{}", recip);
+    let dest = format!("{}/{}", MAIL_SPOOL, recip);
     let sender = msg.envelope_sender().unwrap_or(&env.logname);
     corpmail::delivery::mbox(Path::new(&dest), msg, sender)?;
     Ok(())
 }
 
 const MAX_MAIL_SIZE: u64 = 1024 * 1024 * 1024; // 1 GB
+const MAX_RCFILE_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
+
+fn read_file(mut file: File) -> io::Result<String> {
+    let meta = file.metadata()?;
+    if meta.len() > MAX_RCFILE_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "rcfile too large",
+        ));
+    }
+    let mut content = String::with_capacity(meta.len() as usize);
+    file.read_to_string(&mut content)?;
+    Ok(content)
+}
 
 fn read_mail() -> io::Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(64 * 1024);
@@ -292,7 +358,7 @@ fn build_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
     }
 
     e.maildir = format!("{}/Mail", e.home);
-    e.orgmail = format!("/var/mail/{}", e.logname);
+    e.orgmail = format!("{}/{}", MAIL_SPOOL, e.logname);
 
     // Set hostname
     if let Ok(name) = nix::unistd::gethostname() {
@@ -388,24 +454,22 @@ fn is_assignment(arg: &str) -> bool {
 
 fn find_rcfile(
     files: &[String], env: &ProcEnv, mailfilter: bool,
-) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+) -> Result<Option<ValidatedRcfile>, Box<dyn std::error::Error>> {
     let uid = nix::unistd::getuid().as_raw();
 
     // Command line rcfiles
     for f in files {
         let path = resolve_rcpath(f, env, mailfilter);
-        if path.exists() {
-            check_rcfile_security(&path, uid, false)?;
-            return Ok(Some(path));
+        if let Some(rc) = open_and_check(&path, uid, false)? {
+            return Ok(Some(rc));
         }
     }
 
     // Default: ~/.procmailrc
     if files.is_empty() && !mailfilter {
         let default = PathBuf::from(&env.home).join(".procmailrc");
-        if default.exists() {
-            check_rcfile_security(&default, uid, true)?;
-            return Ok(Some(default));
+        if let Some(rc) = open_and_check(&default, uid, true)? {
+            return Ok(Some(rc));
         }
     }
 
@@ -416,34 +480,67 @@ fn find_rcfile(
     Ok(None)
 }
 
-/// Check that an rcfile has safe permissions.
-fn check_rcfile_security(
+/// Open file and check security on the open handle to prevent TOCTOU.
+fn open_and_check(
     path: &Path, uid: u32, is_default: bool,
+) -> Result<Option<ValidatedRcfile>, Box<dyn std::error::Error>> {
+    // Check for symlinks before opening
+    let link_meta = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    if link_meta.file_type().is_symlink() {
+        return Err(format!("rcfile is a symlink: {}", path.display()).into());
+    }
+
+    let file = File::open(path)?;
+    check_rcfile_security(&file, path, uid, is_default)?;
+    Ok(Some(ValidatedRcfile {
+        path: path.to_path_buf(),
+        file,
+    }))
+}
+
+/// Check that an rcfile has safe permissions (using fstat on open handle).
+fn check_rcfile_security(
+    file: &File, path: &Path, uid: u32, is_default: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let meta = fs::metadata(path)?;
+    let meta = file.metadata()?;
     let mode = meta.mode();
     let owner = meta.uid();
 
     // Must be owned by user or root
-    if owner != uid && owner != 0 {
-        return Err(format!("Suspicious rcfile: {}", path.display()).into());
+    if owner != uid && owner != ROOT_UID {
+        return Err(format!(
+            "rcfile not owned by user or root: {}",
+            path.display()
+        )
+        .into());
     }
 
     // Must not be world writable
     if mode & 0o002 != 0 {
-        return Err(format!("Suspicious rcfile: {}", path.display()).into());
+        return Err(
+            format!("rcfile is world-writable: {}", path.display()).into()
+        );
     }
 
     // Default rcfile must not be group writable
     if is_default && mode & 0o020 != 0 {
-        return Err(format!("Suspicious rcfile: {}", path.display()).into());
+        return Err(
+            format!("rcfile is group-writable: {}", path.display()).into()
+        );
     }
 
-    // Check parent directory (for absolute paths)
-    if path.is_absolute()
-        && let Some(parent) = path.parent()
-    {
-        check_dir_security(parent)?;
+    // Check all ancestor directories (for absolute paths)
+    if path.is_absolute() {
+        for ancestor in path.ancestors().skip(1) {
+            if ancestor.as_os_str().is_empty() {
+                break;
+            }
+            check_dir_security(ancestor)?;
+        }
     }
 
     Ok(())
@@ -454,9 +551,11 @@ fn check_dir_security(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let meta = fs::metadata(path)?;
     let mode = meta.mode();
 
-    // World writable + executable without sticky bit is unsafe
-    if mode & 0o003 == 0o003 && mode & 0o1000 == 0 {
-        return Err(format!("Suspicious directory: {}", path.display()).into());
+    // World writable without sticky bit is unsafe
+    if mode & 0o002 != 0 && mode & 0o1000 == 0 {
+        return Err(
+            format!("directory is world-writable: {}", path.display()).into()
+        );
     }
 
     Ok(())
