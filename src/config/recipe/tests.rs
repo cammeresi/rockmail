@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use super::*;
 
 #[test]
@@ -35,8 +37,6 @@ fn flags_h_resets_default() {
 
 #[test]
 fn is_delivering() {
-    use std::path::PathBuf;
-
     let folder = Recipe::new(
         Flags::new(),
         None,

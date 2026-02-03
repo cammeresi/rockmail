@@ -201,3 +201,51 @@ fn weighted_shell() {
     let w = weight.unwrap();
     assert!((w.w - 100.0).abs() < 0.001);
 }
+
+#[test]
+fn malformed_weight_double_dot() {
+    // 1..2^3 should be treated as regex, not weight
+    let c = Condition::parse("1..2^3 pattern").unwrap();
+    let Condition::Regex {
+        pattern, weight, ..
+    } = c
+    else {
+        panic!("expected regex");
+    };
+    assert!(weight.is_none());
+    assert_eq!(pattern, "1..2^3 pattern");
+}
+
+#[test]
+fn malformed_weight_multiple_dots() {
+    let c = Condition::parse("1.2.3^4.5.6 pattern").unwrap();
+    let Condition::Regex {
+        pattern, weight, ..
+    } = c
+    else {
+        panic!("expected regex");
+    };
+    assert!(weight.is_none());
+    assert_eq!(pattern, "1.2.3^4.5.6 pattern");
+}
+
+#[test]
+fn weight_x_equals_one() {
+    let c = Condition::parse("5^1 pattern").unwrap();
+    let Condition::Regex { weight, .. } = c else {
+        panic!("expected regex");
+    };
+    let w = weight.unwrap();
+    assert!((w.x - 1.0).abs() < 0.001);
+}
+
+#[test]
+fn weight_negative_exponent() {
+    let c = Condition::parse("10^-2 pattern").unwrap();
+    let Condition::Regex { weight, .. } = c else {
+        panic!("expected regex");
+    };
+    let w = weight.unwrap();
+    assert!((w.w - 10.0).abs() < 0.001);
+    assert!((w.x - -2.0).abs() < 0.001);
+}

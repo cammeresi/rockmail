@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 
 use super::*;
 
@@ -273,8 +273,6 @@ fn duplicate_maxlen_zero() {
 
 #[test]
 fn babyl_format_split() {
-    use std::io::Write;
-
     // Create BABYL format input
     let mut input = Vec::new();
     // BABYL header
@@ -284,21 +282,21 @@ fn babyl_format_split() {
     input.push(BABYL_SEP2);
     input.push(b'\n');
     // First message pseudo-header
-    write!(input, "0, unseen,,\n").unwrap();
+    writeln!(input, "0, unseen,,").unwrap();
     write!(input, "*** STRSTRSTR STRSTRSTR ***\n\n").unwrap();
     // Actual message
-    write!(input, "From: test@example.com\n").unwrap();
+    writeln!(input, "From: test@example.com").unwrap();
     write!(input, "Subject: Test 1\n\n").unwrap();
-    write!(input, "Body 1\n").unwrap();
+    writeln!(input, "Body 1").unwrap();
     // Second message separator
     input.push(BABYL_SEP1);
     input.push(BABYL_SEP2);
     input.push(b'\n');
-    write!(input, "0, unseen,,\n").unwrap();
+    writeln!(input, "0, unseen,,").unwrap();
     write!(input, "*** EOSTRSTR EOSTRSTR ***\n\n").unwrap();
-    write!(input, "From: other@example.com\n").unwrap();
+    writeln!(input, "From: other@example.com").unwrap();
     write!(input, "Subject: Test 2\n\n").unwrap();
-    write!(input, "Body 2\n").unwrap();
+    writeln!(input, "Body 2").unwrap();
 
     // Verify the test input contains expected separators
     assert!(input.contains(&BABYL_SEP1));

@@ -1,4 +1,4 @@
-use corpmail::config::{Action, Condition, Flags, Item, Recipe, parse};
+use corpmail::config::{Action, Condition, Flags, Item, Recipe, Weight, parse};
 use std::cmp::Ordering;
 use std::fs;
 
@@ -157,6 +157,10 @@ fn format_flags(f: &Flags) -> String {
     parts.join(", ")
 }
 
+fn format_weight(w: Option<Weight>) -> String {
+    w.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x))
+}
+
 fn format_condition(c: &Condition) -> String {
     match c {
         Condition::Regex {
@@ -164,8 +168,7 @@ fn format_condition(c: &Condition) -> String {
             negate,
             weight,
         } => {
-            let prefix =
-                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
+            let prefix = format_weight(*weight);
             if *negate {
                 format!("{}NOT regex {:?}", prefix, pattern)
             } else {
@@ -173,8 +176,7 @@ fn format_condition(c: &Condition) -> String {
             }
         }
         Condition::Size { op, bytes, weight } => {
-            let prefix =
-                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
+            let prefix = format_weight(*weight);
             let cmp = match op {
                 Ordering::Less => "<",
                 Ordering::Greater => ">",
@@ -183,18 +185,14 @@ fn format_condition(c: &Condition) -> String {
             format!("{}size {} {} bytes", prefix, cmp, bytes)
         }
         Condition::Shell { cmd, weight } => {
-            let prefix =
-                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
-            format!("{}shell {:?}", prefix, cmd)
+            format!("{}shell {:?}", format_weight(*weight), cmd)
         }
         Condition::Variable {
             name,
             pattern,
             weight,
         } => {
-            let prefix =
-                weight.map_or(String::new(), |w| format!("{}^{} ", w.w, w.x));
-            format!("{}${} matches {:?}", prefix, name, pattern)
+            format!("{}${} matches {:?}", format_weight(*weight), name, pattern)
         }
         Condition::Subst { inner, negate } => {
             let inner_str = format_condition(inner);

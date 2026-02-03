@@ -6,6 +6,7 @@
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::process::{Child, Command, ExitCode, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use nix::fcntl::{Flock, FlockArg};
@@ -505,8 +506,6 @@ fn extract_address(s: &str) -> &str {
 }
 
 fn generate_message_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

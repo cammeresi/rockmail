@@ -38,10 +38,16 @@ pub enum EngineError {
     Delivery(#[from] DeliveryError),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("failed to acquire lock: {0}")]
+    Lock(String),
+    #[error("INCLUDERC recursion depth exceeded")]
+    RecursionLimit,
 }
 
 /// Result of engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;
+
+const MAX_INCLUDE_DEPTH: usize = 32;
 
 /// Mutable state during recipe processing.
 #[allow(dead_code)]
@@ -54,6 +60,8 @@ pub struct State {
     pub prev_cond: bool,
     /// Current score (for weighted conditions).
     pub score: f64,
+    /// Current INCLUDERC/SWITCHRC recursion depth.
+    pub depth: usize,
 }
 
 impl Default for State {
@@ -63,6 +71,7 @@ impl Default for State {
             last_succ: false,
             prev_cond: false,
             score: 0.0,
+            depth: 0,
         }
     }
 }
@@ -135,21 +144,34 @@ where
                 }
                 Item::Include(path) => {
                     let expanded = self.expand(path);
+                    self.set_var("INCLUDERC", &expanded);
+                    if state.depth >= MAX_INCLUDE_DEPTH {
+                        return Err(EngineError::RecursionLimit);
+                    }
                     if let Some(items) = self.load_rcfile(&expanded) {
-                        let outcome = self.process_items(&items, msg, state)?;
-                        if matches!(outcome, Outcome::Delivered(_)) {
-                            return Ok(outcome);
+                        state.depth += 1;
+                        let outcome = self.process_items(&items, msg, state);
+                        state.depth -= 1;
+                        if matches!(outcome, Ok(Outcome::Delivered(_))) {
+                            return outcome;
                         }
+                        outcome?;
                     }
                 }
                 Item::Switch(path) => {
                     if path.is_empty() {
-                        // Empty SWITCHRC aborts current rcfile
                         return Ok(Outcome::Default);
                     }
                     let expanded = self.expand(path);
+                    self.set_var("SWITCHRC", &expanded);
+                    if state.depth >= MAX_INCLUDE_DEPTH {
+                        return Err(EngineError::RecursionLimit);
+                    }
                     if let Some(items) = self.load_rcfile(&expanded) {
-                        return self.process_items(&items, msg, state);
+                        state.depth += 1;
+                        let outcome = self.process_items(&items, msg, state);
+                        state.depth -= 1;
+                        return outcome;
                     }
                 }
             }
@@ -159,18 +181,12 @@ where
 
     /// Load and parse an rcfile. Returns None if file doesn't exist or fails to parse.
     fn load_rcfile(&self, path: &str) -> Option<Vec<Item>> {
-        let p = Path::new(path);
-        if !p.exists() || !p.is_file() {
-            if path != "/dev/null" {
-                log::warn!("rcfile not found: {}", path);
-            }
-            return None;
-        }
-
-        let content = match fs::read_to_string(p) {
+        let content = match fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                log::warn!("failed to read rcfile {}: {}", path, e);
+                if e.kind() != ErrorKind::NotFound && path != "/dev/null" {
+                    log::warn!("failed to read rcfile {}: {}", path, e);
+                }
                 return None;
             }
         };
@@ -329,7 +345,7 @@ where
 
         // Weighted size: w * (M/L)^x or w * (L/M)^x
         let ratio = match op {
-            Ordering::Greater => size as f64 / bytes as f64,
+            Ordering::Greater => size as f64 / bytes.max(1) as f64,
             Ordering::Less => bytes as f64 / size.max(1) as f64,
             Ordering::Equal => 1.0,
         };
@@ -385,9 +401,16 @@ where
             return Ok((matched, 0.0, false));
         };
 
-        // Weighted regex: count matches and compute score
+        let result = matcher.exec(&text);
+        if result.matched
+            && let Some(cap) = result.capture
+        {
+            self.set_var("MATCH", cap);
+        }
+
         let count = matcher.count_matches(&text);
         let score = compute_weighted_score(wt, count);
+        let score = if negate { -score } else { score };
 
         if self.verbose {
             log::info!(
@@ -495,8 +518,11 @@ where
         &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
         // Acquire lockfile if specified
-        let lockpath = self.resolve_lockfile(recipe);
-        let _guard = lockpath.as_ref().and_then(|p| LockGuard::acquire(p));
+        let _guard = if let Some(p) = self.resolve_lockfile(recipe) {
+            Some(LockGuard::acquire(p)?)
+        } else {
+            None
+        };
 
         match &recipe.action {
             Action::Folder(path) => {
@@ -672,6 +698,8 @@ where
     }
 }
 
+const WEIGHT_EPSILON: f64 = 1e-10;
+
 /// Compute weighted score from count of matches.
 /// Formula: w * (x^n - 1) / (x - 1) when x != 1, or w * n when x == 1.
 fn compute_weighted_score(wt: Weight, n: usize) -> f64 {
@@ -679,10 +707,15 @@ fn compute_weighted_score(wt: Weight, n: usize) -> f64 {
         return 0.0;
     }
     let n = n as f64;
-    if (wt.x - 1.0).abs() < 1e-10 {
+    let score = if (wt.x - 1.0).abs() < WEIGHT_EPSILON {
         wt.w * n
     } else {
         wt.w * (wt.x.powf(n) - 1.0) / (wt.x - 1.0)
+    };
+    if score.is_nan() || score.is_infinite() {
+        0.0
+    } else {
+        score
     }
 }
 
@@ -702,16 +735,12 @@ struct LockGuard {
 }
 
 impl LockGuard {
-    fn acquire(path: &str) -> Option<Self> {
-        match locking::create_lock(Path::new(path)) {
-            Ok(()) => Some(Self {
-                path: path.to_string(),
-            }),
-            Err(e) => {
-                log::warn!("failed to acquire lock {}: {}", path, e);
-                None
-            }
-        }
+    fn acquire(path: String) -> EngineResult<Self> {
+        locking::create_lock(Path::new(&path)).map_err(|e| {
+            log::error!("failed to acquire lock {}: {}", path, e);
+            EngineError::Lock(path.clone())
+        })?;
+        Ok(Self { path })
     }
 }
 

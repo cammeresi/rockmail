@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-use crate::config::{Action, Condition, Flags, Item, Recipe};
+use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
 use crate::mail::Message;
 use crate::variables::{MockEnv, SubstCtx};
 
@@ -305,4 +305,53 @@ fn subst_negation_inverts_match() {
         action: Action::Folder(PathBuf::from(t.maildir("negated"))),
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn weighted_condition_positive_score_matches() {
+    let mut t = Test::with_msg("Subject: test test test\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "test".to_string(),
+            negate: false,
+            weight: Some(Weight { w: 100.0, x: 1.0 }),
+        }],
+        action: Action::Folder(PathBuf::from(t.maildir("weighted"))),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn weighted_condition_zero_matches_fails() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "nomatch".to_string(),
+            negate: false,
+            weight: Some(Weight { w: 100.0, x: 1.0 }),
+        }],
+        action: Action::Folder(PathBuf::from(t.maildir("weighted"))),
+    })];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn weighted_negated_inverts_score() {
+    let mut t = Test::with_msg("Subject: spam spam spam\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "spam".to_string(),
+            negate: true,
+            weight: Some(Weight { w: 100.0, x: 1.0 }),
+        }],
+        action: Action::Folder(PathBuf::from(t.maildir("negated"))),
+    })];
+    // Negated weighted: score becomes negative, so no match
+    assert_eq!(t.process(&items), Outcome::Default);
 }
