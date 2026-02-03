@@ -30,3 +30,12 @@ Workaround: use `[^\\^]` or reorder the class contents.
 
 A trailing backslash in a pattern (e.g., `foo\`) is treated as a literal
 backslash, matching `foo\`. This matches procmail behavior.
+
+## Comsat/Biff Notifications
+
+Procmail can notify the biff service when mail is delivered, allowing
+terminals to display "You have new mail" messages. The `COMSAT` variable
+controls this.
+
+Corpmail does not support comsat notifications. The `COMSAT` variable
+is ignored. This feature is rarely used on modern systems.

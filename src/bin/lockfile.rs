@@ -1,14 +1,11 @@
-use clap::Parser;
-use corpmail::locking::{create_lock, lock_mtime, remove_lock};
-use corpmail::util::{LockError, exit, now_secs, *};
-use nix::sys::signal::{SigHandler, Signal, signal};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
 use std::time::Duration;
 
-static SIGNAL_FLAG: AtomicBool = AtomicBool::new(false);
+use clap::Parser;
+use corpmail::locking::{create_lock, lock_mtime, remove_lock};
+use corpmail::util::{LockError, exit, now_secs, signals, *};
 
 const DEF_LOCKSLEEP: u64 = 8;
 const DEF_SUSPEND: u64 = 16;
@@ -56,29 +53,9 @@ struct Args {
     files: Vec<PathBuf>,
 }
 
-fn setup_signals() {
-    let handler = SigHandler::Handler(handle_signal);
-    unsafe {
-        for sig in [
-            Signal::SIGHUP,
-            Signal::SIGINT,
-            Signal::SIGQUIT,
-            Signal::SIGTERM,
-        ] {
-            signal(sig, handler).expect("couldn't set {sig}");
-        }
-        signal(Signal::SIGPIPE, SigHandler::SigIgn)
-            .expect("couldn't ignore SIGPIPE");
-    }
-}
-
-extern "C" fn handle_signal(_: i32) {
-    SIGNAL_FLAG.store(true, Ordering::Release);
-}
-
 fn main() -> ExitCode {
     let args = Args::parse();
-    setup_signals();
+    signals::setup();
 
     let invert = args.invert % 2 == 1;
     let mut retries = args.retries;
@@ -146,7 +123,7 @@ fn main() -> ExitCode {
 }
 
 fn check_signal(path: &Path) -> Result<(), u8> {
-    if SIGNAL_FLAG.load(Ordering::Acquire) {
+    if signals::should_exit() {
         eprintln!(
             "lockfile: Signal received, giving up on \"{}\"",
             path.display()

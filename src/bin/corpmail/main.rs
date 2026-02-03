@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::io::{self, Read};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -9,7 +10,7 @@ use clap::Parser;
 use corpmail::config::{self, is_var_name};
 use corpmail::mail::Message;
 use corpmail::recipe::{Engine, Outcome};
-use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE};
+use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
 use corpmail::variables::{Env, RealEnv, SubstCtx};
 use nix::unistd::{Uid, User};
 
@@ -17,6 +18,7 @@ use nix::unistd::{Uid, User};
 mod tests;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const ETC_PROCMAILRC: &str = "/etc/procmailrc";
 
 #[derive(Parser, Debug)]
 #[command(
@@ -97,6 +99,8 @@ fn main() -> ExitCode {
         return ExitCode::from(EX_USAGE);
     }
 
+    signals::setup();
+
     let fail_code = if args.tempfail {
         EX_TEMPFAIL
     } else {
@@ -165,7 +169,19 @@ fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
         engine.set_var(name, value);
     }
 
-    // Find rcfile to use
+    // Process /etc/procmailrc if not in preserve mode (-p), no rcfile on
+    // command line, and not in delivery mode (-d).
+    let has_cmdline_rcfile = !rcfiles.is_empty();
+    if !args.preserve
+        && !has_cmdline_rcfile
+        && args.deliver.is_none()
+        && let Some(Outcome::Delivered(_)) =
+            process_etcrc(&mut engine, &mut msg)?
+    {
+        return Ok(());
+    }
+
+    // Find user rcfile to use
     let rcfile = find_rcfile(&rcfiles, &penv, args.mailfilter)?;
 
     if let Some(path) = rcfile {
@@ -186,10 +202,38 @@ fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Delivery mode: deliver to named recipient's mailbox
+/// Process /etc/procmailrc if it exists.
+fn process_etcrc(
+    engine: &mut Engine<RealEnv>, msg: &mut Message,
+) -> Result<Option<Outcome>, Box<dyn std::error::Error>> {
+    let path = Path::new(ETC_PROCMAILRC);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(path)?;
+    let items = config::parse(&content)?;
+    engine.set_var("_", ETC_PROCMAILRC);
+
+    let outcome = engine.process(&items, msg)?;
+    Ok(Some(outcome))
+}
+
+/// Delivery mode: deliver to named recipient's mailbox.
 fn deliver_to_recipient(
     env: &ProcEnv, msg: &Message, recip: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Look up recipient in passwd database
+    let Some(user) = User::from_name(recip)? else {
+        return Err(format!("Unknown user: {recip}").into());
+    };
+
+    // Check privileges: must be root or same user
+    let euid = nix::unistd::geteuid();
+    if !euid.is_root() && euid != user.uid {
+        return Err("Insufficient privileges".into());
+    }
+
     let dest = format!("/var/mail/{}", recip);
     let sender = msg.envelope_sender().unwrap_or(&env.logname);
     corpmail::delivery::mbox(Path::new(&dest), msg, sender)?;
@@ -345,10 +389,13 @@ fn is_assignment(arg: &str) -> bool {
 fn find_rcfile(
     files: &[String], env: &ProcEnv, mailfilter: bool,
 ) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+    let uid = nix::unistd::getuid().as_raw();
+
     // Command line rcfiles
     for f in files {
         let path = resolve_rcpath(f, env, mailfilter);
         if path.exists() {
+            check_rcfile_security(&path, uid, false)?;
             return Ok(Some(path));
         }
     }
@@ -357,6 +404,7 @@ fn find_rcfile(
     if files.is_empty() && !mailfilter {
         let default = PathBuf::from(&env.home).join(".procmailrc");
         if default.exists() {
+            check_rcfile_security(&default, uid, true)?;
             return Ok(Some(default));
         }
     }
@@ -366,6 +414,52 @@ fn find_rcfile(
     }
 
     Ok(None)
+}
+
+/// Check that an rcfile has safe permissions.
+fn check_rcfile_security(
+    path: &Path, uid: u32, is_default: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let meta = fs::metadata(path)?;
+    let mode = meta.mode();
+    let owner = meta.uid();
+
+    // Must be owned by user or root
+    if owner != uid && owner != 0 {
+        return Err(format!("Suspicious rcfile: {}", path.display()).into());
+    }
+
+    // Must not be world writable
+    if mode & 0o002 != 0 {
+        return Err(format!("Suspicious rcfile: {}", path.display()).into());
+    }
+
+    // Default rcfile must not be group writable
+    if is_default && mode & 0o020 != 0 {
+        return Err(format!("Suspicious rcfile: {}", path.display()).into());
+    }
+
+    // Check parent directory (for absolute paths)
+    if path.is_absolute()
+        && let Some(parent) = path.parent()
+    {
+        check_dir_security(parent)?;
+    }
+
+    Ok(())
+}
+
+/// Check that a directory is not world writable (unless sticky).
+fn check_dir_security(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let meta = fs::metadata(path)?;
+    let mode = meta.mode();
+
+    // World writable + executable without sticky bit is unsafe
+    if mode & 0o003 == 0o003 && mode & 0o1000 == 0 {
+        return Err(format!("Suspicious directory: {}", path.display()).into());
+    }
+
+    Ok(())
 }
 
 fn resolve_rcpath(path: &str, env: &ProcEnv, mailfilter: bool) -> PathBuf {
