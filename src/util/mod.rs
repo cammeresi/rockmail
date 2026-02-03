@@ -12,6 +12,7 @@ pub const EX_TEMPFAIL: u8 = 75;
 pub const EX_UNAVAILABLE: u8 = 69;
 pub const EX_OSERR: u8 = 71;
 pub const EX_CANTCREAT: u8 = 73;
+pub const EX_NOINPUT: u8 = 66;
 
 pub fn exit(code: u8) -> ExitCode {
     ExitCode::from(code)
