@@ -5,7 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::{DeliveryError, DeliveryResult};
+use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::mail::Message;
 
 /// State for MH message numbering (caches next number across deliveries).
@@ -25,19 +25,26 @@ impl Namer {
 /// MH folders use numbered files (1, 2, 3, ...).
 /// Creates the folder directory if needed.
 pub fn deliver(
+    path: &Path, msg: &Message, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver_with(&mut Namer::new(), path, msg, opts)
+}
+
+#[cfg(test)]
+pub fn deliver_test(
     path: &Path, msg: &Message,
 ) -> Result<DeliveryResult, DeliveryError> {
-    deliver_with(&mut Namer::new(), path, msg)
+    deliver(path, msg, DeliveryOpts::default())
 }
 
 /// Deliver with explicit namer (for batch deliveries).
 pub fn deliver_with(
-    namer: &mut Namer, path: &Path, msg: &Message,
+    namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
     fs::create_dir_all(path)?;
 
     let (file, dest) = create_unique(namer, path)?;
-    let bytes = write_msg(file, msg)?;
+    let bytes = write_msg(file, msg, opts)?;
 
     Ok(DeliveryResult {
         bytes,
@@ -75,7 +82,9 @@ fn scan_max(path: &Path) -> Result<u64, DeliveryError> {
     Ok(max)
 }
 
-fn write_msg(file: File, msg: &Message) -> Result<usize, DeliveryError> {
+fn write_msg(
+    file: File, msg: &Message, opts: DeliveryOpts,
+) -> Result<usize, DeliveryError> {
     let data = if msg.from_line().is_some() {
         crate::mail::skip_from_lines(msg.as_bytes())
     } else {
@@ -87,7 +96,7 @@ fn write_msg(file: File, msg: &Message) -> Result<usize, DeliveryError> {
     w.write_all(data)?;
     let bytes = data.len();
 
-    let extra = if !data.ends_with(b"\n") {
+    let extra = if !opts.raw && !data.ends_with(b"\n") {
         w.write_all(b"\n")?;
         1
     } else {

@@ -4,14 +4,14 @@ use crate::delivery::tests::msg;
 #[test]
 fn pipe_to_cat() {
     let m = msg("Subject: Test\n\nBody content\n");
-    let r = deliver("cat > /dev/null", &m, false).unwrap();
+    let r = deliver_test("cat > /dev/null", &m, false).unwrap();
     assert_eq!(r.bytes, m.as_bytes().len());
 }
 
 #[test]
 fn filter_mode() {
     let m = msg("Subject: Test\n\nHello\n");
-    let r = deliver("cat", &m, true).unwrap();
+    let r = deliver_test("cat", &m, true).unwrap();
 
     let output = r.output.unwrap();
     assert_eq!(output, m.as_bytes());
@@ -20,7 +20,7 @@ fn filter_mode() {
 #[test]
 fn filter_transforms() {
     let m = msg("Subject: Test\n\nHello\n");
-    let r = deliver("tr a-z A-Z", &m, true).unwrap();
+    let r = deliver_test("tr a-z A-Z", &m, true).unwrap();
 
     let output = r.output.unwrap();
     let s = String::from_utf8_lossy(&output);
@@ -29,9 +29,18 @@ fn filter_transforms() {
 }
 
 #[test]
-fn exit_code_error() {
+fn exit_code_ignored_without_wait() {
     let m = msg("Subject: Test\n\nBody\n");
-    let r = deliver("exit 1", &m, false);
+    // Without wait flag, non-zero exit is ignored
+    let r = deliver_test("exit 1", &m, false);
+    assert!(r.is_ok());
+}
+
+#[test]
+fn exit_code_error_with_wait() {
+    let m = msg("Subject: Test\n\nBody\n");
+    // With wait flag, non-zero exit returns error
+    let r = deliver("exit 1", &m, false, true);
 
     match r {
         Err(DeliveryError::PipeExit(1)) => {}
@@ -43,7 +52,7 @@ fn exit_code_error() {
 fn early_exit() {
     // Command that reads nothing and exits
     let m = msg(&"Subject: Test\n\n".repeat(1000));
-    let r = deliver("exit 0", &m, false);
+    let r = deliver_test("exit 0", &m, false);
     // Should succeed even though we couldn't write everything
     assert!(r.is_ok());
 }

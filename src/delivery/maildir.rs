@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{DeliveryError, DeliveryResult};
+use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::mail::{Message, skip_from_lines};
 
 /// State for unique filename generation (preserves serial across calls).
@@ -61,23 +61,30 @@ impl Namer {
 /// Creates the Maildir structure (tmp, new, cur) if needed.
 /// Writes to tmp/ then hard-links to new/ for atomic delivery.
 pub fn deliver(
+    path: &Path, msg: &Message, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver_with(&mut Namer::new(), path, msg, opts)
+}
+
+#[cfg(test)]
+pub fn deliver_test(
     path: &Path, msg: &Message,
 ) -> Result<DeliveryResult, DeliveryError> {
-    deliver_with(&mut Namer::new(), path, msg)
+    deliver(path, msg, DeliveryOpts::default())
 }
 
 /// Deliver a message directly to a directory (procmail // mode).
 ///
 /// Unlike Maildir, writes directly without tmp/new/cur structure.
 pub fn deliver_dir(
-    path: &Path, msg: &Message,
+    path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
     fs::create_dir_all(path)?;
 
     let name = Namer::new().next()?;
     let dest = path.join(format!("msg.{}", name));
 
-    let bytes = write_msg(&dest, msg)?;
+    let bytes = write_msg(&dest, msg, opts)?;
 
     Ok(DeliveryResult {
         bytes,
@@ -87,7 +94,7 @@ pub fn deliver_dir(
 
 /// Deliver with explicit namer (for preserving serial across deliveries).
 pub fn deliver_with(
-    namer: &mut Namer, path: &Path, msg: &Message,
+    namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
     ensure_dirs(path)?;
 
@@ -95,7 +102,7 @@ pub fn deliver_with(
     let tmp = path.join("tmp").join(&name);
     let new = path.join("new").join(&name);
 
-    let bytes = write_msg(&tmp, msg)?;
+    let bytes = write_msg(&tmp, msg, opts)?;
 
     if fs::hard_link(&tmp, &new).is_err() {
         fs::rename(&tmp, &new)?;
@@ -123,7 +130,9 @@ fn hostname() -> String {
         .unwrap_or_else(|| "localhost".to_string())
 }
 
-fn write_msg(path: &Path, msg: &Message) -> Result<usize, DeliveryError> {
+fn write_msg(
+    path: &Path, msg: &Message, opts: DeliveryOpts,
+) -> Result<usize, DeliveryError> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
@@ -138,8 +147,8 @@ fn write_msg(path: &Path, msg: &Message) -> Result<usize, DeliveryError> {
     w.write_all(data)?;
     let bytes = data.len();
 
-    // Ensure trailing newline
-    let extra = if !data.ends_with(b"\n") {
+    // Ensure trailing newline (unless raw mode)
+    let extra = if !opts.raw && !data.ends_with(b"\n") {
         w.write_all(b"\n")?;
         1
     } else {

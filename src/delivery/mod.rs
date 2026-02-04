@@ -7,6 +7,9 @@ mod mh;
 mod pipe;
 
 use std::io;
+use std::path::Path;
+
+use crate::mail::Message;
 
 pub use maildir::{deliver as maildir, deliver_dir as dir};
 pub use mbox::deliver as mbox;
@@ -57,6 +60,24 @@ impl FolderType {
             (FolderType::File, path)
         }
     }
+
+    pub fn deliver(
+        self, path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
+    ) -> Result<DeliveryResult, DeliveryError> {
+        match self {
+            FolderType::File => mbox::deliver(path, msg, sender, opts),
+            FolderType::Maildir => maildir::deliver(path, msg, opts),
+            FolderType::Mh => mh::deliver(path, msg, opts),
+            FolderType::Dir => maildir::deliver_dir(path, msg, opts),
+        }
+    }
+}
+
+/// Options for delivery operations.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeliveryOpts {
+    /// Raw mode: don't ensure trailing newline.
+    pub raw: bool,
 }
 
 /// Result of a delivery operation.

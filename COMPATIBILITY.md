@@ -31,6 +31,38 @@ Workaround: use `[^\\^]` or reorder the class contents.
 A trailing backslash in a pattern (e.g., `foo\`) is treated as a literal
 backslash, matching `foo\`. This matches procmail behavior.
 
+## mailstat: Maildir only
+
+Corpmail's `mailstat` currently assumes Maildir layout. Folder paths in the
+log are normalized by stripping the last two path components (e.g.
+`/home/user/Maildir/new/1234567890.host` becomes `/home/user/Maildir`).
+mbox-style paths (a single file) are not specially handled.
+
+## mailstat: ~/.mailstatrc
+
+Procmail's `mailstat` has no configuration file. Corpmail adds support for
+`~/.mailstatrc` with the following commands:
+
+- `ignore <folder>` — Exclude a folder from the summary output. Suppressed
+  by the `-z` flag.
+- `date_format <spec>` — Override the date format used in the "No mail
+  arrived since ..." message. The spec uses the `time` crate's v1 format
+  description syntax (e.g. `[day] [month repr:short], [hour]:[minute]`).
+  Not affected by `-z`.
+
+The default date format is `[day] [month repr:short], [hour]:[minute]`.
+
+## formail: -Y flag
+
+The original formail's `-Y` flag (ignore Content-Length headers) is not
+implemented. Content-Length headers are always ignored since corpmail uses
+From_ line detection for message boundaries.
+
+## procmail: -z (LMTP server mode)
+
+Procmail's `-z` flag enables LMTP server mode (RFC 2033). This is an optional
+compile-time feature in the original procmail. Corpmail does not support it.
+
 ## Comsat/Biff Notifications
 
 Procmail can notify the biff service when mail is delivered, allowing

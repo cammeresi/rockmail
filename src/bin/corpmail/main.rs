@@ -288,7 +288,12 @@ fn deliver_to_recipient(
 
     let dest = format!("{}/{}", MAIL_SPOOL, recip);
     let sender = msg.envelope_sender().unwrap_or(&env.logname);
-    corpmail::delivery::mbox(Path::new(&dest), msg, sender)?;
+    corpmail::delivery::mbox(
+        Path::new(&dest),
+        msg,
+        sender,
+        Default::default(),
+    )?;
     Ok(())
 }
 
@@ -586,13 +591,23 @@ where
     let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
 
     if !default.is_empty() {
-        corpmail::delivery::mbox(Path::new(&default), msg, sender)?;
+        corpmail::delivery::mbox(
+            Path::new(&default),
+            msg,
+            sender,
+            Default::default(),
+        )?;
         return Ok(());
     }
 
     let orgmail = env.get("ORGMAIL").unwrap_or_else(|| penv.orgmail.clone());
     if !orgmail.is_empty() {
-        corpmail::delivery::mbox(Path::new(&orgmail), msg, sender)?;
+        corpmail::delivery::mbox(
+            Path::new(&orgmail),
+            msg,
+            sender,
+            Default::default(),
+        )?;
         return Ok(());
     }
 

@@ -11,7 +11,7 @@ fn deliver_creates_folder() {
     let mh = dir.path().join("inbox");
 
     let m = msg("Subject: Test\n\nHello\n");
-    deliver(&mh, &m).unwrap();
+    deliver_test(&mh, &m).unwrap();
 
     assert!(mh.is_dir());
 }
@@ -23,7 +23,7 @@ fn sequential_numbers() {
 
     for i in 1..=3 {
         let m = msg(&format!("Subject: Message {}\n\nBody {}\n", i, i));
-        let r = deliver(&mh, &m).unwrap();
+        let r = deliver_test(&mh, &m).unwrap();
         assert!(r.path.ends_with(&format!("/{}", i)));
     }
 
@@ -46,7 +46,7 @@ fn finds_highest_existing() {
 
     // Next should be 6
     let m = msg("Subject: Test\n\nBody\n");
-    let r = deliver(&mh, &m).unwrap();
+    let r = deliver_test(&mh, &m).unwrap();
     assert!(r.path.ends_with("/6"));
 }
 
@@ -57,7 +57,7 @@ fn strips_from_line() {
 
     let m =
         msg("From sender Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n");
-    let r = deliver(&mh, &m).unwrap();
+    let r = deliver_test(&mh, &m).unwrap();
 
     let content = fs::read_to_string(&r.path).unwrap();
     assert!(!content.starts_with("From "));

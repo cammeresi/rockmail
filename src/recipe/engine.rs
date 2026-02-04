@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
-use crate::delivery::{self, DeliveryError, FolderType};
+use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType};
 use crate::locking;
 use crate::mail::Message;
 use crate::re::Matcher;
@@ -567,15 +567,22 @@ where
     ) -> EngineResult<Outcome> {
         let (folder_type, path) = FolderType::parse(path);
         let msg = self.message_for_delivery(recipe, msg);
+        let ignore = recipe.flags.ignore;
+        let opts = DeliveryOpts {
+            raw: recipe.flags.raw,
+        };
 
-        let result = match folder_type {
-            FolderType::File => {
-                let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
-                delivery::mbox(Path::new(path), &msg, sender)?
+        let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
+        let result = folder_type.deliver(Path::new(path), &msg, sender, opts);
+
+        // Handle errors based on i flag
+        let result = match result {
+            Ok(r) => r,
+            Err(e) if ignore => {
+                log::warn!("Ignoring delivery error: {}", e);
+                return Ok(Outcome::Continue);
             }
-            FolderType::Maildir => delivery::maildir(Path::new(path), &msg)?,
-            FolderType::Mh => delivery::mh(Path::new(path), &msg)?,
-            FolderType::Dir => delivery::dir(Path::new(path), &msg)?,
+            Err(e) => return Err(e.into()),
         };
 
         self.set_var("LASTFOLDER", &result.path);
@@ -595,8 +602,33 @@ where
     ) -> EngineResult<Outcome> {
         let delivery_msg = self.message_for_delivery(recipe, msg);
         let filter = recipe.flags.filter;
+        let wait = recipe.flags.wait;
+        let quiet = recipe.flags.quiet;
 
-        let result = delivery::pipe(cmd, &delivery_msg, filter)?;
+        let result = delivery::pipe(cmd, &delivery_msg, filter, wait);
+
+        // Handle pipe errors based on w/W flags
+        let result = match result {
+            Ok(r) => r,
+            Err(DeliveryError::PipeExit(code)) if wait => {
+                self.ctx.last_exit = code;
+                if !quiet {
+                    log::error!("Program failure ({}) of \"{}\"", code, cmd);
+                }
+                return Ok(Outcome::Default);
+            }
+            Err(DeliveryError::PipeSignal(sig)) if wait => {
+                if !quiet {
+                    log::error!(
+                        "Program terminated by signal {} \"{}\"",
+                        sig,
+                        cmd
+                    );
+                }
+                return Ok(Outcome::Default);
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         if let Some(ref output) = result.output {
             if filter {

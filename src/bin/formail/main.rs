@@ -20,11 +20,15 @@ mod tests;
 
 /// formail - mail (re)formatter
 #[derive(Parser, Debug, Default)]
-#[command(name = "formail", version, about)]
+#[command(name = "formail", version, about, disable_version_flag = true)]
 #[command(
     override_usage = "formail [+skip] [-total] [options] [-s [command [arg ...]]]"
 )]
 struct Args {
+    /// Print version
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: (),
+
     /// Skip the first N messages while splitting
     #[arg(short = '+', value_name = "skip", hide = true)]
     skip: Option<usize>,
@@ -37,9 +41,9 @@ struct Args {
     #[arg(short = 'b')]
     no_escape: bool,
 
-    /// Berkeley format (ignore Content-Length)
+    /// BABYL rmail file format
     #[arg(short = 'B')]
-    berkeley: bool,
+    babyl: bool,
 
     /// Concatenate continued header fields
     #[arg(short = 'c')]
@@ -154,8 +158,9 @@ fn main() -> ExitCode {
             a
         }
         Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::from(util::EX_USAGE);
+            let _ = e.print();
+            let code = if e.use_stderr() { util::EX_USAGE } else { 0 };
+            return ExitCode::from(code);
         }
     };
 
@@ -603,14 +608,14 @@ where
     let minfields = args.minfields.unwrap_or(2);
 
     // -B (berkeley/BABYL) implies every mode
-    let every = args.every || args.berkeley;
-    let digest = args.digest || args.berkeley;
+    let every = args.every || args.babyl;
+    let digest = args.digest || args.babyl;
 
     let base: i64 = env.get("FILENO").and_then(|s| s.parse().ok()).unwrap_or(0);
     let width = env.get("FILENO").map(|s| s.len()).unwrap_or(0);
     let mut pool = args.nowait.map(ProcessPool::new);
 
-    if args.berkeley {
+    if args.babyl {
         skip_babyl_leader(&mut reader)?;
     }
 
@@ -638,7 +643,7 @@ where
         }
 
         // Check for BABYL separator
-        if args.berkeley && line.starts_with(&[BABYL_SEP1]) {
+        if args.babyl && line.starts_with(&[BABYL_SEP1]) {
             babyl_start = true;
             // Output previous message if any
             if in_msg && !msg.is_empty() {
@@ -664,7 +669,7 @@ where
         }
 
         // In BABYL mode, don't split on regular boundaries
-        if args.berkeley && !babyl_start {
+        if args.babyl && !babyl_start {
             if in_msg {
                 msg.extend_from_slice(&line);
             }
@@ -698,7 +703,7 @@ where
             msg.clear();
             pending_header.clear();
             // Convert Mail-from: to From (BABYL format)
-            if args.berkeley && line.len() > 10 {
+            if args.babyl && line.len() > 10 {
                 let lower: Vec<u8> =
                     line[..10].iter().map(|b| b.to_ascii_lowercase()).collect();
                 if &lower == b"mail-from:" {

@@ -11,7 +11,7 @@ fn deliver_simple() {
     let path = dir.path().join("mbox");
 
     let m = msg("Subject: Test\n\nHello world\n");
-    deliver(&path, &m, "user@host").unwrap();
+    deliver_test(&path, &m, "user@host").unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.starts_with("From user@host "));
@@ -27,7 +27,7 @@ fn deliver_with_from_line() {
 
     let m =
         msg("From sender Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n");
-    deliver(&path, &m, "other@host").unwrap();
+    deliver_test(&path, &m, "other@host").unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     // Should use the existing From_ line, not add a new one
@@ -40,7 +40,7 @@ fn from_escaping() {
     let path = dir.path().join("mbox");
 
     let m = msg("Subject: Test\n\nFrom here we go\nFrom there too\n");
-    deliver(&path, &m, "user@host").unwrap();
+    deliver_test(&path, &m, "user@host").unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.contains(">From here we go"));
@@ -55,8 +55,8 @@ fn multiple_deliveries() {
     let m1 = msg("Subject: First\n\nBody 1\n");
     let m2 = msg("Subject: Second\n\nBody 2\n");
 
-    deliver(&path, &m1, "user@host").unwrap();
-    deliver(&path, &m2, "user@host").unwrap();
+    deliver_test(&path, &m1, "user@host").unwrap();
+    deliver_test(&path, &m2, "user@host").unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     let from_count = content.matches("\nFrom ").count();
@@ -72,7 +72,7 @@ fn escaping_in_headers() {
 
     // Headers shouldn't normally have "From " at line start, but test anyway
     let m = msg("Subject: Test\nFrom scratch\n\nBody\n");
-    deliver(&path, &m, "user@host").unwrap();
+    deliver_test(&path, &m, "user@host").unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.contains(">From scratch"));
@@ -84,7 +84,7 @@ fn body_without_trailing_newline() {
     let path = dir.path().join("mbox");
 
     let m = msg("Subject: Test\n\nNo newline at end");
-    deliver(&path, &m, "user@host").unwrap();
+    deliver_test(&path, &m, "user@host").unwrap();
 
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.ends_with("No newline at end\n\n"));

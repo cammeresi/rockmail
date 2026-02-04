@@ -6,6 +6,10 @@
 //! - `\<` and `\>`: word boundaries (zero-width, using `\b`)
 //! - `\/`: capture point - text after this goes to $MATCH
 //! - `^` and `$`: match newlines (multiline mode)
+//! - `^TO_`: macro for destination addresses (To, Cc, Bcc, etc.)
+//! - `^TO`: macro for destination words
+//! - `^FROM_DAEMON`: macro for daemon senders
+//! - `^FROM_MAILER`: macro for mailer-daemon senders
 
 use regex::{Regex, RegexBuilder};
 use std::iter::Peekable;
@@ -16,6 +20,37 @@ use thiserror::Error;
 mod tests;
 
 const MAX_PATTERN_LEN: usize = 4096;
+
+// Procmail macro expansions from config.h
+// ^TO_ matches destination addresses
+const TO_KEY: &str = "^TO_";
+const TO_SUBSTITUTE: &str = "(^((Original-)?(Resent-)?(To|Cc|Bcc)|\
+(X-Envelope|Apparently(-Resent)?)-To):(.*[^-a-zA-Z0-9_.])?)";
+
+// ^TO matches destination words
+const TO2_KEY: &str = "^TO";
+const TO2_SUBSTITUTE: &str = "(^((Original-)?(Resent-)?(To|Cc|Bcc)|\
+(X-Envelope|Apparently(-Resent)?)-To):(.*[^a-zA-Z])?)";
+
+// ^FROM_DAEMON matches most daemons
+const FROMD_KEY: &str = "^FROM_DAEMON";
+const FROMD_SUBSTITUTE: &str = "(^(Mailing-List:|Precedence:.*(junk|bulk|list)|\
+To: Multiple recipients of |\
+(((Resent-)?(From|Sender)|X-Envelope-From):|>?From )([^>]*[^(.%@a-z0-9])?(\
+Post(ma?(st(e?r)?|n)|office)|(send)?Mail(er)?|daemon|m(mdf|ajordomo)|n?uucp|\
+LIST(SERV|proc)|NETSERV|o(wner|ps)|r(e(quest|sponse)|oot)|b(ounce|bs\\.smtp)|\
+echo|mirror|s(erv(ices?|er)|mtp(error)?|ystem)|\
+A(dmin(istrator)?|MMGR|utoanswer)\
+)(([^).!:a-z0-9][-_a-z0-9]*)?[%@>\t ][^<)]*(\\(.*\\).*)?)?$([^>]|$)))";
+
+// ^FROM_MAILER matches most mailer-daemons
+const FROMM_KEY: &str = "^FROM_MAILER";
+const FROMM_SUBSTITUTE: &str = "(^(((Resent-)?(From|Sender)|X-Envelope-From):|\
+>?From )([^>]*[^(.%@a-z0-9])?(\
+Post(ma(st(er)?|n)|office)|(send)?Mail(er)?|daemon|mmdf|n?uucp|ops|\
+r(esponse|oot)|(bbs\\.)?smtp(error)?|s(erv(ices?|er)|ystem)|A(dmin(istrator)?|\
+MMGR)\
+)(([^).!:a-z0-9][-_a-z0-9]*)?[%@>\t ][^<)]*(\\(.*\\).*)?)?$([^>]|$))";
 
 #[derive(Error, Debug)]
 pub enum PatternError {
@@ -51,7 +86,8 @@ impl Matcher {
             return Err(PatternError::TooLong(pattern.len()));
         }
 
-        let compiled = compile(pattern);
+        let expanded = expand_macros(pattern);
+        let compiled = compile(&expanded);
 
         let regex = RegexBuilder::new(&compiled)
             .case_insensitive(case_insensitive)
@@ -60,7 +96,7 @@ impl Matcher {
 
         Ok(Self {
             regex,
-            capture_group: compiled_capture_group(pattern),
+            capture_group: compiled_capture_group(&expanded),
         })
     }
 
@@ -101,8 +137,24 @@ impl Matcher {
     }
 }
 
-/// Compile a procmail pattern to a Rust regex pattern.
-/// Anchors (^^) are compiled into \A and \z for efficiency.
+fn expand_macros(pat: &str) -> String {
+    // Order matters: ^TO_ must be checked before ^TO
+    let macros = [
+        (TO_KEY, TO_SUBSTITUTE),
+        (TO2_KEY, TO2_SUBSTITUTE),
+        (FROMD_KEY, FROMD_SUBSTITUTE),
+        (FROMM_KEY, FROMM_SUBSTITUTE),
+    ];
+
+    let mut result = pat.to_string();
+    for (key, sub) in macros {
+        if let Some(pos) = result.find(key) {
+            result.replace_range(pos..pos + key.len(), sub);
+        }
+    }
+    result
+}
+
 fn compile(pat: &str) -> String {
     // Capacity: worst case is \< or \> expanding to \b (same size),
     // plus \A and \z anchors (4 bytes total)

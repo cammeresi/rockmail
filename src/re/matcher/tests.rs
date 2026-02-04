@@ -213,3 +213,48 @@ fn pattern_too_long() {
     let err = Matcher::new(&long, false).unwrap_err();
     assert!(matches!(err, PatternError::TooLong(_)));
 }
+
+#[test]
+fn macro_to_underscore() {
+    let m = Matcher::new("^TO_foo@", true).unwrap();
+    assert!(m.exec("To: foo@bar.com").matched);
+    assert!(m.exec("Cc: foo@bar.com").matched);
+    assert!(m.exec("Bcc: foo@bar.com").matched);
+    assert!(m.exec("Resent-To: foo@bar.com").matched);
+    assert!(m.exec("X-Envelope-To: foo@bar.com").matched);
+    assert!(!m.exec("From: foo@bar.com").matched);
+}
+
+#[test]
+fn macro_to() {
+    let m = Matcher::new("^TOuser", true).unwrap();
+    assert!(m.exec("To: user").matched);
+    assert!(m.exec("Cc: user").matched);
+    // ^TO matches word boundary, so "notuser" shouldn't match
+    assert!(!m.exec("To: notuser").matched);
+}
+
+#[test]
+fn macro_from_daemon() {
+    let m = Matcher::new("^FROM_DAEMON", true).unwrap();
+    assert!(m.exec("From: MAILER-DAEMON@host").matched);
+    assert!(m.exec("From: postmaster@host").matched);
+    assert!(m.exec("Precedence: bulk").matched);
+    assert!(m.exec("Mailing-List: foo").matched);
+    assert!(!m.exec("From: user@host").matched);
+}
+
+#[test]
+fn macro_from_mailer() {
+    let m = Matcher::new("^FROM_MAILER", true).unwrap();
+    assert!(m.exec("From: postmaster@host").matched);
+    assert!(m.exec("From: MAILER-DAEMON@host").matched);
+    assert!(!m.exec("From: user@host").matched);
+}
+
+#[test]
+fn macro_expand() {
+    assert_eq!(expand_macros("^TO_foo"), format!("{}foo", TO_SUBSTITUTE));
+    assert_eq!(expand_macros("^TOfoo"), format!("{}foo", TO2_SUBSTITUTE));
+    assert_eq!(expand_macros("plain"), "plain");
+}

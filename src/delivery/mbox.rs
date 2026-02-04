@@ -5,7 +5,7 @@ use std::fs::OpenOptions;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::{DeliveryError, DeliveryResult};
+use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::locking;
 use crate::mail::{Message, generate as from_line};
 
@@ -21,19 +21,26 @@ fn lock_path(path: &Path) -> PathBuf {
 /// prepended if the message doesn't start with one.
 /// Acquires dotlock before writing for concurrent safety.
 pub fn deliver(
-    path: &Path, msg: &Message, sender: &str,
+    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
     let lock = lock_path(path);
     locking::create_lock(&lock)?;
 
-    let result = deliver_inner(path, msg, sender);
+    let result = deliver_inner(path, msg, sender, opts);
 
     let _ = locking::remove_lock(&lock);
     result
 }
 
-fn deliver_inner(
+#[cfg(test)]
+pub fn deliver_test(
     path: &Path, msg: &Message, sender: &str,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver(path, msg, sender, DeliveryOpts::default())
+}
+
+fn deliver_inner(
+    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
 
@@ -65,8 +72,8 @@ fn deliver_inner(
     // Body with From escaping
     bytes += write_escaped(&mut w, msg.body())?;
 
-    // Ensure trailing newline
-    if !msg.body().ends_with(b"\n") {
+    // Ensure trailing newline (unless raw mode)
+    if !opts.raw && !msg.body().ends_with(b"\n") {
         w.write_all(b"\n")?;
         bytes += 1;
     }

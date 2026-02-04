@@ -11,7 +11,7 @@ fn deliver_creates_dirs() {
     let maildir = dir.path().join("Maildir");
 
     let m = msg("Subject: Test\n\nHello\n");
-    deliver(&maildir, &m).unwrap();
+    deliver_test(&maildir, &m).unwrap();
 
     assert!(maildir.join("tmp").is_dir());
     assert!(maildir.join("new").is_dir());
@@ -24,7 +24,7 @@ fn deliver_to_new() {
     let maildir = dir.path().join("Maildir");
 
     let m = msg("Subject: Test\n\nBody\n");
-    let r = deliver(&maildir, &m).unwrap();
+    let r = deliver_test(&maildir, &m).unwrap();
 
     assert!(r.path.contains("/new/"));
 
@@ -44,7 +44,7 @@ fn strips_from_line() {
 
     let m =
         msg("From sender Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n");
-    let r = deliver(&maildir, &m).unwrap();
+    let r = deliver_test(&maildir, &m).unwrap();
 
     let content = fs::read_to_string(&r.path).unwrap();
     assert!(!content.starts_with("From "));
