@@ -76,13 +76,12 @@ impl Field {
     /// Check if name matches (case-insensitive, prefix match allowed).
     pub fn name_matches(&self, pattern: &[u8]) -> bool {
         let name = self.name();
-        if pattern.len() > name.len() {
+        let pat = pattern.strip_suffix(b":").unwrap_or(pattern);
+        if pat.len() > name.len() {
             return false;
         }
-        name[..pattern.len()].eq_ignore_ascii_case(pattern)
-            && (pattern.len() == name.len()
-                || pattern.ends_with(b":")
-                || !pattern.contains(&b':'))
+        name[..pat.len()].eq_ignore_ascii_case(pat)
+            && (pat.len() == name.len() || !pat.contains(&b':'))
     }
 
     /// Rename this field by changing the name portion.
@@ -123,8 +122,7 @@ impl Field {
         if self.is_from_line() {
             return false;
         }
-        let val = self.value();
-        val.iter().all(|&b| b == b' ' || b == b'\t')
+        self.value().is_empty()
     }
 
     /// Ensure there's a space after the colon. Returns true if field was modified.

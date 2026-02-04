@@ -130,7 +130,8 @@ fn reply_subject_adds_re() {
 }
 
 #[test]
-fn reply_subject_no_double_re() {
+fn reply_subject_always_adds_re() {
+    // procmail always adds Re:, even if already present
     let mut fields = FieldList::new();
     fields.push(Field::from_parts(b"From:", b"sender@example.com"));
     fields.push(Field::from_parts(b"Subject:", b"Re: Hello"));
@@ -144,7 +145,7 @@ fn reply_subject_no_double_re() {
 
     let subj = reply.find(b"Subject").unwrap();
     let val = std::str::from_utf8(subj.value()).unwrap();
-    assert!(!val.contains("Re: Re:"));
+    assert!(val.contains("Re: Re: Hello"));
 }
 
 #[test]

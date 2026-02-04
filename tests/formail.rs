@@ -137,11 +137,11 @@ fn reply_mode() {
 
 #[test]
 fn reply_no_double_re() {
+    // Note: procmail always adds Re:, even if already present
     let input = "From: sender@example.com\nSubject: Re: Hello\n\nBody\n";
     let (out, code) = run(&["-r", "-t"], input);
     assert_eq!(code, 0);
-    assert!(out.contains("Subject: Re: Hello"));
-    assert!(!out.contains("Re: Re:"));
+    assert!(out.contains("Subject: Re: Re: Hello"));
 }
 
 #[test]
@@ -227,7 +227,8 @@ fn zap_adds_space() {
 
 #[test]
 fn zap_removes_empty() {
-    let input = "From: user@host\nX-Empty:   \nSubject: Test\n\nBody\n";
+    // Note: procmail only removes truly empty fields (no value), not whitespace-only
+    let input = "From: user@host\nX-Empty:\nSubject: Test\n\nBody\n";
     let (out, code) = run(&["-f", "-z"], input);
     assert_eq!(code, 0);
     assert!(!out.contains("X-Empty:"));

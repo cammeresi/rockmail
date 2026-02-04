@@ -19,5 +19,8 @@ regex = "1"
 thiserror = "1"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 
+[features]
+gold = []
+
 [dev-dependencies]
 tempfile = "3"

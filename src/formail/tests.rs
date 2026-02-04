@@ -85,8 +85,16 @@ fn zap_whitespace_already_has_space() {
 
 #[test]
 fn is_empty_value_true() {
-    let f = Field::new(b"X-Empty:  \t \n".to_vec()).unwrap();
+    // Truly empty (no value at all)
+    let f = Field::new(b"X-Empty:\n".to_vec()).unwrap();
     assert!(f.is_empty_value());
+}
+
+#[test]
+fn is_empty_value_whitespace() {
+    // Whitespace-only is NOT empty (matches procmail)
+    let f = Field::new(b"X-Empty:  \t \n".to_vec()).unwrap();
+    assert!(!f.is_empty_value());
 }
 
 #[test]
@@ -97,9 +105,10 @@ fn is_empty_value_false() {
 
 #[test]
 fn zap_removes_empty() {
+    // Only truly empty fields are removed, not whitespace-only
     let mut list = FieldList::new();
     list.push(Field::new(b"Subject: Test\n".to_vec()).unwrap());
-    list.push(Field::new(b"X-Empty:   \n".to_vec()).unwrap());
+    list.push(Field::new(b"X-Empty:\n".to_vec()).unwrap());
     list.push(Field::new(b"From: user\n".to_vec()).unwrap());
     list.zap_whitespace();
     assert_eq!(list.len(), 2);

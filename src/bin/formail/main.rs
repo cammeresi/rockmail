@@ -123,7 +123,7 @@ struct Args {
     delete_insert: Vec<String>,
 
     /// Rename field (oldname: newname:)
-    #[arg(short = 'R', value_names = ["old", "new"], action = clap::ArgAction::Append)]
+    #[arg(short = 'R', num_args = 2, value_names = ["old", "new"], action = clap::ArgAction::Append)]
     rename: Vec<String>,
 
     /// Keep first occurrence only
@@ -235,13 +235,18 @@ fn run(args: Args) -> io::Result<i32> {
 
         if args.keep_body {
             let prefix = args.prefix.as_deref().unwrap_or(">");
-            output_body(
+            let quote = if args.no_escape { Quote::None } else { Quote::All };
+            let had_body = output_body(
                 &body,
                 &mut stdin,
                 &mut stdout,
-                !args.no_escape,
+                quote,
                 prefix,
             )?;
+            if had_body {
+                // mbox format: blank line after message
+                stdout.write_all(b"\n")?;
+            }
         }
         return Ok(util::EX_OK as i32);
     }
@@ -278,13 +283,18 @@ fn run(args: Args) -> io::Result<i32> {
             || (args.extract.is_empty() && args.extract_keep.is_empty())
         {
             let prefix = args.prefix.as_deref().unwrap_or(">");
-            output_body(
+            let quote = if args.no_escape { Quote::None } else { Quote::From };
+            let had_body = output_body(
                 &body,
                 &mut stdin,
                 &mut stdout,
-                !args.no_escape,
+                quote,
                 prefix,
             )?;
+            if had_body {
+                // mbox format: blank line after message
+                stdout.write_all(b"\n")?;
+            }
         }
     }
 
@@ -388,19 +398,35 @@ fn output_extracted(
     Ok(())
 }
 
-fn output_body(
-    initial: &[u8], reader: &mut impl BufRead, out: &mut impl Write,
-    escape: bool, prefix: &str,
-) -> io::Result<()> {
-    if escape {
-        for line in initial.split_inclusive(|&b| b == b'\n') {
-            if line.starts_with(b"From ") {
-                out.write_all(prefix.as_bytes())?;
-            }
-            out.write_all(line)?;
+enum Quote {
+    None,
+    From,
+    All,
+}
+
+impl Quote {
+    fn prefix(&self, line: &[u8]) -> bool {
+        match self {
+            Quote::None => false,
+            Quote::From => line.starts_with(b"From "),
+            Quote::All => true,
         }
-    } else {
-        out.write_all(initial)?;
+    }
+}
+
+fn output_body<R, W>(
+    initial: &[u8], reader: &mut R, out: &mut W, quote: Quote, prefix: &str,
+) -> io::Result<bool>
+where
+    R: BufRead,
+    W: Write,
+{
+    let mut wrote = !initial.is_empty();
+    for line in initial.split_inclusive(|&b| b == b'\n') {
+        if quote.prefix(line) {
+            out.write_all(prefix.as_bytes())?;
+        }
+        out.write_all(line)?;
     }
 
     let mut line = Vec::with_capacity(1024);
@@ -410,13 +436,14 @@ fn output_body(
         if n == 0 {
             break;
         }
-        if escape && line.starts_with(b"From ") {
+        wrote = true;
+        if quote.prefix(&line) {
             out.write_all(prefix.as_bytes())?;
         }
         out.write_all(&line)?;
     }
 
-    Ok(())
+    Ok(wrote)
 }
 
 fn output_log_summary(
@@ -532,15 +559,10 @@ fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
         find_reply_address(args, orig).unwrap_or_else(|| "UNKNOWN".to_string());
     reply.push(Field::from_parts(b"To:", addr.as_bytes()));
 
-    // Subject with Re: prefix
+    // Subject with Re: prefix (procmail always adds Re:, even if already present)
     if let Some(subj) = orig.find(b"Subject") {
         let s = String::from_utf8_lossy(subj.value());
-        let s = s.trim();
-        let new_subj = if s.to_ascii_lowercase().starts_with("re:") {
-            s.to_string()
-        } else {
-            format!("Re: {}", s)
-        };
+        let new_subj = format!("Re:{}", s);
         reply.push(Field::from_parts(b"Subject:", new_subj.as_bytes()));
     }
 
@@ -687,6 +709,10 @@ where
         if is_boundary {
             // Output previous message if any
             if in_msg && !msg.is_empty() {
+                // Strip trailing blank line (before this boundary)
+                if msg.ends_with(b"\n\n") {
+                    msg.pop();
+                }
                 msg_num += 1;
                 if msg_num > skip {
                     if let Some(t) = total
@@ -830,6 +856,8 @@ fn output_message(
 ) -> io::Result<()> {
     if cmd.is_empty() {
         io::stdout().write_all(msg)?;
+        // mbox format: blank line after message
+        io::stdout().write_all(b"\n")?;
     } else {
         let fileno =
             format!("{:0width$}", base + num as i64, width = width.max(1));
