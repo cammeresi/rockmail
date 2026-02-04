@@ -273,6 +273,14 @@ fn duplicate_maxlen_zero() {
 }
 
 #[test]
+fn output_body_custom_prefix() {
+    let body = b"Hello\nFrom me\nFrom the start\nGoodbye\n";
+    let mut out = Vec::new();
+    output_body(&body[..], &mut &[][..], &mut out, Quote::From, "|").unwrap();
+    assert_eq!(out, b"Hello\n|From me\n|From the start\nGoodbye\n");
+}
+
+#[test]
 fn babyl_format_split() {
     // Create BABYL format input
     let mut input = Vec::new();

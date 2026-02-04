@@ -1,11 +1,13 @@
 //! Gold standard tests comparing Rust formail against procmail's formail.
 //!
 //! Run with:
-//!     PROCMAIL_FORMAIL=/bin/formail cargo test --features gold --test formail_gold
+//!     PROCMAIL_FORMAIL=/bin/formail \
+//!         cargo test --features gold --test formail_gold
 
 #![cfg(feature = "gold")]
 
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 fn procmail_formail() -> String {
@@ -17,9 +19,10 @@ fn rust_formail() -> &'static str {
     env!("CARGO_BIN_EXE_formail")
 }
 
-fn run(bin: &str, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
+fn run(dir: &Path, bin: &str, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
     let mut child = Command::new(bin)
         .args(args)
+        .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -40,10 +43,18 @@ struct Gold {
 
 impl Gold {
     fn run(args: &[&str], input: &[u8]) -> Self {
+        let rust_dir = tempfile::tempdir().unwrap();
+        let proc_dir = tempfile::tempdir().unwrap();
         let proc = procmail_formail();
-        let (rust_out, rust_code) = run(rust_formail(), args, input);
-        let (proc_out, proc_code) = run(&proc, args, input);
-        Self { rust_out, rust_code, proc_out, proc_code }
+        let (rust_out, rust_code) =
+            run(rust_dir.path(), rust_formail(), args, input);
+        let (proc_out, proc_code) = run(proc_dir.path(), &proc, args, input);
+        Self {
+            rust_out,
+            rust_code,
+            proc_out,
+            proc_code,
+        }
     }
 
     fn assert_eq(&self) {
@@ -82,10 +93,11 @@ impl Gold {
 fn normalize_from_line(data: &[u8]) -> Vec<u8> {
     // Match From_ lines with varying whitespace before timestamp
     let re = regex::bytes::Regex::new(
-        r"(?m)^From (\S+) +\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}\n"
+        r"(?m)^From (\S+) +\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}\n",
     )
     .unwrap();
-    re.replace_all(data, b"From $1 TIMESTAMP\n".as_slice()).into_owned()
+    re.replace_all(data, b"From $1 TIMESTAMP\n".as_slice())
+        .into_owned()
 }
 
 fn normalize_message_id(data: &[u8]) -> Vec<u8> {
@@ -111,7 +123,11 @@ macro_rules! gold {
 
 // Tier 1: Exact match (deterministic operations)
 
-gold!(passthrough, &["-f"], b"From: user@host\nSubject: Test\n\nBody\n");
+gold!(
+    passthrough,
+    &["-f"],
+    b"From: user@host\nSubject: Test\n\nBody\n"
+);
 
 gold!(
     extract_value,
@@ -201,6 +217,13 @@ gold!(
     no_escape,
     &["-f", "-b"],
     b"From: user@host\n\nFrom the beginning\nBody\n"
+);
+
+gold!(
+    custom_prefix,
+    &["-p", "|"],
+    b"From: user@host\n\nFrom the start\nBody\n",
+    normalize_from_line
 );
 
 // Tier 2: Normalized match (From_ line timestamps)
@@ -318,4 +341,18 @@ fn binary_body() {
     input.push(b'\n');
 
     Gold::run(&["-f"], &input).assert_eq();
+}
+
+#[test]
+fn duplicate_new() {
+    let input = b"From: a@a\nMessage-ID: <gold-new@host>\n\nBody\n";
+    Gold::run(&["-D", "1000", "cache"], input).assert_eq();
+}
+
+#[test]
+fn duplicate_found() {
+    let input = b"From: a@a\nMessage-ID: <gold-found@host>\n\nBody\n";
+    // First run populates cache, second finds duplicate
+    Gold::run(&["-D", "1000", "cache"], input);
+    Gold::run(&["-D", "1000", "cache"], input).assert_eq();
 }

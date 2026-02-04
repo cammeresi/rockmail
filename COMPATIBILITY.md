@@ -58,6 +58,11 @@ The original formail's `-Y` flag (ignore Content-Length headers) is not
 implemented. Content-Length headers are always ignored since corpmail uses
 From_ line detection for message boundaries.
 
+## formail: -q- syntax
+
+The `-q-` syntax to disable quiet mode is not implemented. The `-q` flag
+is accepted but has no effect (quiet mode is always on).
+
 ## procmail: -z (LMTP server mode)
 
 Procmail's `-z` flag enables LMTP server mode (RFC 2033). This is an optional

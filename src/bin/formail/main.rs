@@ -81,9 +81,9 @@ struct Args {
     #[arg(short = 'p', value_name = "prefix")]
     prefix: Option<String>,
 
-    /// Be quiet about errors (default on, use -q- to disable)
-    #[arg(short = 'q', action = clap::ArgAction::Count)]
-    quiet: u8,
+    /// Be quiet about errors (always on, ignored)
+    #[arg(short = 'q')]
+    quiet: bool,
 
     /// Generate auto-reply header
     #[arg(short = 'r')]
@@ -106,7 +106,8 @@ struct Args {
     duplicate: Option<Vec<String>>,
 
     // Header operations (can be repeated)
-    /// Add header if not present (use "Name:" for just name, generates Message-ID)
+    /// Add header if not present (use "Name:" for just name, generates
+    /// Message-ID)
     #[arg(short = 'a', value_name = "header", action = clap::ArgAction::Append)]
     add_if_not: Vec<String>,
 
@@ -123,7 +124,12 @@ struct Args {
     delete_insert: Vec<String>,
 
     /// Rename field (oldname: newname:)
-    #[arg(short = 'R', num_args = 2, value_names = ["old", "new"], action = clap::ArgAction::Append)]
+    #[arg(
+        short = 'R',
+        num_args = 2,
+        value_names = ["old", "new"],
+        action = clap::ArgAction::Append
+    )]
     rename: Vec<String>,
 
     /// Keep first occurrence only
@@ -235,14 +241,13 @@ fn run(args: Args) -> io::Result<i32> {
 
         if args.keep_body {
             let prefix = args.prefix.as_deref().unwrap_or(">");
-            let quote = if args.no_escape { Quote::None } else { Quote::All };
-            let had_body = output_body(
-                &body,
-                &mut stdin,
-                &mut stdout,
-                quote,
-                prefix,
-            )?;
+            let quote = if args.no_escape {
+                Quote::None
+            } else {
+                Quote::All
+            };
+            let had_body =
+                output_body(&body, &mut stdin, &mut stdout, quote, prefix)?;
             if had_body {
                 // mbox format: blank line after message
                 stdout.write_all(b"\n")?;
@@ -283,14 +288,13 @@ fn run(args: Args) -> io::Result<i32> {
             || (args.extract.is_empty() && args.extract_keep.is_empty())
         {
             let prefix = args.prefix.as_deref().unwrap_or(">");
-            let quote = if args.no_escape { Quote::None } else { Quote::From };
-            let had_body = output_body(
-                &body,
-                &mut stdin,
-                &mut stdout,
-                quote,
-                prefix,
-            )?;
+            let quote = if args.no_escape {
+                Quote::None
+            } else {
+                Quote::From
+            };
+            let had_body =
+                output_body(&body, &mut stdin, &mut stdout, quote, prefix)?;
             if had_body {
                 // mbox format: blank line after message
                 stdout.write_all(b"\n")?;
@@ -559,7 +563,8 @@ fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
         find_reply_address(args, orig).unwrap_or_else(|| "UNKNOWN".to_string());
     reply.push(Field::from_parts(b"To:", addr.as_bytes()));
 
-    // Subject with Re: prefix (procmail always adds Re:, even if already present)
+    // Subject with Re: prefix (procmail always adds Re:, even if already
+    // present)
     if let Some(subj) = orig.find(b"Subject") {
         let s = String::from_utf8_lossy(subj.value());
         let new_subj = format!("Re:{}", s);
