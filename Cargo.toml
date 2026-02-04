@@ -17,7 +17,7 @@ log = "0.4"
 nix = { version = "0.29", features = ["user", "fs", "process", "signal", "hostname"] }
 regex = "1"
 thiserror = "1"
-time = { version = "0.3", features = ["formatting", "macros"] }
+time = { version = "0.3", features = ["formatting", "local-offset"] }
 
 [dev-dependencies]
 tempfile = "3"
