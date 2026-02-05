@@ -3,10 +3,14 @@
 //! Run with:
 //!     PROCMAIL_FORMAIL=/bin/formail \
 //!         cargo test --features gold --test formail_gold
+//!
+//! Many of these tests require running procmail with -f lest the two
+//! procmails generate new "From " lines with differing timestamps.
+//! Otherwise timestamps need to be ignored when comparing output.
 
 #![cfg(feature = "gold")]
 
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
@@ -84,7 +88,13 @@ impl Gold {
             .spawn()
             .expect("failed to spawn formail");
 
-        child.stdin.take().unwrap().write_all(input).unwrap();
+        if let Err(e) = child.stdin.take().unwrap().write_all(input) {
+            // formail may exit before reading all input (e.g. -x extracts
+            // headers only)
+            if e.kind() != ErrorKind::BrokenPipe {
+                panic!("failed to write to stdin: {e}");
+            }
+        }
         let out = child.wait_with_output().expect("failed to wait");
         (out.stdout, out.status.code().unwrap_or(-1))
     }
@@ -156,15 +166,51 @@ gold!(
 );
 
 gold!(
+    extract_value_multiple,
+    &["-x", "Received"],
+    b"Received: first\nReceived: second\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    extract_value_continuation,
+    &["-x", "Subject"],
+    b"From: user@host\nSubject: This is\n a continued\n header\n\nBody\n"
+);
+
+gold!(
     extract_with_name,
     &["-X", "Subject"],
     b"From: user@host\nSubject: Hello\n\nBody\n"
 );
 
 gold!(
+    extract_with_name_multiple,
+    &["-X", "Received"],
+    b"Received: first\nReceived: second\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    extract_with_name_continuation,
+    &["-X", "Subject"],
+    b"From: user@host\nSubject: This is\n a continued\n header\n\nBody\n"
+);
+
+gold!(
     extract_missing,
     &["-x", "X-Missing"],
     b"From: user@host\n\nBody\n"
+);
+
+gold!(
+    extract_concatenate,
+    &["-c", "-x", "Subject"],
+    b"From: user@host\nSubject: This is\n a continued\n header\n\nBody\n"
+);
+
+gold!(
+    extract_concatenate_with_name,
+    &["-c", "-X", "Subject"],
+    b"From: user@host\nSubject: This is\n a continued\n header\n\nBody\n"
 );
 
 gold!(
@@ -180,9 +226,45 @@ gold!(
 );
 
 gold!(
+    keep_first_single,
+    &["-f", "-u", "Subject"],
+    b"From: user@host\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    keep_first_missing,
+    &["-f", "-u", "X-Missing"],
+    b"From: user@host\nSubject: Test\n\nBody\n"
+);
+
+gold!(
     keep_last,
     &["-f", "-U", "Received"],
     b"Received: first\nReceived: second\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    keep_last_single,
+    &["-f", "-U", "Subject"],
+    b"From: user@host\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    keep_last_missing,
+    &["-f", "-U", "X-Missing"],
+    b"From: user@host\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    rename_multiple,
+    &["-f", "-R", "Received:", "X-Received:"],
+    b"Received: first\nReceived: second\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    rename_missing,
+    &["-f", "-R", "X-Missing:", "X-New:"],
+    b"From: user@host\nSubject: Test\n\nBody\n"
 );
 
 gold!(
@@ -198,9 +280,40 @@ gold!(
 );
 
 gold!(
+    add_if_missing_multiple,
+    &["-f", "-a", "X-Foo: bar", "-a", "X-Bar: baz"],
+    b"From: user@host\n\nBody\n"
+);
+
+gold!(
+    add_if_missing_msgid,
+    &["-f", "-a", "Message-ID:"],
+    b"From: user@host\n\nBody\n",
+    normalize_message_id
+);
+
+gold!(
+    add_if_present_msgid,
+    &["-f", "-a", "Message-ID:"],
+    b"From: user@host\nMessage-ID: <existing@host>\n\nBody\n"
+);
+
+gold!(
     add_always,
     &["-f", "-A", "X-Foo: bar"],
     b"From: user@host\nX-Foo: original\n\nBody\n"
+);
+
+gold!(
+    add_always_no_existing,
+    &["-f", "-A", "X-Foo: bar"],
+    b"From: user@host\n\nBody\n"
+);
+
+gold!(
+    add_always_multiple,
+    &["-f", "-A", "X-Foo: bar", "-A", "X-Foo: baz"],
+    b"From: user@host\n\nBody\n"
 );
 
 gold!(
@@ -213,6 +326,54 @@ gold!(
     insert_rename,
     &["-f", "-i", "Subject: New Subject"],
     b"From: user\nSubject: Old Subject\n\nBody\n"
+);
+
+gold!(
+    insert_rename_no_existing,
+    &["-f", "-i", "X-New: value"],
+    b"From: user\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    insert_rename_multiple,
+    &["-f", "-i", "Received: new"],
+    b"Received: first\nReceived: second\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    insert_rename_name_only,
+    &["-f", "-i", "Subject:"],
+    b"From: user\nSubject: Old Subject\n\nBody\n"
+);
+
+gold!(
+    delete_insert,
+    &["-f", "-I", "Subject: New Subject"],
+    b"From: user\nSubject: Old Subject\n\nBody\n"
+);
+
+gold!(
+    delete_insert_no_existing,
+    &["-f", "-I", "X-New: value"],
+    b"From: user\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    delete_insert_multiple,
+    &["-f", "-I", "Received: new"],
+    b"Received: first\nReceived: second\nSubject: Test\n\nBody\n"
+);
+
+gold!(
+    delete_insert_name_only,
+    &["-f", "-I", "Subject:"],
+    b"From: user\nSubject: Old Subject\n\nBody\n"
+);
+
+gold!(
+    delete_insert_name_only_no_existing,
+    &["-f", "-I", "X-Missing:"],
+    b"From: user\nSubject: Test\n\nBody\n"
 );
 
 gold!(
