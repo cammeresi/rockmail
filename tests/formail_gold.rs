@@ -356,3 +356,9 @@ fn duplicate_found() {
     Gold::run(&["-D", "1000", "cache"], input);
     Gold::run(&["-D", "1000", "cache"], input).assert_eq();
 }
+
+gold!(
+    log_summary,
+    &["-l", "/inbox"],
+    b"From user@host Mon Jan  1 00:00:00 2024\nFrom: user@host\nSubject: Test message\n\nBody here\n"
+);

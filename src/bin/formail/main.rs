@@ -265,6 +265,8 @@ fn run(args: Args) -> io::Result<i32> {
         let mut rest = Vec::new();
         stdin.read_to_end(&mut rest)?;
         total += rest.len();
+        // mbox format adds trailing blank line
+        total += 1;
 
         output_log_summary(folder, &fields, total, &mut stdout)?;
         return Ok(util::EX_OK as i32);
@@ -455,7 +457,6 @@ fn output_log_summary(
     folder: &str, fields: &FieldList, len: usize, out: &mut impl Write,
 ) -> io::Result<()> {
     const TAB: usize = 8;
-    const OFFSET: usize = 64;
     const MAX_SUBJ: usize = 78;
 
     if let Some(f) = fields.iter().next()
@@ -472,7 +473,7 @@ fn output_log_summary(
         } else {
             &s
         };
-        out.write_all(b" ")?;
+        out.write_all(b" Subject: ")?;
         out.write_all(s.as_bytes())?;
         out.write_all(b"\n")?;
     }
@@ -481,14 +482,25 @@ fn output_log_summary(
     out.write_all(prefix.as_bytes())?;
     out.write_all(folder.as_bytes())?;
 
+    // Right-align size to column 79
+    let num = format!("{len}");
     let mut col = prefix.len() + folder.len();
-    col -= col % TAB;
-    while col < OFFSET {
-        out.write_all(b"\t")?;
-        col += TAB;
+    let target = 79 - num.len();
+    while col < target {
+        let next = (col / TAB + 1) * TAB;
+        if next <= target {
+            out.write_all(b"\t")?;
+            col = next;
+        } else {
+            break;
+        }
+    }
+    while col < target {
+        out.write_all(b" ")?;
+        col += 1;
     }
 
-    writeln!(out, "{len}")?;
+    writeln!(out, "{num}")?;
     Ok(())
 }
 
