@@ -10,7 +10,7 @@ use std::process::{Command, Stdio};
 
 use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType};
-use crate::locking;
+use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{Env, SubstCtx};
@@ -519,7 +519,10 @@ where
     ) -> EngineResult<Outcome> {
         // Acquire lockfile if specified
         let _guard = if let Some(p) = self.resolve_lockfile(recipe) {
-            Some(LockGuard::acquire(p)?)
+            Some(FileLock::acquire(Path::new(&p)).map_err(|e| {
+                log::error!("failed to acquire lock {}: {}", p, e);
+                EngineError::Lock(p)
+            })?)
         } else {
             None
         };
@@ -547,12 +550,11 @@ where
     fn resolve_lockfile(&self, recipe: &Recipe) -> Option<String> {
         let lock = recipe.lockfile.as_ref()?;
         if lock.is_empty() {
-            // Auto-generate lockfile from action
+            // Auto-generate from folder action
             match &recipe.action {
                 Action::Folder(path) => {
                     let path_str = path.to_string_lossy();
-                    let expanded = self.expand(&path_str);
-                    Some(format!("{}.lock", expanded))
+                    Some(self.expand(&path_str))
                 }
                 _ => None,
             }
@@ -759,25 +761,4 @@ fn skip_from_line(data: &[u8]) -> &[u8] {
         return &data[pos + 1..];
     }
     data
-}
-
-/// RAII guard for recipe lockfiles. Releases lock on drop.
-struct LockGuard {
-    path: String,
-}
-
-impl LockGuard {
-    fn acquire(path: String) -> EngineResult<Self> {
-        locking::create_lock(Path::new(&path)).map_err(|e| {
-            log::error!("failed to acquire lock {}: {}", path, e);
-            EngineError::Lock(path.clone())
-        })?;
-        Ok(Self { path })
-    }
-}
-
-impl Drop for LockGuard {
-    fn drop(&mut self) {
-        let _ = locking::remove_lock(Path::new(&self.path));
-    }
 }

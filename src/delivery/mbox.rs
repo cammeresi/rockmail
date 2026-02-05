@@ -3,33 +3,22 @@ mod tests;
 
 use std::fs::OpenOptions;
 use std::io::{self, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::{DeliveryError, DeliveryOpts, DeliveryResult};
-use crate::locking;
+use crate::locking::FileLock;
 use crate::mail::{Message, generate as from_line};
-
-fn lock_path(path: &Path) -> PathBuf {
-    let mut s = path.as_os_str().to_owned();
-    s.push(".lock");
-    PathBuf::from(s)
-}
 
 /// Deliver a message to an mbox file.
 ///
 /// Appends the message with proper From_ escaping. A From_ line is
 /// prepended if the message doesn't start with one.
-/// Acquires dotlock before writing for concurrent safety.
+/// Acquires flock before writing for concurrent safety.
 pub fn deliver(
     path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
-    let lock = lock_path(path);
-    locking::create_lock(&lock)?;
-
-    let result = deliver_inner(path, msg, sender, opts);
-
-    let _ = locking::remove_lock(&lock);
-    result
+    let _guard = FileLock::acquire(path)?;
+    deliver_inner(path, msg, sender, opts)
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ use regex::Regex;
 use time::format_description::OwnedFormatItem;
 use time::{OffsetDateTime, UtcOffset};
 
-use corpmail::locking::{create_lock, remove_lock};
+use corpmail::locking::FileLock;
 use corpmail::util::{EX_CANTCREAT, EX_NOINPUT, EX_OK, EX_TEMPFAIL, exit};
 
 #[cfg(test)]
@@ -90,7 +90,7 @@ fn main() -> ExitCode {
     let args = Args::parse();
     let keep = args.keep || args.old;
 
-    let locks = if keep {
+    let _locks = if keep {
         Vec::new()
     } else {
         match acquire_locks(&args.file) {
@@ -99,9 +99,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let code = run(&args, keep);
-    release_locks(&locks);
-    exit(code)
+    exit(run(&args, keep))
 }
 
 fn run(args: &Args, keep: bool) -> u8 {
@@ -273,14 +271,13 @@ fn load_rc() -> RcConfig {
     RcConfig { ignores, date_fmt }
 }
 
-fn acquire_locks(base: &Path) -> Result<Vec<PathBuf>, ExitCode> {
+fn acquire_locks(base: &Path) -> Result<Vec<FileLock>, ExitCode> {
     let mut locks = Vec::new();
-    for ext in ["lock", "old.lock"] {
-        let path = base.with_added_extension(ext);
-        match create_lock(&path) {
-            Ok(()) => locks.push(path),
+    let old = base.with_added_extension("old");
+    for path in [base, old.as_path()] {
+        match FileLock::acquire(path) {
+            Ok(l) => locks.push(l),
             Err(e) => {
-                release_locks(&locks);
                 eprintln!(
                     "mailstat: cannot lock \"{}\": {}",
                     path.display(),
@@ -291,18 +288,6 @@ fn acquire_locks(base: &Path) -> Result<Vec<PathBuf>, ExitCode> {
         }
     }
     Ok(locks)
-}
-
-fn release_locks(locks: &[PathBuf]) {
-    for lock in locks {
-        if let Err(e) = remove_lock(lock) {
-            eprintln!(
-                "mailstat: warning: cannot remove lock \"{}\": {}",
-                lock.display(),
-                e
-            );
-        }
-    }
 }
 
 fn normalize_folder(name: &str) -> String {

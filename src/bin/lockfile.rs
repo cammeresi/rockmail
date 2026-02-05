@@ -1,3 +1,5 @@
+#![cfg(feature = "nfs")]
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::thread::sleep;
