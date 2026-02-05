@@ -76,3 +76,8 @@ controls this.
 
 Corpmail does not support comsat notifications. The `COMSAT` variable
 is ignored. This feature is rarely used on modern systems.
+
+## formail: -s with command
+
+The `-s` (split) flag does not support piping to a command. Only `-s`
+without arguments is supported, which outputs split messages to stdout.
