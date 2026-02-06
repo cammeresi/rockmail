@@ -141,7 +141,7 @@ where
             }
             VAR_MAILDIR => {
                 if let Err(e) = env::set_current_dir(value) {
-                    log::warn!("can't chdir to {:?}: {}", value, e);
+                    eprintln!("can't chdir to {:?}: {}", value, e);
                     let cur = env::current_dir()
                         .map(|p| p.to_string_lossy().into_owned())
                         .unwrap_or_else(|_| ".".into());
@@ -166,11 +166,11 @@ where
         }
         let Ok(f) = OpenOptions::new().create(true).append(true).open(path)
         else {
-            log::warn!("failed to open logfile: {}", path);
+            eprintln!("failed to open logfile: {}", path);
             return;
         };
         if dup2(f.as_raw_fd(), 2).is_err() {
-            log::warn!("failed to redirect stderr to logfile: {}", path);
+            eprintln!("failed to redirect stderr to logfile: {}", path);
             return;
         }
         self.logfile = Some(f);
@@ -243,7 +243,7 @@ where
             Ok(c) => c,
             Err(e) => {
                 if e.kind() != ErrorKind::NotFound && path != "/dev/null" {
-                    log::warn!("failed to read rcfile {}: {}", path, e);
+                    eprintln!("failed to read rcfile {}: {}", path, e);
                 }
                 return None;
             }
@@ -252,7 +252,7 @@ where
         match crate::config::parse(&content) {
             Ok(items) => Some(items),
             Err(e) => {
-                log::warn!("failed to parse rcfile {}: {}", path, e);
+                eprintln!("failed to parse rcfile {}: {}", path, e);
                 None
             }
         }
@@ -389,7 +389,7 @@ where
                 Ordering::Greater => '>',
                 Ordering::Equal => '=',
             };
-            log::info!(
+            eprintln!(
                 "{} on {}{}",
                 if matched { "Match" } else { "No match" },
                 sym,
@@ -420,7 +420,7 @@ where
         let ok = self.run_shell(&expanded, text.as_bytes())?;
 
         if self.verbose {
-            log::info!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
+            eprintln!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
         }
 
         let Some(wt) = weight else {
@@ -450,7 +450,7 @@ where
             }
             let matched = result.matched ^ negate;
             if self.verbose {
-                log::info!(
+                eprintln!(
                     "{} on \"{}\"",
                     if matched { "Match" } else { "No match" },
                     pattern
@@ -471,12 +471,7 @@ where
         let score = if negate { -score } else { score };
 
         if self.verbose {
-            log::info!(
-                "Score {} ({} matches) on \"{}\"",
-                score,
-                count,
-                pattern
-            );
+            eprintln!("Score {} ({} matches) on \"{}\"", score, count, pattern);
         }
 
         Ok((true, score, true))
@@ -499,7 +494,7 @@ where
                 self.set_var("MATCH", cap);
             }
             if self.verbose {
-                log::info!(
+                eprintln!(
                     "{} on {} ?? {}",
                     if result.matched { "Match" } else { "No match" },
                     name,
@@ -513,12 +508,9 @@ where
         let score = compute_weighted_score(wt, count);
 
         if self.verbose {
-            log::info!(
+            eprintln!(
                 "Score {} ({} matches) on {} ?? {}",
-                score,
-                count,
-                name,
-                pattern
+                score, count, name, pattern
             );
         }
 
@@ -578,7 +570,7 @@ where
         // Acquire lockfile if specified
         let _guard = if let Some(p) = self.resolve_lockfile(recipe) {
             Some(FileLock::acquire_temp(Path::new(&p)).map_err(|e| {
-                log::error!("failed to acquire lock {}: {}", p, e);
+                eprintln!("failed to acquire lock {}: {}", p, e);
                 EngineError::Lock(p)
             })?)
         } else {
@@ -641,7 +633,7 @@ where
         let result = match result {
             Ok(r) => r,
             Err(e) if ignore => {
-                log::warn!("Ignoring delivery error: {}", e);
+                eprintln!("Ignoring delivery error: {}", e);
                 return Ok(Outcome::Continue);
             }
             Err(e) => return Err(e.into()),
@@ -651,7 +643,7 @@ where
         self.ctx.lastfolder = result.path.clone();
 
         if self.verbose {
-            log::info!("Delivered to {}", result.path);
+            eprintln!("Delivered to {}", result.path);
         }
 
         Ok(Outcome::Delivered(result.path))
@@ -675,16 +667,15 @@ where
             Err(DeliveryError::PipeExit(code)) if wait => {
                 self.ctx.last_exit = code;
                 if !quiet {
-                    log::error!("Program failure ({}) of \"{}\"", code, cmd);
+                    eprintln!("Program failure ({}) of \"{}\"", code, cmd);
                 }
                 return Ok(Outcome::Default);
             }
             Err(DeliveryError::PipeSignal(sig)) if wait => {
                 if !quiet {
-                    log::error!(
+                    eprintln!(
                         "Program terminated by signal {} \"{}\"",
-                        sig,
-                        cmd
+                        sig, cmd
                     );
                 }
                 return Ok(Outcome::Default);
@@ -707,7 +698,7 @@ where
         self.ctx.lastfolder = cmd.to_string();
 
         if self.verbose {
-            log::info!("Piped to \"{}\"", cmd);
+            eprintln!("Piped to \"{}\"", cmd);
         }
 
         Ok(Outcome::Delivered(cmd.to_string()))
@@ -756,7 +747,7 @@ where
         self.ctx.lastfolder = dest.clone();
 
         if self.verbose {
-            log::info!("Forwarded to {}", dest);
+            eprintln!("Forwarded to {}", dest);
         }
 
         Ok(Outcome::Delivered(dest))

@@ -116,7 +116,7 @@ fn main() -> ExitCode {
         EX_CANTCREAT
     };
 
-    // Set up environment before spawning any threads (env_logger may spawn)
+    // Set up environment before spawning any threads
     let penv = match init_env(&args) {
         Ok(e) => e,
         Err(e) => {
@@ -124,8 +124,6 @@ fn main() -> ExitCode {
             return ExitCode::from(fail_code);
         }
     };
-
-    env_logger::init();
 
     match run(args, penv) {
         Ok(code) => code.map_or(ExitCode::SUCCESS, ExitCode::from),
@@ -348,7 +346,7 @@ fn getenv(name: &str) -> Option<String> {
 }
 
 fn setenv(name: &str, value: &str) {
-    // SAFETY: called only from init_env before env_logger::init spawns threads
+    // SAFETY: called only from init_env before any threads spawn
     unsafe { std::env::set_var(name, value) }
 }
 

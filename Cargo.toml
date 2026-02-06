@@ -11,9 +11,7 @@ categories = ["email", "command-line-utilities"]
 anyhow = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-env_logger = "0.11"
 filetime = "0.2"
-log = "0.4"
 nix = { version = "0.29", features = ["user", "fs", "process", "signal", "hostname"] }
 regex = "1"
 thiserror = "1"

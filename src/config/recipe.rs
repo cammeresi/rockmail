@@ -63,7 +63,7 @@ impl Flags {
                 'i' => f.ignore = true,
                 'r' => f.raw = true,
                 ' ' | '\t' => {}
-                _ => log::warn!("unknown recipe flag: {c}"),
+                _ => eprintln!("unknown recipe flag: {c}"),
             }
         }
         f
