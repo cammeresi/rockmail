@@ -3,8 +3,10 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fs;
+use std::env;
+use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -13,7 +15,11 @@ use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
-use crate::variables::{Env, SubstCtx};
+use crate::variables::{
+    Env, SubstCtx, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_UMASK, VAR_VERBOSE,
+};
+use nix::sys::stat::{self, Mode};
+use nix::unistd::dup2;
 
 #[cfg(test)]
 mod tests;
@@ -85,6 +91,8 @@ where
     ctx: SubstCtx,
     vars: HashMap<String, String>,
     verbose: bool,
+    /// Kept alive so the fd backing stderr remains valid.
+    logfile: Option<File>,
 }
 
 impl<E> Engine<E>
@@ -97,6 +105,7 @@ where
             ctx,
             vars: HashMap::new(),
             verbose: false,
+            logfile: None,
         }
     }
 
@@ -105,7 +114,7 @@ where
     }
 
     /// Get a variable (local vars override env).
-    fn get_var(&self, name: &str) -> Option<Cow<'_, str>> {
+    pub fn get_var(&self, name: &str) -> Option<Cow<'_, str>> {
         if let Some(v) = self.vars.get(name) {
             Some(Cow::Borrowed(v))
         } else {
@@ -113,9 +122,57 @@ where
         }
     }
 
-    /// Set a local variable.
+    /// Set a local variable, applying side effects for special variables.
     pub fn set_var(&mut self, name: &str, value: &str) {
         self.vars.insert(name.to_string(), value.to_string());
+        self.apply_side_effect(name, value);
+    }
+
+    fn apply_side_effect(&mut self, name: &str, value: &str) {
+        match name {
+            VAR_VERBOSE => {
+                self.verbose = matches!(value, "on" | "yes" | "1");
+            }
+            VAR_UMASK => {
+                if let Ok(m) = u32::from_str_radix(value, 8) {
+                    stat::umask(Mode::from_bits_truncate(m));
+                }
+            }
+            VAR_MAILDIR => {
+                if let Err(e) = env::set_current_dir(value) {
+                    log::warn!("can't chdir to {:?}: {}", value, e);
+                    let cur = env::current_dir()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| ".".into());
+                    self.vars.insert(name.to_string(), cur);
+                }
+            }
+            VAR_LOG => {
+                eprint!("{value}");
+            }
+            VAR_LOGFILE => {
+                self.open_logfile(value);
+            }
+            _ => {}
+        }
+    }
+
+    /// Open a logfile and redirect stderr to it.
+    fn open_logfile(&mut self, path: &str) {
+        if path.is_empty() {
+            self.logfile = None;
+            return;
+        }
+        let Ok(f) = OpenOptions::new().create(true).append(true).open(path)
+        else {
+            log::warn!("failed to open logfile: {}", path);
+            return;
+        };
+        if dup2(f.as_raw_fd(), 2).is_err() {
+            log::warn!("failed to redirect stderr to logfile: {}", path);
+            return;
+        }
+        self.logfile = Some(f);
     }
 
     /// Process a list of items (rcfile contents).
@@ -660,12 +717,17 @@ where
         let sendmail = self
             .get_var("SENDMAIL")
             .unwrap_or(Cow::Borrowed("/usr/sbin/sendmail"));
+        let flags = self
+            .get_var("SENDMAILFLAGS")
+            .unwrap_or(Cow::Borrowed("-oi"));
         let msg = self.message_for_delivery(recipe, msg);
 
         // Skip From_ line for forwarding
         let data = skip_from_line(msg.as_bytes());
 
+        let flag_args: Vec<&str> = flags.split_whitespace().collect();
         let mut child = Command::new(&*sendmail)
+            .args(&flag_args)
             .args(addrs)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())

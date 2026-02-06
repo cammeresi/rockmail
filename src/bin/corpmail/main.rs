@@ -11,7 +11,7 @@ use corpmail::config::{self, is_var_name};
 use corpmail::mail::Message;
 use corpmail::recipe::{Engine, Outcome};
 use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
-use corpmail::variables::{Env, RealEnv, SubstCtx};
+use corpmail::variables::*;
 use nix::unistd::{Uid, User};
 
 #[cfg(test)]
@@ -128,7 +128,7 @@ fn main() -> ExitCode {
     env_logger::init();
 
     match run(args, penv) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code.map_or(ExitCode::SUCCESS, ExitCode::from),
         Err(e) => {
             eprintln!("corpmail: {e}");
             ExitCode::from(fail_code)
@@ -136,7 +136,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
+fn run(
+    args: Args, penv: ProcEnv,
+) -> Result<Option<u8>, Box<dyn std::error::Error>> {
     let mail = read_mail()?;
     let mut msg = Message::parse(&mail);
 
@@ -150,7 +152,8 @@ fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
 
     // -d: delivery mode - deliver directly to recipient
     if let Some(ref recip) = args.deliver {
-        return deliver_to_recipient(&penv, &msg, recip);
+        deliver_to_recipient(&penv, &msg, recip)?;
+        return Ok(None);
     }
 
     let argv = if args.mailfilter {
@@ -187,7 +190,7 @@ fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
         && let Some(Outcome::Delivered(_)) =
             process_etcrc(&mut engine, &mut msg)?
     {
-        return Ok(());
+        return Ok(exit_code(&engine));
     }
 
     // Find user rcfile to use
@@ -204,11 +207,26 @@ fn run(args: Args, penv: ProcEnv) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // DELIVERED variable: pretend message was delivered
+    if !delivered
+        && engine
+            .get_var(VAR_DELIVERED)
+            .is_some_and(|v| v == "yes" || v == "1")
+    {
+        delivered = true;
+    }
+
     if !delivered {
         deliver_default(&penv, &msg)?;
     }
 
-    Ok(())
+    Ok(exit_code(&engine))
+}
+
+/// Check for EXITCODE variable override.
+fn exit_code(engine: &Engine<RealEnv>) -> Option<u8> {
+    let v = engine.get_var(VAR_EXITCODE)?;
+    v.parse::<u8>().ok()
 }
 
 /// Process /etc/procmailrc if it exists.
@@ -375,11 +393,18 @@ fn build_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
         setenv("HOME", &e.home);
         setenv("LOGNAME", &e.logname);
         setenv("SHELL", &e.shell);
+        setenv(VAR_PATH, DEF_PATH);
     }
     setenv("MAILDIR", &e.maildir);
     setenv("ORGMAIL", &e.orgmail);
     setenv("DEFAULT", &e.orgmail);
     setenv("HOST", &e.host);
+    setenv(VAR_SENDMAILFLAGS, DEF_SENDMAILFLAGS);
+    setenv(VAR_PROCMAIL_VERSION, VERSION);
+    setenv(VAR_USER_SHELL, &e.shell);
+    setenv(VAR_NORESRETRY, &DEF_NORESRETRY.to_string());
+    setenv(VAR_SUSPEND, &DEF_SUSPEND.to_string());
+    setenv(VAR_LOGABSTRACT, &DEF_LOGABSTRACT.to_string());
 
     Ok(e)
 }

@@ -1,5 +1,7 @@
 use std::io::{Read, Write};
 
+use tempfile::NamedTempFile;
+
 use super::*;
 
 #[test]
@@ -178,7 +180,7 @@ fn find_reply_untrusted() {
 
 #[test]
 fn duplicate_cache_circular_buffer() {
-    let cache = tempfile::NamedTempFile::new().unwrap();
+    let cache = NamedTempFile::new().unwrap();
     let path = cache.path().to_str().unwrap().to_string();
 
     // Helper to run check_duplicate
@@ -260,7 +262,7 @@ fn binary_body() {
 
 #[test]
 fn duplicate_maxlen_zero() {
-    let cache = tempfile::NamedTempFile::new().unwrap();
+    let cache = NamedTempFile::new().unwrap();
     let path = cache.path().to_str().unwrap().to_string();
 
     let mut fields = FieldList::new();
@@ -278,6 +280,54 @@ fn output_body_custom_prefix() {
     let mut out = Vec::new();
     output_body(&body[..], &mut &[][..], &mut out, Quote::From, "|").unwrap();
     assert_eq!(out, b"Hello\n|From me\n|From the start\nGoodbye\n");
+}
+
+#[test]
+fn duplicate_cache_many_messages() {
+    let cache = NamedTempFile::new().unwrap();
+    let path = cache.path().to_str().unwrap().to_string();
+
+    let check = |msgid: &str, maxlen| -> bool {
+        let mut fields = FieldList::new();
+        fields.push(Field::from_parts(b"Message-ID:", msgid.as_bytes()));
+        let args = Args::default();
+        check_duplicate(&args, &fields, &path, maxlen).unwrap()
+    };
+
+    // Each ID is 12 chars + null + end marker = 14 bytes
+    // Use cache large enough for ~8 IDs
+    let maxlen = 120;
+
+    // Insert several unique messages
+    for i in 0..8 {
+        let id = format!("<msg{:03}@x>", i);
+        let dup = check(&id, maxlen);
+        assert!(!dup, "msg {} should not be duplicate on first insert", i);
+    }
+
+    // All inserted messages should be detected as duplicates
+    for i in 0..8 {
+        let id = format!("<msg{:03}@x>", i);
+        let dup = check(&id, maxlen);
+        assert!(dup, "msg {} should be duplicate", i);
+    }
+
+    // Overflow the cache - this should wrap and evict earlier entries
+    for i in 8..16 {
+        let id = format!("<msg{:03}@x>", i);
+        let dup = check(&id, maxlen);
+        assert!(!dup, "msg {} should not be duplicate on first insert", i);
+    }
+
+    // Early messages should have been evicted by wrap-around
+    let id = format!("<msg{:03}@x>", 0);
+    let dup = check(&id, maxlen);
+    assert!(!dup, "msg 0 should have been evicted");
+
+    // Recent messages should still be present
+    let id = format!("<msg{:03}@x>", 15);
+    let dup = check(&id, maxlen);
+    assert!(dup, "msg 15 should still be in cache");
 }
 
 #[test]
