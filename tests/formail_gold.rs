@@ -10,10 +10,9 @@
 
 #![cfg(feature = "gold")]
 
-use std::io::{ErrorKind, Write};
-use std::path::Path;
-use std::process::{Command, Stdio};
-use tempfile::TempDir;
+mod common;
+
+use common::{Gold, GoldResult, normalize_from_line, normalize_message_id};
 
 fn procmail_formail() -> String {
     std::env::var("PROCMAIL_FORMAIL")
@@ -24,129 +23,29 @@ fn rust_formail() -> &'static str {
     env!("CARGO_BIN_EXE_formail")
 }
 
-#[must_use]
-struct GoldResult {
-    rust_out: Vec<u8>,
-    rust_code: i32,
-    proc_out: Vec<u8>,
-    proc_code: i32,
+fn run_once(args: &[&str], input: &[u8]) -> GoldResult {
+    Gold::run_once(rust_formail(), &procmail_formail(), args, input)
 }
 
-impl GoldResult {
-    fn assert_codes_eq(rust: i32, proc: i32) {
-        assert_eq!(
-            rust, proc,
-            "exit codes differ: rust={}, proc={}",
-            rust, proc
-        );
-    }
-
-    fn assert_output_eq(rust: &[u8], proc: &[u8]) {
-        if rust != proc {
-            panic!(
-                "stdout differs:\n--- rust ---\n{}\n--- proc ---\n{}",
-                String::from_utf8_lossy(rust),
-                String::from_utf8_lossy(proc)
-            );
-        }
-    }
-
-    fn assert_eq(self) {
-        Self::assert_codes_eq(self.rust_code, self.proc_code);
-        Self::assert_output_eq(&self.rust_out, &self.proc_out);
-    }
-
-    fn assert_eq_with<F: Fn(&[u8]) -> Vec<u8>>(self, norm: F) {
-        Self::assert_codes_eq(self.rust_code, self.proc_code);
-        Self::assert_output_eq(&norm(&self.rust_out), &norm(&self.proc_out));
-    }
+fn gold() -> Gold {
+    Gold::new()
 }
 
-/// Runs both Rust and procmail formail in temp directories for comparison.
-struct Gold {
-    rust_dir: TempDir,
-    proc_dir: TempDir,
-}
-
-impl Gold {
-    fn new() -> Self {
-        Self {
-            rust_dir: TempDir::new().unwrap(),
-            proc_dir: TempDir::new().unwrap(),
-        }
-    }
-
-    fn run_impl(
-        dir: &Path, bin: &str, args: &[&str], input: &[u8],
-    ) -> (Vec<u8>, i32) {
-        let mut child = Command::new(bin)
-            .args(args)
-            .current_dir(dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("failed to spawn formail");
-
-        if let Err(e) = child.stdin.take().unwrap().write_all(input) {
-            // formail may exit before reading all input (e.g. -x extracts
-            // headers only)
-            if e.kind() != ErrorKind::BrokenPipe {
-                panic!("failed to write to stdin: {e}");
-            }
-        }
-        let out = child.wait_with_output().expect("failed to wait");
-        (out.stdout, out.status.code().unwrap_or(-1))
-    }
-
-    /// Run with fresh temp directories (for single-run tests).
-    fn run_once(args: &[&str], input: &[u8]) -> GoldResult {
-        Gold::new().run(args, input)
-    }
-
-    /// Run using persistent temp directories (for multi-run tests).
-    fn run(&self, args: &[&str], input: &[u8]) -> GoldResult {
-        let proc = procmail_formail();
-        let (rust_out, rust_code) =
-            Self::run_impl(self.rust_dir.path(), rust_formail(), args, input);
-        let (proc_out, proc_code) =
-            Self::run_impl(self.proc_dir.path(), &proc, args, input);
-        GoldResult {
-            rust_out,
-            rust_code,
-            proc_out,
-            proc_code,
-        }
-    }
-}
-
-fn normalize_from_line(data: &[u8]) -> Vec<u8> {
-    // Match From_ lines with varying whitespace before timestamp
-    let re = regex::bytes::Regex::new(
-        r"(?m)^From (\S+) +\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}\n",
-    )
-    .unwrap();
-    re.replace_all(data, b"From $1 TIMESTAMP\n".as_slice())
-        .into_owned()
-}
-
-fn normalize_message_id(data: &[u8]) -> Vec<u8> {
-    let re = regex::bytes::Regex::new(r"Message-ID: <[^>]+>").unwrap();
-    re.replace_all(data, b"Message-ID: <GENERATED>".as_slice())
-        .into_owned()
+fn run(g: &Gold, args: &[&str], input: &[u8]) -> GoldResult {
+    g.run(rust_formail(), &procmail_formail(), args, input)
 }
 
 macro_rules! gold {
     ($name:ident, $args:expr, $input:expr) => {
         #[test]
         fn $name() {
-            Gold::run_once($args, $input).assert_eq();
+            run_once($args, $input).assert_eq();
         }
     };
     ($name:ident, $args:expr, $input:expr, $norm:expr) => {
         #[test]
         fn $name() {
-            Gold::run_once($args, $input).assert_eq_with($norm);
+            run_once($args, $input).assert_eq_with($norm);
         }
     };
 }
@@ -521,23 +420,23 @@ fn binary_body() {
     }
     input.push(b'\n');
 
-    Gold::run_once(&["-f"], &input).assert_eq();
+    run_once(&["-f"], &input).assert_eq();
 }
 
 #[test]
 fn duplicate_new() {
     let input = b"From: a@a\nMessage-ID: <gold-new@host>\n\nBody\n";
-    Gold::run_once(&["-D", "1000", "cache"], input).assert_eq();
+    run_once(&["-D", "1000", "cache"], input).assert_eq();
 }
 
 #[test]
 fn duplicate_found() {
-    let g = Gold::new();
+    let g = gold();
     let input = b"From: a@a\nMessage-ID: <gold-found@host>\n\nBody\n";
     // First run populates cache
-    g.run(&["-D", "1000", "cache"], input).assert_eq();
+    run(&g, &["-D", "1000", "cache"], input).assert_eq();
     // Second finds duplicate
-    g.run(&["-D", "1000", "cache"], input).assert_eq();
+    run(&g, &["-D", "1000", "cache"], input).assert_eq();
 }
 
 gold!(
@@ -566,59 +465,59 @@ gold!(
 
 #[test]
 fn duplicate_sequence() {
-    let g = Gold::new();
+    let g = gold();
     let msg1 = b"From: a@a\nMessage-ID: <seq-1@test>\n\nBody1\n";
     let msg2 = b"From: a@a\nMessage-ID: <seq-2@test>\n\nBody2\n";
 
     // First occurrence of msg1 - unique
-    g.run(&["-D", "1000", "cache"], msg1).assert_eq();
+    run(&g, &["-D", "1000", "cache"], msg1).assert_eq();
     // First occurrence of msg2 - unique
-    g.run(&["-D", "1000", "cache"], msg2).assert_eq();
+    run(&g, &["-D", "1000", "cache"], msg2).assert_eq();
     // Second occurrence of msg1 - should be duplicate
-    g.run(&["-D", "1000", "cache"], msg1).assert_eq();
+    run(&g, &["-D", "1000", "cache"], msg1).assert_eq();
 }
 
 #[test]
 fn duplicate_wraparound() {
-    let g = Gold::new();
+    let g = gold();
     // <wrap-1@h> = 10 chars. Entry = 10 + 1 (null) + 1 (end marker) = 12 bytes.
     // With maxlen=11, scan stops before seeing end marker, so second entry
     // wraps to start, evicting the first.
     let msg1 = b"From: a@a\nMessage-ID: <wrap-1@h>\n\nBody\n";
     let msg2 = b"From: a@a\nMessage-ID: <wrap-2@h>\n\nBody\n";
 
-    g.run(&["-D", "11", "cache"], msg1).assert_eq();
-    g.run(&["-D", "11", "cache"], msg2).assert_eq();
+    run(&g, &["-D", "11", "cache"], msg1).assert_eq();
+    run(&g, &["-D", "11", "cache"], msg2).assert_eq();
     // msg2 overwrote msg1, so msg1 is now unique again
-    g.run(&["-D", "11", "cache"], msg1).assert_eq();
+    run(&g, &["-D", "11", "cache"], msg1).assert_eq();
     // msg2 should still be cached
-    g.run(&["-D", "11", "cache"], msg2).assert_eq();
+    run(&g, &["-D", "11", "cache"], msg2).assert_eq();
 }
 
 #[test]
 fn duplicate_reply_mode() {
-    let g = Gold::new();
+    let g = gold();
     // Two messages with same From address but different Message-IDs
     let msg1 = b"From: same@sender.com\nMessage-ID: <reply-1@host>\n\nBody1\n";
     let msg2 = b"From: same@sender.com\nMessage-ID: <reply-2@host>\n\nBody2\n";
 
     // First message with this sender
-    g.run(&["-D", "1000", "cache", "-r"], msg1).assert_eq();
+    run(&g, &["-D", "1000", "cache", "-r"], msg1).assert_eq();
     // Second message from same sender - should be duplicate in -r mode
-    g.run(&["-D", "1000", "cache", "-r"], msg2).assert_eq();
+    run(&g, &["-D", "1000", "cache", "-r"], msg2).assert_eq();
 }
 
 #[test]
 fn duplicate_leading_whitespace_match() {
-    let g = Gold::new();
+    let g = gold();
     // Procmail strips leading spaces only (not trailing)
     let msg1 = b"From: a@a\nMessage-ID: <ws-test@host>\n\nBody\n";
     let msg2 = b"From: a@a\nMessage-ID:   <ws-test@host>\n\nBody\n";
 
     // First occurrence
-    g.run(&["-D", "1000", "cache"], msg1).assert_eq();
+    run(&g, &["-D", "1000", "cache"], msg1).assert_eq();
     // Same ID with extra leading whitespace - should match as duplicate
-    g.run(&["-D", "1000", "cache"], msg2).assert_eq();
+    run(&g, &["-D", "1000", "cache"], msg2).assert_eq();
 }
 
 gold!(
