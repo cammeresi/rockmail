@@ -85,23 +85,20 @@ fn scan_max(path: &Path) -> Result<u64, DeliveryError> {
 fn write_msg(
     file: File, msg: &Message, opts: DeliveryOpts,
 ) -> Result<usize, DeliveryError> {
-    let data = if msg.from_line().is_some() {
-        crate::mail::skip_from_lines(msg.as_bytes())
-    } else {
-        msg.as_bytes()
-    };
+    let data = msg.as_bytes();
 
     let mut w = BufWriter::new(file);
 
     w.write_all(data)?;
     let bytes = data.len();
 
-    let extra = if !opts.raw && !data.ends_with(b"\n") {
+    let mut extra = 0;
+    if !opts.raw && !data.ends_with(b"\n") {
         w.write_all(b"\n")?;
-        1
-    } else {
-        0
-    };
+        extra += 1;
+    }
+    w.write_all(b"\n")?;
+    extra += 1;
 
     w.flush()?;
     let file = w.into_inner().map_err(|e| e.into_error())?;

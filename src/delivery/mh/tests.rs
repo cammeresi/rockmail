@@ -51,7 +51,7 @@ fn finds_highest_existing() {
 }
 
 #[test]
-fn strips_from_line() {
+fn preserves_from_line() {
     let dir = tempdir().unwrap();
     let mh = dir.path().join("inbox");
 
@@ -60,6 +60,5 @@ fn strips_from_line() {
     let r = deliver_test(&mh, &m).unwrap();
 
     let content = fs::read_to_string(&r.path).unwrap();
-    assert!(!content.starts_with("From "));
-    assert!(content.starts_with("Subject:"));
+    assert!(content.starts_with("From sender"));
 }

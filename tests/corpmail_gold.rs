@@ -37,7 +37,7 @@ fn setup(dir: &Path, rc_template: &str) {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
 }
 
-fn run_gold(rc_template: &str, input: &[u8]) {
+fn run_gold_with(rc_template: &str, input: &[u8], cmp: fn(&Path, &Path)) {
     let g = Gold::new();
     setup(g.rust_dir.path(), rc_template);
     setup(g.proc_dir.path(), rc_template);
@@ -48,12 +48,17 @@ fn run_gold(rc_template: &str, input: &[u8]) {
     let (_, rc) = run(g.rust_dir.path(), corpmail(), &args_r, input);
     let (_, pc) = run(g.proc_dir.path(), &procmail(), &args_p, input);
     assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
-    assert_dirs_eq(
+    cmp(
         &g.rust_dir.path().join("maildir"),
         &g.proc_dir.path().join("maildir"),
     );
 }
 
+fn run_gold(rc_template: &str, input: &[u8]) {
+    run_gold_with(rc_template, input, assert_dirs_eq);
+}
+
+/// Compare two directory trees, asserting identical file names and contents.
 fn assert_dirs_eq(rust: &Path, proc: &Path) {
     let r = snapshot(rust);
     let p = snapshot(proc);
@@ -61,17 +66,42 @@ fn assert_dirs_eq(rust: &Path, proc: &Path) {
     let pk: Vec<_> = p.keys().collect();
     assert_eq!(rk, pk, "file sets differ:\n  rust: {rk:?}\n  proc: {pk:?}");
     for (path, rd) in &r {
-        let pd = &p[path];
-        let rn = normalize_from_line(rd);
-        let pn = normalize_from_line(pd);
-        if rn != pn {
-            panic!(
-                "contents differ for {path}:\
-                 \n--- rust ---\n{}\n--- proc ---\n{}",
-                String::from_utf8_lossy(&rn),
-                String::from_utf8_lossy(&pn),
-            );
-        }
+        assert_contents_eq(path, rd, &p[path]);
+    }
+}
+
+/// Compare two directory trees ignoring file names (for maildir, where
+/// filenames contain timestamps/PIDs).  Asserts identical sorted contents.
+fn assert_dirs_eq_contents(rust: &Path, proc: &Path) {
+    let mut r: Vec<_> = snapshot(rust).into_values().collect();
+    let mut p: Vec<_> = snapshot(proc).into_values().collect();
+    assert_eq!(
+        r.len(),
+        p.len(),
+        "file count differs: rust={}, proc={}",
+        r.len(),
+        p.len()
+    );
+    r.sort();
+    p.sort();
+    for (i, (rd, pd)) in r.iter().zip(p.iter()).enumerate() {
+        assert_contents_eq(&format!("file #{i}"), rd, pd);
+    }
+}
+
+fn assert_contents_eq(label: &str, rust: &[u8], proc: &[u8]) {
+    let rn = normalize_from_line(rust);
+    let pn = normalize_from_line(proc);
+    if rn != pn {
+        panic!(
+            "contents differ for {label}:\
+             \n--- rust ({} bytes) ---\n{:?}\
+             \n--- proc ({} bytes) ---\n{:?}",
+            rn.len(),
+            String::from_utf8_lossy(&rn),
+            pn.len(),
+            String::from_utf8_lossy(&pn),
+        );
     }
 }
 
@@ -106,6 +136,35 @@ DEFAULT=$DEFAULT
 
 :0
 inbox
+",
+        b"From: user@host\nSubject: Test\n\nBody\n",
+    );
+}
+
+#[test]
+fn deliver_maildir() {
+    run_gold_with(
+        "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+inbox/
+",
+        b"From: user@host\nSubject: Test\n\nBody\n",
+        assert_dirs_eq_contents,
+    );
+}
+
+#[test]
+fn deliver_mh() {
+    run_gold(
+        "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+inbox/.
 ",
         b"From: user@host\nSubject: Test\n\nBody\n",
     );
