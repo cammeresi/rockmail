@@ -37,7 +37,10 @@ fn setup(dir: &Path, rc_template: &str) {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
 }
 
-fn run_gold_with(rc_template: &str, input: &[u8], cmp: fn(&Path, &Path)) {
+fn run_gold_with(
+    rc_template: &str, inputs: &[&[u8]], count: usize,
+    cmp: fn(&Path, &Path),
+) {
     let g = Gold::new();
     setup(g.rust_dir.path(), rc_template);
     setup(g.proc_dir.path(), rc_template);
@@ -45,18 +48,32 @@ fn run_gold_with(rc_template: &str, input: &[u8], cmp: fn(&Path, &Path)) {
     let rc_p = g.proc_dir.path().join("rcfile");
     let args_r: Vec<&str> = vec!["-f", "sender@test", rc_r.to_str().unwrap()];
     let args_p: Vec<&str> = vec!["-f", "sender@test", rc_p.to_str().unwrap()];
-    let (_, rc) = run(g.rust_dir.path(), corpmail(), &args_r, input);
-    let (_, pc) = run(g.proc_dir.path(), &procmail(), &args_p, input);
-    assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
-    cmp(
-        &g.rust_dir.path().join("maildir"),
-        &g.proc_dir.path().join("maildir"),
-    );
+    for input in inputs {
+        let (_, rc) = run(g.rust_dir.path(), corpmail(), &args_r, input);
+        let (_, pc) = run(g.proc_dir.path(), &procmail(), &args_p, input);
+        assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
+    }
+    let r = &g.rust_dir.path().join("maildir");
+    let n = file_count(r);
+    assert_eq!(n, count, "expected {count} files in maildir, got {n}");
+    cmp(r, &g.proc_dir.path().join("maildir"));
 }
 
-fn run_gold(rc_template: &str, input: &[u8]) {
-    run_gold_with(rc_template, input, assert_dirs_eq);
+fn run_gold(rc_template: &str, inputs: &[&[u8]], count: usize) {
+    run_gold_with(rc_template, inputs, count, assert_dirs_eq);
 }
+
+fn file_count(dir: &Path) -> usize {
+    snapshot(dir).len()
+}
+
+const MSGS: &[&[u8]] = &[
+    b"From: a@host\nSubject: one\n\nBody one\n",
+    b"From: b@host\nSubject: two\n\nBody two\n",
+    b"From: c@host\nSubject: three\n\nBody three\n",
+    b"From: d@host\nSubject: four\n\nBody four\n",
+    b"From: e@host\nSubject: five\n\nBody five\n",
+];
 
 /// Compare two directory trees, asserting identical file names and contents.
 fn assert_dirs_eq(rust: &Path, proc: &Path) {
@@ -119,7 +136,7 @@ fn walk(base: &Path, dir: &Path, map: &mut BTreeMap<String, Vec<u8>>) {
         let p = e.path();
         if p.is_dir() {
             walk(base, &p, map);
-        } else if !p.to_string_lossy().ends_with(".lock") {
+        } else {
             let rel = p.strip_prefix(base).unwrap();
             let key = rel.to_string_lossy().into_owned();
             map.insert(key, fs::read(&p).unwrap());
@@ -133,11 +150,13 @@ fn deliver_mbox() {
         "\
 MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT
+LOG=log
 
 :0
 inbox
 ",
-        b"From: user@host\nSubject: Test\n\nBody\n",
+        MSGS,
+        1,
     );
 }
 
@@ -147,11 +166,13 @@ fn deliver_maildir() {
         "\
 MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT
+LOG=log
 
 :0
 inbox/
 ",
-        b"From: user@host\nSubject: Test\n\nBody\n",
+        MSGS,
+        5,
         assert_dirs_eq_contents,
     );
 }
@@ -162,10 +183,12 @@ fn deliver_mh() {
         "\
 MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT
+LOG=log
 
 :0
 inbox/.
 ",
-        b"From: user@host\nSubject: Test\n\nBody\n",
+        MSGS,
+        5,
     );
 }
