@@ -192,6 +192,22 @@ inbox/.
     );
 }
 
+#[test]
+fn deliver_dev_null() {
+    run_gold(
+        "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOG=log
+
+:0
+/dev/null
+",
+        MSGS,
+        0,
+    );
+}
+
 const ADDRS: &[&str] = &[
     "alice@example.com",
     "bob@work.org",

@@ -78,7 +78,10 @@ fn deliver_inner(
 
     w.flush()?;
     let file = w.into_inner().map_err(|e| e.into_error())?;
-    file.sync_all()?;
+    // fsync on /dev/null returns EINVAL.
+    if path != Path::new("/dev/null") {
+        file.sync_all()?;
+    }
 
     Ok(DeliveryResult {
         bytes,
