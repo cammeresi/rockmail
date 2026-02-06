@@ -1,15 +1,27 @@
-use crate::util::LockError;
+use std::fs::{self, File, OpenOptions};
+use std::path::{Path, PathBuf};
+
 use nix::fcntl::{Flock, FlockArg};
-use std::fs::{File, OpenOptions};
-use std::path::Path;
+
+use crate::util::LockError;
 
 pub struct FileLock {
     #[allow(dead_code)]
     lock: Flock<File>,
+    cleanup: Option<PathBuf>,
 }
 
 impl FileLock {
     pub fn acquire(path: &Path) -> Result<Self, LockError> {
+        Self::open(path, None)
+    }
+
+    /// Acquire a lock and remove the file on drop.
+    pub fn acquire_temp(path: &Path) -> Result<Self, LockError> {
+        Self::open(path, Some(path.to_path_buf()))
+    }
+
+    fn open(path: &Path, cleanup: Option<PathBuf>) -> Result<Self, LockError> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -22,6 +34,14 @@ impl FileLock {
             })?;
         let lock = Flock::lock(file, FlockArg::LockExclusiveNonblock)
             .map_err(|_| LockError::Exists)?;
-        Ok(Self { lock })
+        Ok(Self { lock, cleanup })
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        if let Some(p) = self.cleanup.take() {
+            let _ = fs::remove_file(p);
+        }
     }
 }

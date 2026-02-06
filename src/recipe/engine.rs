@@ -16,7 +16,8 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    Env, SubstCtx, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_UMASK, VAR_VERBOSE,
+    DEF_LOCKEXT, Env, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR,
+    VAR_UMASK, VAR_VERBOSE,
 };
 use nix::sys::stat::{self, Mode};
 use nix::unistd::dup2;
@@ -576,7 +577,7 @@ where
     ) -> EngineResult<Outcome> {
         // Acquire lockfile if specified
         let _guard = if let Some(p) = self.resolve_lockfile(recipe) {
-            Some(FileLock::acquire(Path::new(&p)).map_err(|e| {
+            Some(FileLock::acquire_temp(Path::new(&p)).map_err(|e| {
                 log::error!("failed to acquire lock {}: {}", p, e);
                 EngineError::Lock(p)
             })?)
@@ -607,11 +608,13 @@ where
     fn resolve_lockfile(&self, recipe: &Recipe) -> Option<String> {
         let lock = recipe.lockfile.as_ref()?;
         if lock.is_empty() {
-            // Auto-generate from folder action
             match &recipe.action {
                 Action::Folder(path) => {
                     let path_str = path.to_string_lossy();
-                    Some(self.expand(&path_str))
+                    let ext = self
+                        .get_var(VAR_LOCKEXT)
+                        .unwrap_or(Cow::Borrowed(DEF_LOCKEXT));
+                    Some(self.expand(&path_str) + &ext)
                 }
                 _ => None,
             }

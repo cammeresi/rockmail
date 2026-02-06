@@ -38,8 +38,7 @@ fn setup(dir: &Path, rc_template: &str) {
 }
 
 fn run_gold_with(
-    rc_template: &str, inputs: &[&[u8]], count: usize,
-    cmp: fn(&Path, &Path),
+    rc_template: &str, inputs: &[&[u8]], count: usize, cmp: fn(&Path, &Path),
 ) {
     let g = Gold::new();
     setup(g.rust_dir.path(), rc_template);
@@ -191,4 +190,98 @@ inbox/.
         MSGS,
         5,
     );
+}
+
+const ADDRS: &[&str] = &[
+    "alice@example.com",
+    "bob@work.org",
+    "carol@lists.net",
+    "dave@spam.biz",
+    "eve@friend.io",
+];
+
+const SUBJECTS: &[&str] = &[
+    "Meeting tomorrow",
+    "URGENT deal",
+    "Re: project update",
+    "Newsletter #42",
+    "Invitation to connect",
+];
+
+const LISTS: &[&str] =
+    &["dev@lists.net", "announce@lists.net", "security@lists.net"];
+
+fn build_complex_rc() -> String {
+    let mut rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^X-Spam-Flag: YES
+spam
+
+:0:
+* ^TO_lists\\.net
+lists
+
+:0 c:
+* ^X-Priority: 1
+urgent
+
+"
+    .to_string();
+    for addr in &ADDRS[..2] {
+        let name = addr.split('@').next().unwrap();
+        let escaped = addr.replace('.', "\\.");
+        rc += &format!(":0:\n* ^From:.*{escaped}\n{name}\n\n");
+    }
+    rc += ":0:\n* ^Subject:.*URGENT\nurgent\n";
+    rc
+}
+
+fn build_complex_msgs() -> Vec<Vec<u8>> {
+    let msg = |from: &str, to: &str, subj: &str, extra: &str| {
+        let hdrs = if extra.is_empty() {
+            format!("From: {from}\nTo: {to}\nSubject: {subj}")
+        } else {
+            format!("From: {from}\nTo: {to}\nSubject: {subj}\n{extra}")
+        };
+        format!("{hdrs}\n\nBody\n").into_bytes()
+    };
+    vec![
+        // 0: spam — discarded
+        msg(ADDRS[3], ADDRS[0], SUBJECTS[0], "X-Spam-Flag: YES"),
+        // 1: to list, no other match — lists
+        msg(ADDRS[4], LISTS[0], SUBJECTS[2], ""),
+        // 2: high priority from alice — urgent (copy) + alice
+        msg(ADDRS[0], ADDRS[4], SUBJECTS[0], "X-Priority: 1"),
+        // 3: from bob, normal — bob
+        msg(ADDRS[1], ADDRS[0], SUBJECTS[2], ""),
+        // 4: URGENT subject, from carol — urgent
+        msg(ADDRS[2], ADDRS[0], SUBJECTS[1], ""),
+        // 5: high priority to list — urgent (copy) + lists
+        msg(ADDRS[4], LISTS[1], SUBJECTS[3], "X-Priority: 1"),
+        // 6: from alice, normal — alice
+        msg(ADDRS[0], ADDRS[1], SUBJECTS[4], ""),
+        // 7: no match — default
+        msg(ADDRS[4], ADDRS[3], SUBJECTS[0], ""),
+        // 8: spam with high priority — discarded (spam rule first)
+        msg(
+            ADDRS[3],
+            ADDRS[0],
+            SUBJECTS[1],
+            "X-Spam-Flag: YES\nX-Priority: 1",
+        ),
+        // 9: from bob, URGENT subject — bob (from rule before subject rule)
+        msg(ADDRS[1], ADDRS[0], SUBJECTS[1], ""),
+    ]
+}
+
+#[test]
+fn complex_filtering() {
+    let rc = build_complex_rc();
+    let msgs = build_complex_msgs();
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    // Files: spam (2), lists (2), urgent (3), alice (2), bob (2), default (1)
+    run_gold(&rc, &refs, 6);
 }

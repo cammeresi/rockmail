@@ -217,7 +217,7 @@ fn run(
     }
 
     if !delivered {
-        deliver_default(&penv, &msg)?;
+        deliver_default(&engine, &penv, &msg)?;
     }
 
     Ok(exit_code(&engine))
@@ -600,40 +600,28 @@ fn resolve_rcpath(path: &str, env: &ProcEnv, mailfilter: bool) -> PathBuf {
     }
 }
 
-fn deliver_default(
-    penv: &ProcEnv, msg: &Message,
-) -> Result<(), Box<dyn std::error::Error>> {
-    deliver_default_with_env(penv, msg, &RealEnv)
-}
-
-fn deliver_default_with_env<E>(
-    penv: &ProcEnv, msg: &Message, env: &E,
+fn deliver_default<E>(
+    engine: &Engine<E>, penv: &ProcEnv, msg: &Message,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     E: Env,
 {
-    let default = env.get("DEFAULT").unwrap_or_else(|| penv.orgmail.clone());
     let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
 
-    if !default.is_empty() {
-        corpmail::delivery::mbox(
-            Path::new(&default),
-            msg,
-            sender,
-            Default::default(),
-        )?;
-        return Ok(());
-    }
-
-    let orgmail = env.get("ORGMAIL").unwrap_or_else(|| penv.orgmail.clone());
-    if !orgmail.is_empty() {
-        corpmail::delivery::mbox(
-            Path::new(&orgmail),
-            msg,
-            sender,
-            Default::default(),
-        )?;
-        return Ok(());
+    for name in ["DEFAULT", "ORGMAIL"] {
+        let path = engine
+            .get_var(name)
+            .map(|v| v.into_owned())
+            .unwrap_or_else(|| penv.orgmail.clone());
+        if !path.is_empty() {
+            corpmail::delivery::mbox(
+                Path::new(&path),
+                msg,
+                sender,
+                Default::default(),
+            )?;
+            return Ok(());
+        }
     }
 
     Err("No delivery destination".into())

@@ -17,7 +17,12 @@ use crate::mail::{Message, generate as from_line};
 pub fn deliver(
     path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
-    let _guard = FileLock::acquire(path)?;
+    // Locking /dev/null would be silly (matches procmail behavior).
+    let _guard = if path != Path::new("/dev/null") {
+        Some(FileLock::acquire(path)?)
+    } else {
+        None
+    };
     deliver_inner(path, msg, sender, opts)
 }
 

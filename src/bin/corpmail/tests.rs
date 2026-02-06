@@ -1,7 +1,8 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
-use corpmail::variables::MockEnv;
+use corpmail::recipe::Engine;
+use corpmail::variables::{MockEnv, SubstCtx};
 
 #[test]
 fn parse_rest_assignments() {
@@ -162,11 +163,12 @@ fn deliver_default_to_mbox() {
         ..Default::default()
     };
     let env = MockEnv::new();
+    let engine = Engine::new(env, SubstCtx::default());
 
     let msg = Message::parse(
         b"From sender@test Mon Jan 1 00:00:00 2024\nSubject: Test\n\nBody\n",
     );
-    deliver_default_with_env(&penv, &msg, &env).unwrap();
+    deliver_default(&engine, &penv, &msg).unwrap();
 
     let content = std::fs::read_to_string(&mbox).unwrap();
     assert!(content.contains("Subject: Test"));
