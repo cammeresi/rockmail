@@ -26,4 +26,5 @@ name = "lockfile"
 required-features = ["nfs"]
 
 [dev-dependencies]
+rand = "0.8"
 tempfile = "3"

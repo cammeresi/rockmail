@@ -9,12 +9,16 @@
 #[allow(unused)]
 mod common;
 
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
-use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::panic::AssertUnwindSafe;
+use std::path::{Path, PathBuf};
+use std::{env, fs, panic, process};
 
 use common::{Gold, normalize_from_line, run};
+use rand::Rng;
+use rand::seq::SliceRandom;
 
 fn procmail() -> String {
     std::env::var("PROCMAIL_PROCMAIL")
@@ -37,12 +41,30 @@ fn setup(dir: &Path, rc_template: &str) {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
 }
 
-fn run_gold_with(
-    rc_template: &str, inputs: &[&[u8]], count: usize, cmp: fn(&Path, &Path),
-) {
+fn run_gold_with<S>(
+    rc_template: S, inputs: &[&[u8]], count: Option<usize>,
+    cmp: fn(&Path, &Path),
+) where
+    S: Borrow<str>,
+{
+    let rc_template = rc_template.borrow();
     let g = Gold::new();
     setup(g.rust_dir.path(), rc_template);
     setup(g.proc_dir.path(), rc_template);
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        run_gold_inner(&g, inputs, count, cmp);
+    }));
+    if let Err(e) = result {
+        let dir = preserve_failure(&g, rc_template, inputs);
+        eprintln!("preserved failure artifacts in {}", dir.display());
+        panic::resume_unwind(e);
+    }
+}
+
+fn run_gold_inner(
+    g: &Gold, inputs: &[&[u8]], count: Option<usize>, cmp: fn(&Path, &Path),
+) {
     let rc_r = g.rust_dir.path().join("rcfile");
     let rc_p = g.proc_dir.path().join("rcfile");
     let args_r: Vec<&str> = vec!["-f", "sender@test", rc_r.to_str().unwrap()];
@@ -53,13 +75,47 @@ fn run_gold_with(
         assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
     }
     let r = &g.rust_dir.path().join("maildir");
-    let n = file_count(r);
-    assert_eq!(n, count, "expected {count} files in maildir, got {n}");
+    if let Some(count) = count {
+        let n = file_count(r);
+        assert_eq!(n, count, "expected {count} files in maildir, got {n}");
+    }
     cmp(r, &g.proc_dir.path().join("maildir"));
 }
 
+fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
+    let dir =
+        env::temp_dir().join(format!("corpmail-gold-fail-{}", process::id(),));
+    let _ = fs::create_dir_all(&dir);
+    fs::write(dir.join("rcfile"), rc_template).ok();
+    for (i, msg) in inputs.iter().enumerate() {
+        fs::write(dir.join(format!("msg-{i:02}")), msg).ok();
+    }
+    // Copy the maildir trees for comparison
+    let rust_out = dir.join("rust");
+    let proc_out = dir.join("proc");
+    copy_dir(&g.rust_dir.path().join("maildir"), &rust_out);
+    copy_dir(&g.proc_dir.path().join("maildir"), &proc_out);
+    dir
+}
+
+fn copy_dir(src: &Path, dst: &Path) {
+    let _ = fs::create_dir_all(dst);
+    let Ok(entries) = fs::read_dir(src) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        let target = dst.join(e.file_name());
+        if p.is_dir() {
+            copy_dir(&p, &target);
+        } else {
+            fs::copy(&p, &target).ok();
+        }
+    }
+}
+
 fn run_gold(rc_template: &str, inputs: &[&[u8]], count: usize) {
-    run_gold_with(rc_template, inputs, count, assert_dirs_eq);
+    run_gold_with(rc_template, inputs, Some(count), assert_dirs_eq);
 }
 
 fn file_count(dir: &Path) -> usize {
@@ -171,7 +227,7 @@ LOG=log
 inbox/
 ",
         MSGS,
-        5,
+        Some(5),
         assert_dirs_eq_contents,
     );
 }
@@ -227,31 +283,33 @@ const SUBJECTS: &[&str] = &[
 const LISTS: &[&str] =
     &["dev@lists.net", "announce@lists.net", "security@lists.net"];
 
-fn build_complex_rc() -> String {
-    let mut rc = "\
+fn build_complex_rc(suffix: &str) -> String {
+    let s = suffix;
+    let mut rc = format!(
+        "\
 MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT
 
 :0
 * ^X-Spam-Flag: YES
-spam
+spam{s}
 
-:0:
+:0
 * ^TO_lists\\.net
-lists
+lists{s}
 
-:0 c:
+:0 c
 * ^X-Priority: 1
-urgent
+urgent{s}
 
 "
-    .to_string();
+    );
     for addr in &ADDRS[..2] {
         let name = addr.split('@').next().unwrap();
         let escaped = addr.replace('.', "\\.");
-        rc += &format!(":0:\n* ^From:.*{escaped}\n{name}\n\n");
+        rc += &format!(":0\n* ^From:.*{escaped}\n{name}{s}\n\n");
     }
-    rc += ":0:\n* ^Subject:.*URGENT\nurgent\n";
+    rc += &format!(":0\n* ^Subject:.*URGENT\nurgent{s}\n");
     rc
 }
 
@@ -294,10 +352,151 @@ fn build_complex_msgs() -> Vec<Vec<u8>> {
 }
 
 #[test]
-fn complex_filtering() {
-    let rc = build_complex_rc();
+fn complex_filtering_static_mbox() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    // Files: spam (2), lists (2), urgent (3), alice (2), bob (2), default (1)
-    run_gold(&rc, &refs, 6);
+    // 10 messages + 2 copies across 6 destinations
+    run_gold(&build_complex_rc(""), &refs, 6);
+}
+
+#[test]
+fn complex_filtering_static_maildir() {
+    let msgs = build_complex_msgs();
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    run_gold_with(build_complex_rc("/"), &refs, None, assert_dirs_eq_contents);
+}
+
+#[test]
+fn complex_filtering_static_mh() {
+    let msgs = build_complex_msgs();
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    run_gold_with(build_complex_rc("/."), &refs, None, assert_dirs_eq);
+}
+
+fn build_random_rc(rng: &mut impl Rng, suffix: &str) -> String {
+    let s = suffix;
+    let mut rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+"
+    .to_string();
+    if rng.gen_bool(0.5) {
+        rc += &format!(":0\n* ^X-Spam-Flag: YES\nspam{s}\n\n");
+    }
+    if rng.gen_bool(0.5) {
+        rc += &format!(":0\n* ^TO_lists\\.net\nlists{s}\n\n");
+    }
+    if rng.gen_bool(0.5) {
+        rc += &format!(":0 c\n* ^X-Priority: 1\nurgent{s}\n\n");
+    }
+    let n = rng.gen_range(1..=ADDRS.len());
+    let mut addrs: Vec<_> = ADDRS.to_vec();
+    addrs.shuffle(rng);
+    for addr in &addrs[..n] {
+        let name = addr.split('@').next().unwrap();
+        let escaped = addr.replace('.', "\\.");
+        rc += &format!(":0\n* ^From:.*{escaped}\n{name}{s}\n\n");
+    }
+    if rng.gen_bool(0.5) {
+        rc += &format!(":0\n* ^Subject:.*URGENT\nurgent{s}\n");
+    }
+    rc
+}
+
+fn build_random_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
+    let n = rng.gen_range(10..=20);
+    let msg = |from: &str, to: &str, subj: &str, extra: &str| {
+        let hdrs = if extra.is_empty() {
+            format!("From: {from}\nTo: {to}\nSubject: {subj}")
+        } else {
+            format!("From: {from}\nTo: {to}\nSubject: {subj}\n{extra}")
+        };
+        format!("{hdrs}\n\nBody\n").into_bytes()
+    };
+    let extras = ["", "", "", "X-Spam-Flag: YES", "X-Priority: 1"];
+    (0..n)
+        .map(|_| {
+            let from = ADDRS.choose(rng).unwrap();
+            let to = if rng.gen_bool(0.3) {
+                LISTS.choose(rng).unwrap()
+            } else {
+                ADDRS.choose(rng).unwrap()
+            };
+            let subj = SUBJECTS.choose(rng).unwrap();
+            let extra = extras.choose(rng).unwrap();
+            msg(from, to, subj, extra)
+        })
+        .collect()
+}
+
+fn run_random(suffix: &str, cmp: fn(&Path, &Path)) {
+    let mut rng = rand::thread_rng();
+    let rc = build_random_rc(&mut rng, suffix);
+    let msgs = build_random_msgs(&mut rng);
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    run_gold_with(rc, &refs, None, cmp);
+}
+
+#[test]
+fn complex_filtering_random_mbox() {
+    run_random("", assert_dirs_eq);
+}
+
+#[test]
+fn complex_filtering_random_maildir() {
+    run_random("/", assert_dirs_eq_contents);
+}
+
+#[test]
+fn complex_filtering_random_mh() {
+    run_random("/.", assert_dirs_eq);
+}
+
+fn build_size_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
+    let n = rng.gen_range(10..=20);
+    (0..n)
+        .map(|_| {
+            let from = ADDRS.choose(rng).unwrap();
+            let to = ADDRS.choose(rng).unwrap();
+            let subj = SUBJECTS.choose(rng).unwrap();
+            let body_len = rng.gen_range(10..=500);
+            let body: String = (0..body_len).map(|_| 'x').collect();
+            format!("From: {from}\nTo: {to}\nSubject: {subj}\n\n{body}\n")
+                .into_bytes()
+        })
+        .collect()
+}
+
+fn build_size_rc(rng: &mut impl Rng) -> String {
+    let thresh = rng.gen_range(100..=300);
+    let mut rc = format!(
+        "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* > {thresh}
+big
+
+:0
+* < {thresh}
+small
+
+"
+    );
+    // Negated From rule: deliver to "other" if NOT from a random addr
+    let addr = ADDRS.choose(rng).unwrap();
+    let escaped = addr.replace('.', "\\.");
+    rc += &format!(":0\n* ! ^From:.*{escaped}\nother\n");
+    rc
+}
+
+#[test]
+fn size_and_negation() {
+    let mut rng = rand::thread_rng();
+    let rc = build_size_rc(&mut rng);
+    let msgs = build_size_msgs(&mut rng);
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    run_gold_with(rc, &refs, None, assert_dirs_eq);
 }
