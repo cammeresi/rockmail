@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::Read;
 
 use tempfile::NamedTempFile;
 
@@ -328,35 +328,4 @@ fn duplicate_cache_many_messages() {
     let id = format!("<msg{:03}@x>", 15);
     let dup = check(&id, maxlen);
     assert!(dup, "msg 15 should still be in cache");
-}
-
-#[test]
-fn babyl_format_split() {
-    // Create BABYL format input
-    let mut input = Vec::new();
-    // BABYL header
-    write!(input, "BABYL OPTIONS:\nVersion: 5\n").unwrap();
-    // Separator
-    input.push(BABYL_SEP1);
-    input.push(BABYL_SEP2);
-    input.push(b'\n');
-    // First message pseudo-header
-    writeln!(input, "0, unseen,,").unwrap();
-    write!(input, "*** STRSTRSTR STRSTRSTR ***\n\n").unwrap();
-    // Actual message
-    writeln!(input, "From: test@example.com").unwrap();
-    write!(input, "Subject: Test 1\n\n").unwrap();
-    writeln!(input, "Body 1").unwrap();
-    // Second message separator
-    input.push(BABYL_SEP1);
-    input.push(BABYL_SEP2);
-    input.push(b'\n');
-    writeln!(input, "0, unseen,,").unwrap();
-    write!(input, "*** EOSTRSTR EOSTRSTR ***\n\n").unwrap();
-    writeln!(input, "From: other@example.com").unwrap();
-    write!(input, "Subject: Test 2\n\n").unwrap();
-    writeln!(input, "Body 2").unwrap();
-
-    // Verify the test input contains expected separators
-    assert!(input.contains(&BABYL_SEP1));
 }

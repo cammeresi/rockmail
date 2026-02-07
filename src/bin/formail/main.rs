@@ -42,10 +42,6 @@ struct Args {
     #[arg(short = 'b')]
     no_escape: bool,
 
-    /// BABYL rmail file format
-    #[arg(short = 'B')]
-    babyl: bool,
-
     /// Concatenate continued header fields
     #[arg(short = 'c')]
     concatenate: bool,
@@ -626,10 +622,6 @@ fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
     reply
 }
 
-// BABYL format separators
-const BABYL_SEP1: u8 = 0x1F; // control-_
-const BABYL_SEP2: u8 = 0x0C; // form feed
-
 /// Run in split mode - split mailbox/digest into messages.
 fn run_split(args: Args) -> io::Result<i32> {
     run_split_with_env(args, &RealEnv)
@@ -659,13 +651,6 @@ impl SplitState {
             babyl_start: false,
         }
     }
-
-    fn reset_header(&mut self) {
-        self.pending.clear();
-        self.fields = 0;
-        self.in_msg = false;
-        self.last_blank = true;
-    }
 }
 
 struct SplitConfig<'a> {
@@ -675,7 +660,6 @@ struct SplitConfig<'a> {
     minfields: usize,
     every: bool,
     digest: bool,
-    babyl: bool,
     base: i64,
     width: usize,
 }
@@ -702,18 +686,13 @@ where
         skip: args.skip.unwrap_or(0),
         total: args.total,
         minfields: args.minfields.unwrap_or(2),
-        every: args.every || args.babyl,
-        digest: args.digest || args.babyl,
-        babyl: args.babyl,
+        every: args.every,
+        digest: args.digest,
         base: env.get("FILENO").and_then(|s| s.parse().ok()).unwrap_or(0),
         width: env.get("FILENO").map(|s| s.len()).unwrap_or(0),
     };
     let mut pool = args.nowait.map(ProcessPool::new);
     let mut state = SplitState::new();
-
-    if cfg.babyl {
-        skip_babyl_leader(&mut reader)?;
-    }
 
     let mut line = Vec::new();
     loop {
@@ -724,7 +703,7 @@ where
             break;
         }
 
-        if let Some(msg) = process_line(&cfg, &mut state, &line, &mut reader)?
+        if let Some(msg) = process_line(&cfg, &mut state, &line)?
             && !emit_message(&cfg, &mut pool, &mut state, &msg)?
         {
             break;
@@ -740,51 +719,19 @@ where
     Ok(util::EX_OK as i32)
 }
 
-fn process_line<R>(
-    cfg: &SplitConfig, state: &mut SplitState, line: &[u8], reader: &mut R,
-) -> io::Result<Option<Vec<u8>>>
-where
-    R: BufRead,
-{
-    if cfg.babyl && line.starts_with(&[BABYL_SEP1]) {
-        return process_babyl_sep(state, reader);
-    }
-
-    if cfg.babyl && !state.babyl_start {
-        if state.in_msg {
-            state.msg.extend_from_slice(line);
-        }
-        return Ok(None);
-    }
-
+fn process_line(
+    cfg: &SplitConfig, state: &mut SplitState, line: &[u8],
+) -> io::Result<Option<Vec<u8>>> {
     if cfg.is_boundary(line, state.last_blank) {
-        return process_boundary(cfg, state, line);
+        return process_boundary(state, line);
     }
 
     process_content(cfg, state, line);
     Ok(None)
 }
 
-fn process_babyl_sep<R>(
-    state: &mut SplitState, reader: &mut R,
-) -> io::Result<Option<Vec<u8>>>
-where
-    R: BufRead,
-{
-    state.babyl_start = true;
-    let prev = if state.in_msg && !state.msg.is_empty() {
-        Some(mem::take(&mut state.msg))
-    } else {
-        None
-    };
-    skip_babyl_header(reader)?;
-    state.msg.clear();
-    state.reset_header();
-    Ok(prev)
-}
-
 fn process_boundary(
-    cfg: &SplitConfig, state: &mut SplitState, line: &[u8],
+    state: &mut SplitState, line: &[u8],
 ) -> io::Result<Option<Vec<u8>>> {
     let prev = if state.in_msg && !state.msg.is_empty() {
         let mut msg = mem::take(&mut state.msg);
@@ -798,7 +745,7 @@ fn process_boundary(
 
     state.msg.clear();
     state.pending.clear();
-    start_pending_header(cfg, state, line);
+    start_pending_header(state, line);
     state.fields = if is_header_field(line) { 1 } else { 0 };
     state.in_msg = false;
     state.babyl_start = false;
@@ -806,20 +753,7 @@ fn process_boundary(
     Ok(prev)
 }
 
-fn start_pending_header(
-    cfg: &SplitConfig, state: &mut SplitState, line: &[u8],
-) {
-    if cfg.babyl && line.len() > 10 {
-        let lower: Vec<u8> =
-            line[..10].iter().map(|b| b.to_ascii_lowercase()).collect();
-        if &lower == b"mail-from:" {
-            state.pending.extend_from_slice(b"From ");
-            let rest = &line[10..];
-            let rest = rest.strip_prefix(b" ").unwrap_or(rest);
-            state.pending.extend_from_slice(rest);
-            return;
-        }
-    }
+fn start_pending_header(state: &mut SplitState, line: &[u8]) {
     state.pending.extend_from_slice(line);
 }
 
@@ -883,38 +817,6 @@ fn flush_final(
                 cfg.base,
                 cfg.width,
             )?;
-        }
-    }
-    Ok(())
-}
-
-/// Skip the BABYL leader (everything until the first separator).
-fn skip_babyl_leader<R: BufRead>(reader: &mut R) -> io::Result<()> {
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        let n = reader.read_until(b'\n', &mut line)?;
-        if n == 0 {
-            break;
-        }
-        if line.starts_with(&[BABYL_SEP1, BABYL_SEP2]) {
-            break;
-        }
-    }
-    // Skip the line after the separator
-    line.clear();
-    reader.read_until(b'\n', &mut line)?;
-    Ok(())
-}
-
-/// Skip BABYL pseudo header (until blank line).
-fn skip_babyl_header<R: BufRead>(reader: &mut R) -> io::Result<()> {
-    let mut line = Vec::new();
-    loop {
-        line.clear();
-        let n = reader.read_until(b'\n', &mut line)?;
-        if n == 0 || line == b"\n" || line == b"\r\n" {
-            break;
         }
     }
     Ok(())

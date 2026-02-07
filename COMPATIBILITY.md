@@ -81,3 +81,7 @@ is ignored. This feature is rarely used on modern systems.
 
 The `-s` (split) flag does not support piping to a command. Only `-s`
 without arguments is supported, which outputs split messages to stdout.
+
+## formail: -B flag
+
+Splitting BABYL format mailboxes is unsupported.
