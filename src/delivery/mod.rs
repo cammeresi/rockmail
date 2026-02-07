@@ -11,7 +11,9 @@ use std::path::Path;
 
 use crate::mail::Message;
 
-pub use maildir::{deliver as maildir, deliver_dir as dir};
+pub use maildir::{
+    Namer, deliver as maildir, deliver_dir as dir, deliver_with as maildir_with,
+};
 pub use mbox::deliver as mbox;
 pub use mh::deliver as mh;
 pub use pipe::deliver as pipe;
@@ -69,10 +71,13 @@ impl FolderType {
 
     pub fn deliver(
         self, path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
+        namer: &mut Namer,
     ) -> Result<DeliveryResult, DeliveryError> {
         match self {
             FolderType::File => mbox::deliver(path, msg, sender, opts),
-            FolderType::Maildir => maildir::deliver(path, msg, opts),
+            FolderType::Maildir => {
+                maildir::deliver_with(namer, path, msg, opts)
+            }
             FolderType::Mh => mh::deliver(path, msg, opts),
             FolderType::Dir => maildir::deliver_dir(path, msg, opts),
         }

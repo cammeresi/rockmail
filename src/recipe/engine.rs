@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
-use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType};
+use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
@@ -94,6 +94,7 @@ where
     verbose: bool,
     /// Kept alive so the fd backing stderr remains valid.
     logfile: Option<File>,
+    namer: Namer,
 }
 
 impl<E> Engine<E>
@@ -107,6 +108,7 @@ where
             vars: HashMap::new(),
             verbose: false,
             logfile: None,
+            namer: Namer::new(),
         }
     }
 
@@ -632,7 +634,13 @@ where
         };
 
         let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
-        let result = folder_type.deliver(Path::new(path), &msg, sender, opts);
+        let result = folder_type.deliver(
+            Path::new(path),
+            &msg,
+            sender,
+            opts,
+            &mut self.namer,
+        );
 
         // Handle errors based on i flag
         let result = match result {

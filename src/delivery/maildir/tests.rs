@@ -54,16 +54,16 @@ fn strips_from_line() {
 #[test]
 fn unique_names() {
     let mut namer = Namer::new();
-    let n1 = namer.next().unwrap();
-    let n2 = namer.next().unwrap();
+    let n1 = namer.filename().unwrap();
+    let n2 = namer.filename().unwrap();
     assert_ne!(n1, n2);
 }
 
 #[test]
 fn serial_increments_same_second() {
     let mut namer = Namer::new();
-    let n1 = namer.next().unwrap();
-    let n2 = namer.next().unwrap();
+    let n1 = namer.filename().unwrap();
+    let n2 = namer.filename().unwrap();
     // Both in same second, serial should differ
     assert!(n1.contains("_0."));
     assert!(n2.contains("_1."));

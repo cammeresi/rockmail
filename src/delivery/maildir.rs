@@ -34,7 +34,7 @@ impl Namer {
     }
 
     /// Generate unique filename in Maildir format: time.pid_serial.hostname
-    pub fn next(&mut self) -> Result<String, DeliveryError> {
+    pub fn filename(&mut self) -> Result<String, DeliveryError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| DeliveryError::UniqueFile)?;
@@ -81,7 +81,7 @@ pub fn deliver_dir(
 ) -> Result<DeliveryResult, DeliveryError> {
     fs::create_dir_all(path)?;
 
-    let name = Namer::new().next()?;
+    let name = Namer::new().filename()?;
     let dest = path.join(format!("msg.{}", name));
 
     let bytes = write_msg(&dest, msg, opts)?;
@@ -98,7 +98,7 @@ pub fn deliver_with(
 ) -> Result<DeliveryResult, DeliveryError> {
     ensure_dirs(path)?;
 
-    let name = namer.next()?;
+    let name = namer.filename()?;
     let tmp = path.join("tmp").join(&name);
     let new = path.join("new").join(&name);
 
