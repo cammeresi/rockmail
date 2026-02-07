@@ -1,0 +1,43 @@
+#!/bin/bash
+# Replay a preserved gold test failure directory against corpmail and procmail.
+# Usage: PROCMAIL_PROCMAIL=/usr/bin/procmail bash tests/replay-gold.sh <failure-dir>
+
+set -euo pipefail
+
+dir="${1:?usage: $0 <failure-dir>}"
+dir="$(cd "$dir" && pwd)"
+
+: "${PROCMAIL_PROCMAIL:?set PROCMAIL_PROCMAIL to the procmail binary path}"
+
+# Build corpmail
+cargo build --quiet
+corpmail="$(cargo metadata --format-version=1 --no-deps \
+    | jq -r '.target_directory')/debug/corpmail"
+
+rdir="$(mktemp -d)"
+pdir="$(mktemp -d)"
+trap 'rm -rf "$rdir" "$pdir"' EXIT
+
+mkdir "$rdir/maildir" "$pdir/maildir"
+
+# Substitute $MAILDIR and $DEFAULT into per-runner rcfiles
+for d in "$rdir" "$pdir"; do
+    sed "s|\\\$MAILDIR|$d/maildir|g; s|\\\$DEFAULT|$d/maildir/default|g" \
+        "$dir/rcfile" > "$d/rcfile"
+    chmod 644 "$d/rcfile"
+done
+
+# Feed each message to both binaries
+for msg in "$dir"/msg-*; do
+    "$corpmail" -f sender@test "$rdir/rcfile" < "$msg"
+    "$PROCMAIL_PROCMAIL" -f sender@test "$pdir/rcfile" < "$msg"
+done
+
+# Compare maildir trees
+if diff -r "$rdir/maildir" "$pdir/maildir" > /dev/null 2>&1; then
+    echo "PASS: output matches"
+else
+    echo "FAIL: output differs"
+    diff -r "$rdir/maildir" "$pdir/maildir" || true
+    exit 1
+fi
