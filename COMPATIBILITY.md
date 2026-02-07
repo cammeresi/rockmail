@@ -2,6 +2,13 @@
 
 This file documents intentional differences from procmail behavior.
 
+## Corpmail command line arguments
+
+### Unsupported arguments
+
+- `-z` — LMTP server mode (RFC 2033)
+- `-d` — delivery mode, which requires setuid root installation
+
 ## Regex Word Boundaries
 
 Procmail's `\<` and `\>` consume a non-word character:
@@ -62,11 +69,6 @@ From_ line detection for message boundaries.
 
 The `-q-` syntax to disable quiet mode is not implemented. The `-q` flag
 is accepted but has no effect (quiet mode is always on).
-
-## procmail: -z (LMTP server mode)
-
-Procmail's `-z` flag enables LMTP server mode (RFC 2033). This is an optional
-compile-time feature in the original procmail. Corpmail does not support it.
 
 ## Comsat/Biff Notifications
 

@@ -66,10 +66,6 @@ struct Args {
     #[arg(short = 'a', action = clap::ArgAction::Append, value_name = "ARG")]
     args: Vec<String>,
 
-    /// Delivery mode (deliver to named recipient)
-    #[arg(short = 'd', value_name = "RECIPIENT")]
-    deliver: Option<String>,
-
     /// Mail filter mode
     #[arg(short = 'm')]
     mailfilter: bool,
@@ -96,11 +92,6 @@ fn main() -> ExitCode {
     if args.help {
         print_help();
         return ExitCode::SUCCESS;
-    }
-
-    if args.deliver.is_some() && (args.preserve || args.mailfilter) {
-        eprintln!("corpmail: Conflicting options");
-        return ExitCode::from(EX_USAGE);
     }
 
     if args.mailfilter && !args.args.is_empty() && !args.rest.is_empty() {
@@ -148,12 +139,6 @@ fn run(
         }
     }
 
-    // -d: delivery mode - deliver directly to recipient
-    if let Some(ref recip) = args.deliver {
-        deliver_to_recipient(&penv, &msg, recip)?;
-        return Ok(None);
-    }
-
     let argv = if args.mailfilter {
         collect_trailing_args(&args.rest)
     } else {
@@ -180,11 +165,10 @@ fn run(
     }
 
     // Process /etc/procmailrc if not in preserve mode (-p), no rcfile on
-    // command line, and not in delivery mode (-d).
+    // command line.
     let has_cmdline_rcfile = !rcfiles.is_empty();
     if !args.preserve
         && !has_cmdline_rcfile
-        && args.deliver.is_none()
         && let Some(Outcome::Delivered(_)) =
             process_etcrc(&mut engine, &mut msg)?
     {
@@ -275,41 +259,6 @@ fn check_etcrc_security(
         .into());
     }
 
-    Ok(())
-}
-
-/// Delivery mode: deliver to named recipient's mailbox.
-fn deliver_to_recipient(
-    env: &ProcEnv, msg: &Message, recip: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Validate recipient name to prevent path traversal
-    if recip.contains('/')
-        || recip.contains('\0')
-        || recip == ".."
-        || recip == "."
-    {
-        return Err("Invalid recipient name".into());
-    }
-
-    // Look up recipient in passwd database
-    let Some(user) = User::from_name(recip)? else {
-        return Err(format!("Unknown user: {recip}").into());
-    };
-
-    // Check privileges: must be root or same user
-    let euid = nix::unistd::geteuid();
-    if !euid.is_root() && euid != user.uid {
-        return Err("Insufficient privileges".into());
-    }
-
-    let dest = format!("{}/{}", MAIL_SPOOL, recip);
-    let sender = msg.envelope_sender().unwrap_or(&env.logname);
-    corpmail::delivery::mbox(
-        Path::new(&dest),
-        msg,
-        sender,
-        Default::default(),
-    )?;
     Ok(())
 }
 
