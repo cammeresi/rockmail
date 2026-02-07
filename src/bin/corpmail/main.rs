@@ -66,10 +66,6 @@ struct Args {
     #[arg(short = 'a', action = clap::ArgAction::Append, value_name = "ARG")]
     args: Vec<String>,
 
-    /// Mail filter mode
-    #[arg(short = 'm')]
-    mailfilter: bool,
-
     /// Variable assignments and rcfiles
     #[arg(trailing_var_arg = true)]
     rest: Vec<String>,
@@ -92,11 +88,6 @@ fn main() -> ExitCode {
     if args.help {
         print_help();
         return ExitCode::SUCCESS;
-    }
-
-    if args.mailfilter && !args.args.is_empty() && !args.rest.is_empty() {
-        eprintln!("corpmail: -m with -a: use trailing args instead");
-        return ExitCode::from(EX_USAGE);
     }
 
     signals::setup();
@@ -139,13 +130,8 @@ fn run(
         }
     }
 
-    let argv = if args.mailfilter {
-        collect_trailing_args(&args.rest)
-    } else {
-        args.args
-    };
     let ctx = SubstCtx {
-        argv,
+        argv: args.args,
         ..Default::default()
     };
 
@@ -176,7 +162,7 @@ fn run(
     }
 
     // Find user rcfile to use
-    let rcfile = find_rcfile(&rcfiles, &penv, args.mailfilter)?;
+    let rcfile = find_rcfile(&rcfiles, &penv)?;
 
     if let Some(rc) = rcfile {
         let content = read_file(rc.file)?;
@@ -408,50 +394,25 @@ fn parse_rest(rest: &[String]) -> (Vec<(String, String)>, Vec<String>) {
     (assigns, files)
 }
 
-fn collect_trailing_args(rest: &[String]) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut past_rcfile = false;
-    for arg in rest {
-        if past_rcfile {
-            args.push(arg.clone());
-        } else if !is_assignment(arg) {
-            past_rcfile = true;
-        }
-    }
-    args
-}
-
-fn is_assignment(arg: &str) -> bool {
-    if let Some(eq) = arg.find('=') {
-        is_var_name(&arg[..eq])
-    } else {
-        false
-    }
-}
-
 fn find_rcfile(
-    files: &[String], env: &ProcEnv, mailfilter: bool,
+    files: &[String], env: &ProcEnv,
 ) -> Result<Option<ValidatedRcfile>, Box<dyn std::error::Error>> {
     let uid = nix::unistd::getuid().as_raw();
 
     // Command line rcfiles
     for f in files {
-        let path = resolve_rcpath(f, env, mailfilter);
+        let path = resolve_rcpath(f, env);
         if let Some(rc) = open_and_check(&path, uid, false)? {
             return Ok(Some(rc));
         }
     }
 
     // Default: ~/.procmailrc
-    if files.is_empty() && !mailfilter {
+    if files.is_empty() {
         let default = PathBuf::from(&env.home).join(".procmailrc");
         if let Some(rc) = open_and_check(&default, uid, true)? {
             return Ok(Some(rc));
         }
-    }
-
-    if mailfilter && files.is_empty() {
-        return Err("Missing rcfile".into());
     }
 
     Ok(None)
@@ -538,9 +499,9 @@ fn check_dir_security(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn resolve_rcpath(path: &str, env: &ProcEnv, mailfilter: bool) -> PathBuf {
+fn resolve_rcpath(path: &str, env: &ProcEnv) -> PathBuf {
     let p = Path::new(path);
-    if p.is_absolute() || path.starts_with("./") || mailfilter {
+    if p.is_absolute() || path.starts_with("./") {
         p.to_path_buf()
     } else {
         PathBuf::from(&env.home).join(path)

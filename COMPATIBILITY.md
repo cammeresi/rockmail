@@ -8,6 +8,8 @@ This file documents intentional differences from procmail behavior.
 
 - `-z` — LMTP server mode (RFC 2033)
 - `-d` — delivery mode, which requires setuid root installation
+- `-Y` — ignore Content-Length headers
+- `-m` — mail filter mode, which is really a multi-user mode for sysadmins
 
 ## Regex Word Boundaries
 

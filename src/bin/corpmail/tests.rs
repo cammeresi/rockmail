@@ -48,31 +48,12 @@ fn is_var_name_invalid() {
 }
 
 #[test]
-fn collect_trailing_args_basic() {
-    let rest = vec![
-        "VAR=val".into(),
-        "rcfile.rc".into(),
-        "arg1".into(),
-        "arg2".into(),
-    ];
-    let args = collect_trailing_args(&rest);
-    assert_eq!(args, vec!["arg1", "arg2"]);
-}
-
-#[test]
-fn collect_trailing_args_no_rcfile() {
-    let rest = vec!["VAR=val".into(), "OTHER=x".into()];
-    let args = collect_trailing_args(&rest);
-    assert!(args.is_empty());
-}
-
-#[test]
 fn resolve_rcpath_absolute() {
     let env = ProcEnv {
         home: "/home/user".into(),
         ..Default::default()
     };
-    let p = resolve_rcpath("/etc/rc", &env, false);
+    let p = resolve_rcpath("/etc/rc", &env);
     assert_eq!(p, PathBuf::from("/etc/rc"));
 }
 
@@ -82,7 +63,7 @@ fn resolve_rcpath_dotslash() {
         home: "/home/user".into(),
         ..Default::default()
     };
-    let p = resolve_rcpath("./local.rc", &env, false);
+    let p = resolve_rcpath("./local.rc", &env);
     assert_eq!(p, PathBuf::from("./local.rc"));
 }
 
@@ -92,18 +73,8 @@ fn resolve_rcpath_relative_normal() {
         home: "/home/user".into(),
         ..Default::default()
     };
-    let p = resolve_rcpath("mail/filter.rc", &env, false);
+    let p = resolve_rcpath("mail/filter.rc", &env);
     assert_eq!(p, PathBuf::from("/home/user/mail/filter.rc"));
-}
-
-#[test]
-fn resolve_rcpath_mailfilter_mode() {
-    let env = ProcEnv {
-        home: "/home/user".into(),
-        ..Default::default()
-    };
-    let p = resolve_rcpath("filter.rc", &env, true);
-    assert_eq!(p, PathBuf::from("filter.rc"));
 }
 
 #[test]
@@ -117,15 +88,8 @@ fn find_rcfile_explicit() {
         ..Default::default()
     };
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env, false).unwrap();
+    let result = find_rcfile(&files, &env).unwrap();
     assert_eq!(result.map(|r| r.path), Some(rc));
-}
-
-#[test]
-fn find_rcfile_missing_mailfilter() {
-    let env = ProcEnv::default();
-    let result = find_rcfile(&[], &env, true);
-    assert!(result.is_err());
 }
 
 #[test]
@@ -138,7 +102,7 @@ fn find_rcfile_default_procmailrc() {
         home: tmp.path().to_string_lossy().into(),
         ..Default::default()
     };
-    let result = find_rcfile(&[], &env, false).unwrap();
+    let result = find_rcfile(&[], &env).unwrap();
     assert_eq!(result.map(|r| r.path), Some(rc));
 }
 
@@ -149,7 +113,7 @@ fn find_rcfile_no_default() {
         home: tmp.path().to_string_lossy().into(),
         ..Default::default()
     };
-    let result = find_rcfile(&[], &env, false).unwrap();
+    let result = find_rcfile(&[], &env).unwrap();
     assert!(result.is_none());
 }
 
@@ -176,21 +140,6 @@ fn deliver_default_to_mbox() {
 }
 
 #[test]
-fn is_assignment_valid() {
-    assert!(is_assignment("FOO=bar"));
-    assert!(is_assignment("_x=1"));
-    assert!(is_assignment("A="));
-}
-
-#[test]
-fn is_assignment_invalid() {
-    assert!(!is_assignment("123=bad"));
-    assert!(!is_assignment("foo-bar=x"));
-    assert!(!is_assignment("noequals"));
-    assert!(!is_assignment(""));
-}
-
-#[test]
 fn security_rejects_world_writable() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = tmp.path().join("test.rc");
@@ -203,7 +152,7 @@ fn security_rejects_world_writable() {
         ..Default::default()
     };
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env, false);
+    let result = find_rcfile(&files, &env);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("world-writable"));
 }
@@ -220,7 +169,7 @@ fn security_rejects_group_writable_default() {
         home: tmp.path().to_string_lossy().into(),
         ..Default::default()
     };
-    let result = find_rcfile(&[], &env, false);
+    let result = find_rcfile(&[], &env);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("group-writable"));
 }
@@ -238,7 +187,7 @@ fn security_allows_group_writable_explicit() {
         ..Default::default()
     };
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env, false);
+    let result = find_rcfile(&files, &env);
     assert!(result.is_ok());
 }
 
@@ -255,7 +204,7 @@ fn security_accepts_safe_permissions() {
         ..Default::default()
     };
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env, false);
+    let result = find_rcfile(&files, &env);
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -278,7 +227,7 @@ fn dir_security_rejects_world_writable() {
         ..Default::default()
     };
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env, false);
+    let result = find_rcfile(&files, &env);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("directory"));
 }
@@ -301,6 +250,6 @@ fn dir_security_allows_sticky_world_writable() {
         ..Default::default()
     };
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env, false);
+    let result = find_rcfile(&files, &env);
     assert!(result.is_ok());
 }
