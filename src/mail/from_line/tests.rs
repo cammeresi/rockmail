@@ -4,7 +4,7 @@ use chrono::Utc;
 #[test]
 fn generate_from_line() {
     let line = generate("user@example.com");
-    assert!(line.starts_with(b"From user@example.com "));
+    assert!(line.starts_with(b"From user@example.com  "));
     assert!(line.ends_with(b"\n"));
 }
 
@@ -37,7 +37,7 @@ fn ctime_epoch() {
     let epoch = Utc.timestamp_opt(0, 0).unwrap();
     let line = generate_with_time("test", epoch);
     let s = String::from_utf8_lossy(&line);
-    assert!(s.contains("Thu Jan  1 00:00:00 1970"), "got: {}", s);
+    assert_eq!(s, "From test  Thu Jan  1 00:00:00 1970\n");
 }
 
 #[test]

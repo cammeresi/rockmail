@@ -33,11 +33,12 @@ where
         "sender must not contain whitespace"
     );
 
-    // "From " (5) + sender + " " (1) + ctime (24) + "\n" (1) = 31 + sender.len()
-    let mut line = String::with_capacity(31 + sender.len());
+    // "From " (5) + sender + "  " (2) + ctime (24) + "\n" (1) = 32 + sender.len()
+    let mut line = String::with_capacity(32 + sender.len());
     line.push_str("From ");
     line.push_str(sender);
-    line.push(' ');
+    // Two spaces before date, matching procmail's ctime2buf2()
+    line.push_str("  ");
     write!(line, "{}", time.format("%a %b %e %H:%M:%S %Y")).unwrap();
     line.push('\n');
     line.into_bytes()
