@@ -603,10 +603,15 @@ where
             match &recipe.action {
                 Action::Folder(path) => {
                     let path_str = path.to_string_lossy();
+                    let expanded = self.expand(&path_str);
+                    let (ft, _) = FolderType::parse(&expanded);
+                    if !ft.needs_lock() {
+                        return None;
+                    }
                     let ext = self
                         .get_var(VAR_LOCKEXT)
                         .unwrap_or(Cow::Borrowed(DEF_LOCKEXT));
-                    Some(self.expand(&path_str) + &ext)
+                    Some(expanded + &ext)
                 }
                 _ => None,
             }
