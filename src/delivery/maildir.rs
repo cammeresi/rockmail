@@ -56,21 +56,11 @@ impl Namer {
     }
 }
 
-/// Deliver a message to a Maildir folder.
-///
-/// Creates the Maildir structure (tmp, new, cur) if needed.
-/// Writes to tmp/ then hard-links to new/ for atomic delivery.
-pub fn deliver(
-    path: &Path, msg: &Message, opts: DeliveryOpts,
-) -> Result<DeliveryResult, DeliveryError> {
-    deliver_with(&mut Namer::new(), path, msg, opts)
-}
-
 #[cfg(test)]
 pub fn deliver_test(
     path: &Path, msg: &Message,
 ) -> Result<DeliveryResult, DeliveryError> {
-    deliver(path, msg, DeliveryOpts::default())
+    deliver_with(&mut Namer::new(), path, msg, DeliveryOpts::default())
 }
 
 /// Deliver a message directly to a directory (procmail // mode).
@@ -92,7 +82,10 @@ pub fn deliver_dir(
     })
 }
 
-/// Deliver with explicit namer (for preserving serial across deliveries).
+/// Deliver a message to a Maildir folder.
+///
+/// Creates the Maildir structure (tmp, new, cur) if needed.
+/// Writes to tmp/ then hard-links to new/ for atomic delivery.
 pub fn deliver_with(
     namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {

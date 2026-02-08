@@ -17,7 +17,7 @@ use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
     DEF_LOCKEXT, Env, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR,
-    VAR_UMASK, VAR_VERBOSE,
+    VAR_SHELL, VAR_UMASK, VAR_VERBOSE,
 };
 use nix::sys::stat::{self, Mode};
 use nix::unistd::dup2;
@@ -57,7 +57,7 @@ pub type EngineResult<T> = Result<T, EngineError>;
 const MAX_INCLUDE_DEPTH: usize = 32;
 
 /// Mutable state during recipe processing.
-#[allow(dead_code)]
+#[derive(Default)]
 pub struct State {
     /// Last condition result (for A flag).
     pub last_cond: bool,
@@ -66,28 +66,14 @@ pub struct State {
     /// Previous condition (for E flag).
     pub prev_cond: bool,
     /// Current score (for weighted conditions).
+    #[allow(dead_code)]
     pub score: f64,
     /// Current INCLUDERC/SWITCHRC recursion depth.
     pub depth: usize,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            last_cond: false,
-            last_succ: false,
-            prev_cond: false,
-            score: 0.0,
-            depth: 0,
-        }
-    }
-}
-
 /// Recipe evaluation engine.
-pub struct Engine<E>
-where
-    E: Env,
-{
+pub struct Engine<E> {
     env: E,
     ctx: SubstCtx,
     vars: HashMap<String, String>,
@@ -239,7 +225,8 @@ where
         Ok(Outcome::Default)
     }
 
-    /// Load and parse an rcfile. Returns None if file doesn't exist or fails to parse.
+    /// Load and parse an rcfile. Returns None if file doesn't exist or fails
+    /// to parse.
     fn load_rcfile(&self, path: &str) -> Option<Vec<Item>> {
         let content = match fs::read_to_string(path) {
             Ok(c) => c,
@@ -544,7 +531,7 @@ where
 
     /// Run a shell command with message as stdin.
     fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<bool> {
-        let shell = self.get_var("SHELL").unwrap_or(Cow::Borrowed("/bin/sh"));
+        let shell = self.get_var(VAR_SHELL).unwrap_or(Cow::Borrowed("/bin/sh"));
         let mut child = Command::new(&*shell)
             .arg("-c")
             .arg(cmd)

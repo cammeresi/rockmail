@@ -11,11 +11,8 @@ use std::path::Path;
 
 use crate::mail::Message;
 
-pub use maildir::{
-    Namer, deliver as maildir, deliver_dir as dir, deliver_with as maildir_with,
-};
+pub use maildir::Namer;
 pub use mbox::deliver as mbox;
-pub use mh::deliver as mh;
 pub use pipe::deliver as pipe;
 
 /// Folder type as determined by path suffix or filesystem state.

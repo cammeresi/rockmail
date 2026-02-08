@@ -11,6 +11,10 @@ This file documents intentional differences from procmail behavior.
 - `-Y` — ignore Content-Length headers
 - `-m` — mail filter mode, which is really a multi-user mode for sysadmins
 
+### Minor variances
+
+- `-p` — Environment is totally preserved, whereas procmail still filters evil variables and variables related to the dynamic linker.
+
 ## Regex Word Boundaries
 
 Procmail's `\<` and `\>` consume a non-word character:

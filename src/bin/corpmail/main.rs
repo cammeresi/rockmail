@@ -1,5 +1,7 @@
 //! Corpmail binary - autonomous mail processor (procmail replacement).
 
+use std::env;
+use std::error::Error;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
@@ -12,7 +14,7 @@ use corpmail::mail::Message;
 use corpmail::recipe::{Engine, Outcome};
 use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
 use corpmail::variables::*;
-use nix::unistd::{Uid, User};
+use nix::unistd::{ROOT, Uid, User};
 
 #[cfg(test)]
 mod tests;
@@ -83,9 +85,7 @@ fn main() -> ExitCode {
     if args.version {
         print_version();
         return ExitCode::SUCCESS;
-    }
-
-    if args.help {
+    } else if args.help {
         print_help();
         return ExitCode::SUCCESS;
     }
@@ -98,14 +98,11 @@ fn main() -> ExitCode {
         EX_CANTCREAT
     };
 
-    // Set up environment before spawning any threads
-    let penv = match init_env(&args) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("corpmail: {e}");
-            return ExitCode::from(fail_code);
-        }
-    };
+    let penv = init_env(&args);
+
+    // SAFETY:
+    // If some day there should be thread spawning, threads must not be
+    // spawned prior to the preceding environment setup.
 
     match run(args, penv) {
         Ok(code) => code.map_or(ExitCode::SUCCESS, ExitCode::from),
@@ -116,39 +113,26 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(
-    args: Args, penv: ProcEnv,
-) -> Result<Option<u8>, Box<dyn std::error::Error>> {
+fn run(args: Args, penv: ProcEnv) -> Result<Option<u8>, Box<dyn Error>> {
     let mail = read_mail()?;
     let mut msg = Message::parse(&mail);
+    let mut delivered = false;
 
-    // Handle -f (set sender) and -o (override fake From_)
-    if let Some(ref sender) = args.from {
-        let dominated = args.override_from || msg.from_line().is_none();
-        if dominated {
-            msg.set_envelope_sender(sender);
-        }
+    if let Some(ref sender) = args.from
+        && (args.override_from || msg.from_line().is_none())
+    {
+        msg.set_envelope_sender(sender);
     }
 
-    let ctx = SubstCtx {
-        argv: args.args,
-        ..Default::default()
-    };
-
+    let ctx = SubstCtx::new(args.args);
     let mut engine = Engine::new(RealEnv, ctx);
 
-    if getenv("VERBOSE").is_some_and(|v| v == "on" || v == "yes" || v == "1") {
+    // FIXME assignments in rc file
+    if env::var(VAR_VERBOSE).is_ok_and(value_is_true) {
         engine.set_verbose(true);
     }
 
-    let mut delivered = false;
-
-    // Process assignments and find rcfiles
-    let (assignments, rcfiles) = parse_rest(&args.rest);
-
-    for (name, value) in &assignments {
-        engine.set_var(name, value);
-    }
+    let (_, rcfiles) = parse_rest(&args.rest);
 
     // Process /etc/procmailrc if not in preserve mode (-p), no rcfile on
     // command line.
@@ -200,7 +184,7 @@ fn exit_code(engine: &Engine<RealEnv>) -> Option<u8> {
 /// Process /etc/procmailrc if it exists.
 fn process_etcrc(
     engine: &mut Engine<RealEnv>, msg: &mut Message,
-) -> Result<Option<Outcome>, Box<dyn std::error::Error>> {
+) -> Result<Option<Outcome>, Box<dyn Error>> {
     let path = Path::new(ETC_PROCMAILRC);
 
     let file = match File::open(path) {
@@ -222,7 +206,7 @@ fn process_etcrc(
 /// Check that /etc/procmailrc has safe permissions.
 fn check_etcrc_security(
     file: &File, path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     let meta = file.metadata()?;
     let mode = meta.mode();
     let owner = meta.uid();
@@ -239,7 +223,7 @@ fn check_etcrc_security(
     // Must not be world writable
     if mode & 0o002 != 0 {
         return Err(format!(
-            "system rcfile is world-writable: {}",
+            "system rcfile is world writable: {}",
             path.display()
         )
         .into());
@@ -276,32 +260,25 @@ fn read_mail() -> io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn getenv(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
-fn setenv(name: &str, value: &str) {
-    // SAFETY: called only from init_env before any threads spawn
-    unsafe { std::env::set_var(name, value) }
-}
-
-/// Initialize process environment. Must be called before any threads spawn.
-fn init_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
-    let penv = build_env(args)?;
+/// Initialize process environment.  Must be called before any threads spawn.
+fn init_env(args: &Args) -> ProcEnv {
+    let penv = build_env(args);
 
     // Set user variable assignments into environment
     let (assignments, _) = parse_rest(&args.rest);
     for (name, value) in assignments {
-        setenv(&name, &value);
+        // SAFETY: called before any threads spawn
+        unsafe {
+            env::set_var(&name, &value);
+        }
     }
 
-    Ok(penv)
+    penv
 }
 
-fn build_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
+fn build_env(args: &Args) -> ProcEnv {
     let mut e = ProcEnv::default();
 
-    // Get user info
     let uid = nix::unistd::getuid();
     if let Some(user) = get_user_by_uid(uid.as_raw()) {
         e.logname = user.name;
@@ -316,30 +293,37 @@ fn build_env(args: &Args) -> Result<ProcEnv, Box<dyn std::error::Error>> {
     e.maildir = format!("{}/Mail", e.home);
     e.orgmail = format!("{}/{}", MAIL_SPOOL, e.logname);
 
-    // Set hostname
     if let Ok(name) = nix::unistd::gethostname() {
         e.host = name.to_string_lossy().into_owned();
     }
 
-    // Apply to process environment
-    if !args.preserve {
-        setenv("HOME", &e.home);
-        setenv("LOGNAME", &e.logname);
-        setenv("SHELL", &e.shell);
-        setenv(VAR_PATH, DEF_PATH);
-    }
-    setenv("MAILDIR", &e.maildir);
-    setenv("ORGMAIL", &e.orgmail);
-    setenv("DEFAULT", &e.orgmail);
-    setenv("HOST", &e.host);
-    setenv(VAR_SENDMAILFLAGS, DEF_SENDMAILFLAGS);
-    setenv(VAR_PROCMAIL_VERSION, VERSION);
-    setenv(VAR_USER_SHELL, &e.shell);
-    setenv(VAR_NORESRETRY, &DEF_NORESRETRY.to_string());
-    setenv(VAR_SUSPEND, &DEF_SUSPEND.to_string());
-    setenv(VAR_LOGABSTRACT, &DEF_LOGABSTRACT.to_string());
+    // SAFETY: called before any threads spawn
+    unsafe {
+        if !args.preserve {
+            env::vars().for_each(|(k, _)| {
+                if k != VAR_TZ {
+                    env::remove_var(k);
+                }
+            });
+        }
 
-    Ok(e)
+        env::set_var(VAR_HOME, &e.home);
+        env::set_var(VAR_LOGNAME, &e.logname);
+        env::set_var(VAR_SHELL, &e.shell);
+        env::set_var(VAR_PATH, DEF_PATH);
+        env::set_var(VAR_MAILDIR, &e.maildir);
+        env::set_var(VAR_ORGMAIL, &e.orgmail);
+        env::set_var(VAR_DEFAULT, &e.orgmail);
+        env::set_var(VAR_HOST, &e.host);
+        env::set_var(VAR_SENDMAILFLAGS, DEF_SENDMAILFLAGS);
+        env::set_var(VAR_PROCMAIL_VERSION, VERSION);
+        env::set_var(VAR_USER_SHELL, &e.shell);
+        env::set_var(VAR_NORESRETRY, DEF_NORESRETRY.to_string());
+        env::set_var(VAR_SUSPEND, DEF_SUSPEND.to_string());
+        env::set_var(VAR_LOGABSTRACT, DEF_LOGABSTRACT.to_string());
+    }
+
+    e
 }
 
 /// Process environment for mail delivery.
@@ -396,13 +380,11 @@ fn parse_rest(rest: &[String]) -> (Vec<(String, String)>, Vec<String>) {
 
 fn find_rcfile(
     files: &[String], env: &ProcEnv,
-) -> Result<Option<ValidatedRcfile>, Box<dyn std::error::Error>> {
-    let uid = nix::unistd::getuid().as_raw();
-
+) -> Result<Option<ValidatedRcfile>, Box<dyn Error>> {
     // Command line rcfiles
     for f in files {
         let path = resolve_rcpath(f, env);
-        if let Some(rc) = open_and_check(&path, uid, false)? {
+        if let Some(rc) = open_and_check(&path, false)? {
             return Ok(Some(rc));
         }
     }
@@ -410,7 +392,7 @@ fn find_rcfile(
     // Default: ~/.procmailrc
     if files.is_empty() {
         let default = PathBuf::from(&env.home).join(".procmailrc");
-        if let Some(rc) = open_and_check(&default, uid, true)? {
+        if let Some(rc) = open_and_check(&default, true)? {
             return Ok(Some(rc));
         }
     }
@@ -418,10 +400,10 @@ fn find_rcfile(
     Ok(None)
 }
 
-/// Open file and check security on the open handle to prevent TOCTOU.
+/// Open file and check security on the open handle.
 fn open_and_check(
-    path: &Path, uid: u32, is_default: bool,
-) -> Result<Option<ValidatedRcfile>, Box<dyn std::error::Error>> {
+    path: &Path, is_default: bool,
+) -> Result<Option<ValidatedRcfile>, Box<dyn Error>> {
     // Check for symlinks before opening
     let link_meta = match fs::symlink_metadata(path) {
         Ok(m) => m,
@@ -433,7 +415,7 @@ fn open_and_check(
     }
 
     let file = File::open(path)?;
-    check_rcfile_security(&file, path, uid, is_default)?;
+    check_rcfile_security(&file, path, is_default)?;
     Ok(Some(ValidatedRcfile {
         path: path.to_path_buf(),
         file,
@@ -442,14 +424,14 @@ fn open_and_check(
 
 /// Check that an rcfile has safe permissions (using fstat on open handle).
 fn check_rcfile_security(
-    file: &File, path: &Path, uid: u32, is_default: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+    file: &File, path: &Path, is_default: bool,
+) -> Result<(), Box<dyn Error>> {
     let meta = file.metadata()?;
     let mode = meta.mode();
     let owner = meta.uid();
 
     // Must be owned by user or root
-    if owner != uid && owner != ROOT_UID {
+    if owner != Uid::current().as_raw() && owner != ROOT.as_raw() {
         return Err(format!(
             "rcfile not owned by user or root: {}",
             path.display()
@@ -460,14 +442,14 @@ fn check_rcfile_security(
     // Must not be world writable
     if mode & 0o002 != 0 {
         return Err(
-            format!("rcfile is world-writable: {}", path.display()).into()
+            format!("rcfile is world writable: {}", path.display()).into()
         );
     }
 
     // Default rcfile must not be group writable
     if is_default && mode & 0o020 != 0 {
         return Err(
-            format!("rcfile is group-writable: {}", path.display()).into()
+            format!("rcfile is group writable: {}", path.display()).into()
         );
     }
 
@@ -485,14 +467,14 @@ fn check_rcfile_security(
 }
 
 /// Check that a directory is not world writable (unless sticky).
-fn check_dir_security(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn check_dir_security(path: &Path) -> Result<(), Box<dyn Error>> {
     let meta = fs::metadata(path)?;
     let mode = meta.mode();
 
     // World writable without sticky bit is unsafe
     if mode & 0o002 != 0 && mode & 0o1000 == 0 {
         return Err(
-            format!("directory is world-writable: {}", path.display()).into()
+            format!("directory is world writable: {}", path.display()).into()
         );
     }
 
@@ -510,18 +492,19 @@ fn resolve_rcpath(path: &str, env: &ProcEnv) -> PathBuf {
 
 fn deliver_default<E>(
     engine: &Engine<E>, penv: &ProcEnv, msg: &Message,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), Box<dyn Error>>
 where
     E: Env,
 {
     let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
 
-    for name in ["DEFAULT", "ORGMAIL"] {
+    for name in [VAR_DEFAULT, VAR_ORGMAIL] {
         let path = engine
             .get_var(name)
             .map(|v| v.into_owned())
             .unwrap_or_else(|| penv.orgmail.clone());
         if !path.is_empty() {
+            // FIXME ignoring mailbox type
             corpmail::delivery::mbox(
                 Path::new(&path),
                 msg,
@@ -536,8 +519,7 @@ where
 }
 
 fn print_version() {
-    println!("corpmail v{VERSION}");
-    println!("Rust translation of procmail");
+    println!("corpmail v{VERSION} (a Rust translation of procmail)");
 }
 
 fn print_help() {
@@ -555,8 +537,6 @@ Options:
   -f sender   Regenerate From_ line with sender
   -o          Override fake From_ lines
   -a arg      Set $1, $2, ... (can be repeated)
-  -d recip    Delivery mode to named recipient
-  -m          General mail filter mode
 
 Recipe flags: HBDaAeEfhbcwWir"
     );

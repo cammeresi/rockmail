@@ -63,6 +63,15 @@ impl Default for SubstCtx {
     }
 }
 
+impl SubstCtx {
+    pub fn new(argv: Vec<String>) -> Self {
+        Self {
+            argv,
+            ..Default::default()
+        }
+    }
+}
+
 /// Expand variable substitutions using real environment
 pub fn expand(s: &str, ctx: &SubstCtx) -> String {
     subst(s, ctx, &RealEnv)

@@ -1,4 +1,6 @@
 /// Magic/pseudo variable names that have special meaning in procmail
+pub const VAR_HOME: &str = "HOME";
+pub const VAR_LOGNAME: &str = "LOGNAME";
 pub const VAR_LASTFOLDER: &str = "LASTFOLDER";
 pub const VAR_MATCH: &str = "MATCH";
 pub const VAR_MAILDIR: &str = "MAILDIR";
@@ -34,6 +36,7 @@ pub const VAR_PROCMAIL_OVERFLOW: &str = "PROCMAIL_OVERFLOW";
 pub const VAR_SENDMAILFLAGS: &str = "SENDMAILFLAGS";
 pub const VAR_USER_SHELL: &str = "USER_SHELL";
 pub const VAR_PATH: &str = "PATH";
+pub const VAR_TZ: &str = "TZ";
 
 pub const DEF_SHELLMETAS: &str = "&|<>~;?*[";
 pub const DEF_LOCKEXT: &str = ".lock";
