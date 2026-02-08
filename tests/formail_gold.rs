@@ -10,6 +10,7 @@
 
 #![cfg(feature = "gold")]
 
+#[allow(unused)]
 mod common;
 
 use common::{Gold, GoldResult, normalize_from_line, normalize_message_id};

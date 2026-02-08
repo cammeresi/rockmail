@@ -1,8 +1,13 @@
 //! Shared infrastructure for gold standard tests.
 
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
 use std::io::{ErrorKind, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use tempfile::TempDir;
 
@@ -106,6 +111,56 @@ impl GoldResult {
     }
 }
 
+pub fn corpmail() -> &'static str {
+    env!("CARGO_BIN_EXE_corpmail")
+}
+
+pub fn procmail() -> &'static str {
+    static P: OnceLock<String> = OnceLock::new();
+    P.get_or_init(|| {
+        env::var("PROCMAIL_PROCMAIL")
+            .expect("PROCMAIL_PROCMAIL env var required")
+    })
+}
+
+/// Set up a directory with a maildir and an rcfile expanded from a template.
+pub fn setup(dir: &Path, tmpl: &str) {
+    let maildir = dir.join("maildir");
+    fs::create_dir(&maildir).unwrap();
+    let rc = tmpl
+        .replace("$MAILDIR", maildir.to_str().unwrap())
+        .replace("$DEFAULT", maildir.join("default").to_str().unwrap());
+    let p = dir.join("rcfile");
+    fs::write(&p, &rc).unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+fn walk(base: &Path, dir: &Path, map: &mut BTreeMap<String, Vec<u8>>) {
+    for e in fs::read_dir(dir).unwrap() {
+        let e = e.unwrap();
+        let p = e.path();
+        if p.is_dir() {
+            walk(base, &p, map);
+        } else {
+            let rel = p.strip_prefix(base).unwrap();
+            map.insert(
+                rel.to_string_lossy().into_owned(),
+                fs::read(&p).unwrap(),
+            );
+        }
+    }
+}
+
+/// Recursively snapshot a directory tree into a map of relative paths to
+/// file contents.
+pub fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    let mut map = BTreeMap::new();
+    if dir.exists() {
+        walk(dir, dir, &mut map);
+    }
+    map
+}
+
 pub fn normalize_from_line(data: &[u8]) -> Vec<u8> {
     let re = regex::bytes::Regex::new(
         r"(?m)^From (\S+) +\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}\n",
@@ -119,4 +174,94 @@ pub fn normalize_message_id(data: &[u8]) -> Vec<u8> {
     let re = regex::bytes::Regex::new(r"Message-ID: <[^>]+>").unwrap();
     re.replace_all(data, b"Message-ID: <GENERATED>".as_slice())
         .into_owned()
+}
+
+fn is_maildir(base: &Path, top: &str) -> bool {
+    base.join(top).join("new").is_dir()
+}
+
+fn diff_by_name(
+    a: &[(String, Vec<u8>)], b: &[(String, Vec<u8>)],
+) -> Result<(), String> {
+    let ma: BTreeMap<_, _> = a.iter().cloned().collect();
+    let mb: BTreeMap<_, _> = b.iter().cloned().collect();
+    let ka: Vec<_> = ma.keys().collect();
+    let kb: Vec<_> = mb.keys().collect();
+    if ka != kb {
+        return Err(format!("file sets differ:\n  a: {ka:?}\n  b: {kb:?}"));
+    }
+    for (k, va) in &ma {
+        let na = normalize_from_line(va);
+        let nb = normalize_from_line(&mb[k.as_str()]);
+        if na != nb {
+            return Err(format!(
+                "{k} differs:\n--- a ---\n{}\n--- b ---\n{}",
+                String::from_utf8_lossy(&na),
+                String::from_utf8_lossy(&nb),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn diff_by_content(
+    label: &str, a: &[(String, Vec<u8>)], b: &[(String, Vec<u8>)],
+) -> Result<(), String> {
+    if a.len() != b.len() {
+        return Err(format!(
+            "{label}: file count differs: a={}, b={}",
+            a.len(),
+            b.len(),
+        ));
+    }
+    let mut va: Vec<_> =
+        a.iter().map(|(_, d)| normalize_from_line(d)).collect();
+    let mut vb: Vec<_> =
+        b.iter().map(|(_, d)| normalize_from_line(d)).collect();
+    va.sort();
+    vb.sort();
+    for (i, (da, db)) in va.iter().zip(vb.iter()).enumerate() {
+        if da != db {
+            return Err(format!(
+                "{label} file #{i} differs:\n--- a ---\n{}\n--- b ---\n{}",
+                String::from_utf8_lossy(da),
+                String::from_utf8_lossy(db),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Compare two directory trees.  For each entry in the tree, if it looks
+/// like a maildir (has a `new` subdir), compare by sorted content.
+/// Otherwise compare by filename.
+pub fn diff_dirs(a: &Path, b: &Path) -> Result<(), String> {
+    let sa = snapshot(a);
+    let sb = snapshot(b);
+    let group = |s: &BTreeMap<String, Vec<u8>>| {
+        let mut m: BTreeMap<_, Vec<(_, _)>> = BTreeMap::new();
+        for (k, v) in s {
+            let top = k.split('/').next().unwrap_or("").to_string();
+            m.entry(top).or_default().push((k.clone(), v.clone()));
+        }
+        m
+    };
+    let ga = group(&sa);
+    let gb = group(&sb);
+    let ka: Vec<_> = ga.keys().collect();
+    let kb: Vec<_> = gb.keys().collect();
+    if ka != kb {
+        return Err(format!(
+            "top-level entries differ:\n  a: {ka:?}\n  b: {kb:?}"
+        ));
+    }
+    for (top, fa) in &ga {
+        let fb = &gb[top];
+        if is_maildir(a, top) {
+            diff_by_content(top, fa, fb)?;
+        } else {
+            diff_by_name(fa, fb)?;
+        }
+    }
+    Ok(())
 }

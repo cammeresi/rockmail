@@ -11,12 +11,8 @@ use std::process::{Command, Stdio};
 
 use tempfile::TempDir;
 
-fn corpmail() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_corpmail"))
-}
-
 fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
-    let mut child = corpmail()
+    let mut child = Command::new(common::corpmail())
         .args(args)
         .current_dir(dir)
         .env("RUST_LOG", "info")

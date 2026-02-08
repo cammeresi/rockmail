@@ -154,7 +154,7 @@ fn security_rejects_world_writable() {
     let files = vec![rc.to_string_lossy().into()];
     let result = find_rcfile(&files, &env);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("world-writable"));
+    assert!(result.unwrap_err().to_string().contains("world writable"));
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn security_rejects_group_writable_default() {
     };
     let result = find_rcfile(&[], &env);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("group-writable"));
+    assert!(result.unwrap_err().to_string().contains("group writable"));
 }
 
 #[test]

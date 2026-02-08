@@ -10,36 +10,13 @@
 mod common;
 
 use std::borrow::Borrow;
-use std::collections::BTreeMap;
-use std::os::unix::fs::PermissionsExt;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::{env, fs, panic, process};
 
-use common::{Gold, normalize_from_line, run};
+use common::{Gold, corpmail, diff_dirs, procmail, run, setup, snapshot};
 use rand::Rng;
 use rand::seq::SliceRandom;
-
-fn procmail() -> String {
-    std::env::var("PROCMAIL_PROCMAIL")
-        .expect("PROCMAIL_PROCMAIL env var required")
-}
-
-fn corpmail() -> &'static str {
-    env!("CARGO_BIN_EXE_corpmail")
-}
-
-fn setup(dir: &Path, rc_template: &str) {
-    let maildir = dir.join("maildir");
-    fs::create_dir(&maildir).unwrap();
-    let default = maildir.join("default");
-    let rc = rc_template
-        .replace("$MAILDIR", maildir.to_str().unwrap())
-        .replace("$DEFAULT", default.to_str().unwrap());
-    let path = dir.join("rcfile");
-    fs::write(&path, rc).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-}
 
 fn run_gold_with<S>(
     rc_template: S, inputs: &[&[u8]], count: Option<usize>,
@@ -71,7 +48,7 @@ fn run_gold_inner(
     let args_p: Vec<&str> = vec!["-f", "sender@test", rc_p.to_str().unwrap()];
     for input in inputs {
         let (_, rc) = run(g.rust_dir.path(), corpmail(), &args_r, input);
-        let (_, pc) = run(g.proc_dir.path(), &procmail(), &args_p, input);
+        let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
         assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
     }
     let r = &g.rust_dir.path().join("maildir");
@@ -114,8 +91,12 @@ fn copy_dir(src: &Path, dst: &Path) {
     }
 }
 
+fn assert_dirs(a: &Path, b: &Path) {
+    diff_dirs(a, b).unwrap();
+}
+
 fn run_gold(rc_template: &str, inputs: &[&[u8]], count: usize) {
-    run_gold_with(rc_template, inputs, Some(count), assert_dirs_eq);
+    run_gold_with(rc_template, inputs, Some(count), assert_dirs);
 }
 
 fn file_count(dir: &Path) -> usize {
@@ -129,75 +110,6 @@ const MSGS: &[&[u8]] = &[
     b"From: d@host\nSubject: four\n\nBody four\n",
     b"From: e@host\nSubject: five\n\nBody five\n",
 ];
-
-/// Compare two directory trees, asserting identical file names and contents.
-fn assert_dirs_eq(rust: &Path, proc: &Path) {
-    let r = snapshot(rust);
-    let p = snapshot(proc);
-    let rk: Vec<_> = r.keys().collect();
-    let pk: Vec<_> = p.keys().collect();
-    assert_eq!(rk, pk, "file sets differ:\n  rust: {rk:?}\n  proc: {pk:?}");
-    for (path, rd) in &r {
-        assert_contents_eq(path, rd, &p[path]);
-    }
-}
-
-/// Compare two directory trees ignoring file names (for maildir, where
-/// filenames contain timestamps/PIDs).  Asserts identical sorted contents.
-fn assert_dirs_eq_contents(rust: &Path, proc: &Path) {
-    let mut r: Vec<_> = snapshot(rust).into_values().collect();
-    let mut p: Vec<_> = snapshot(proc).into_values().collect();
-    assert_eq!(
-        r.len(),
-        p.len(),
-        "file count differs: rust={}, proc={}",
-        r.len(),
-        p.len()
-    );
-    r.sort();
-    p.sort();
-    for (i, (rd, pd)) in r.iter().zip(p.iter()).enumerate() {
-        assert_contents_eq(&format!("file #{i}"), rd, pd);
-    }
-}
-
-fn assert_contents_eq(label: &str, rust: &[u8], proc: &[u8]) {
-    let rn = normalize_from_line(rust);
-    let pn = normalize_from_line(proc);
-    if rn != pn {
-        panic!(
-            "contents differ for {label}:\
-             \n--- rust ({} bytes) ---\n{:?}\
-             \n--- proc ({} bytes) ---\n{:?}",
-            rn.len(),
-            String::from_utf8_lossy(&rn),
-            pn.len(),
-            String::from_utf8_lossy(&pn),
-        );
-    }
-}
-
-fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
-    let mut map = BTreeMap::new();
-    if dir.exists() {
-        walk(dir, dir, &mut map);
-    }
-    map
-}
-
-fn walk(base: &Path, dir: &Path, map: &mut BTreeMap<String, Vec<u8>>) {
-    for e in fs::read_dir(dir).unwrap() {
-        let e = e.unwrap();
-        let p = e.path();
-        if p.is_dir() {
-            walk(base, &p, map);
-        } else {
-            let rel = p.strip_prefix(base).unwrap();
-            let key = rel.to_string_lossy().into_owned();
-            map.insert(key, fs::read(&p).unwrap());
-        }
-    }
-}
 
 #[test]
 fn deliver_mbox() {
@@ -228,7 +140,7 @@ inbox/
 ",
         MSGS,
         Some(5),
-        assert_dirs_eq_contents,
+        assert_dirs,
     );
 }
 
@@ -363,14 +275,14 @@ fn complex_filtering_static_mbox() {
 fn complex_filtering_static_maildir() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(build_complex_rc("/"), &refs, None, assert_dirs_eq_contents);
+    run_gold_with(build_complex_rc("/"), &refs, None, assert_dirs);
 }
 
 #[test]
 fn complex_filtering_static_mh() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(build_complex_rc("/."), &refs, None, assert_dirs_eq);
+    run_gold_with(build_complex_rc("/."), &refs, None, assert_dirs);
 }
 
 fn build_random_rc(rng: &mut impl Rng, suffix: &str) -> String {
@@ -440,17 +352,17 @@ fn run_random(suffix: &str, cmp: fn(&Path, &Path)) {
 
 #[test]
 fn complex_filtering_random_mbox() {
-    run_random("", assert_dirs_eq);
+    run_random("", assert_dirs);
 }
 
 #[test]
 fn complex_filtering_random_maildir() {
-    run_random("/", assert_dirs_eq_contents);
+    run_random("/", assert_dirs);
 }
 
 #[test]
 fn complex_filtering_random_mh() {
-    run_random("/.", assert_dirs_eq);
+    run_random("/.", assert_dirs);
 }
 
 fn build_size_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
@@ -498,5 +410,5 @@ fn size_and_negation() {
     let rc = build_size_rc(&mut rng);
     let msgs = build_size_msgs(&mut rng);
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(rc, &refs, None, assert_dirs_eq);
+    run_gold_with(rc, &refs, None, assert_dirs);
 }
