@@ -14,7 +14,10 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::{env, fs, panic, process};
 
-use common::{Gold, corpmail, diff_dirs, procmail, run, setup, snapshot};
+use common::{
+    Gold, RcBuilder, corpmail, diff_dirs, procmail, run, setup, snapshot,
+};
+use corpmail::delivery::FolderType;
 use rand::Rng;
 use rand::seq::SliceRandom;
 
@@ -67,6 +70,7 @@ fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
     for (i, msg) in inputs.iter().enumerate() {
         fs::write(dir.join(format!("msg-{i:02}")), msg).ok();
     }
+
     // Copy the maildir trees for comparison
     let rust_out = dir.join("rust");
     let proc_out = dir.join("proc");
@@ -113,67 +117,26 @@ const MSGS: &[&[u8]] = &[
 
 #[test]
 fn deliver_mbox() {
-    run_gold(
-        "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-LOG=log
-
-:0
-inbox
-",
-        MSGS,
-        1,
-    );
+    let rc = RcBuilder::new(FolderType::File).folder("inbox").build();
+    run_gold(&rc, MSGS, 1);
 }
 
 #[test]
 fn deliver_maildir() {
-    run_gold_with(
-        "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-LOG=log
-
-:0
-inbox/
-",
-        MSGS,
-        Some(5),
-        assert_dirs,
-    );
+    let rc = RcBuilder::new(FolderType::Maildir).folder("inbox").build();
+    run_gold_with(rc, MSGS, Some(5), assert_dirs);
 }
 
 #[test]
 fn deliver_mh() {
-    run_gold(
-        "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-LOG=log
-
-:0
-inbox/.
-",
-        MSGS,
-        5,
-    );
+    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
+    run_gold(&rc, MSGS, 5);
 }
 
 #[test]
 fn deliver_dev_null() {
-    run_gold(
-        "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-LOG=log
-
-:0
-/dev/null
-",
-        MSGS,
-        0,
-    );
+    let rc = RcBuilder::new(FolderType::File).dev_null().build();
+    run_gold(&rc, MSGS, 0);
 }
 
 const ADDRS: &[&str] = &[
@@ -195,34 +158,16 @@ const SUBJECTS: &[&str] = &[
 const LISTS: &[&str] =
     &["dev@lists.net", "announce@lists.net", "security@lists.net"];
 
-fn build_complex_rc(suffix: &str) -> String {
-    let s = suffix;
-    let mut rc = format!(
-        "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-
-:0
-* ^X-Spam-Flag: YES
-spam{s}
-
-:0
-* ^TO_lists\\.net
-lists{s}
-
-:0 c
-* ^X-Priority: 1
-urgent{s}
-
-"
-    );
+fn build_complex_rc(kind: FolderType) -> String {
+    let mut b = RcBuilder::new(kind);
+    b.spam().folder("spam");
+    b.lists().folder("lists");
+    b.copy().priority().folder("urgent");
     for addr in &ADDRS[..2] {
-        let name = addr.split('@').next().unwrap();
-        let escaped = addr.replace('.', "\\.");
-        rc += &format!(":0\n* ^From:.*{escaped}\n{name}{s}\n\n");
+        b.from(addr).folder(addr.split('@').next().unwrap());
     }
-    rc += &format!(":0\n* ^Subject:.*URGENT\nurgent{s}\n");
-    rc
+    b.subject("URGENT").folder("urgent");
+    b.build()
 }
 
 fn build_complex_msgs() -> Vec<Vec<u8>> {
@@ -267,53 +212,49 @@ fn build_complex_msgs() -> Vec<Vec<u8>> {
 fn complex_filtering_static_mbox() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    // 10 messages + 2 copies across 6 destinations
-    run_gold(&build_complex_rc(""), &refs, 6);
+    run_gold(&build_complex_rc(FolderType::File), &refs, 6);
 }
 
 #[test]
 fn complex_filtering_static_maildir() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(build_complex_rc("/"), &refs, None, assert_dirs);
+    run_gold_with(
+        build_complex_rc(FolderType::Maildir),
+        &refs,
+        None,
+        assert_dirs,
+    );
 }
 
 #[test]
 fn complex_filtering_static_mh() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(build_complex_rc("/."), &refs, None, assert_dirs);
+    run_gold_with(build_complex_rc(FolderType::Mh), &refs, None, assert_dirs);
 }
 
-fn build_random_rc(rng: &mut impl Rng, suffix: &str) -> String {
-    let s = suffix;
-    let mut rc = "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-
-"
-    .to_string();
+fn build_random_rc(rng: &mut impl Rng, kind: FolderType) -> String {
+    let mut b = RcBuilder::new(kind);
     if rng.gen_bool(0.5) {
-        rc += &format!(":0\n* ^X-Spam-Flag: YES\nspam{s}\n\n");
+        b.spam().folder("spam");
     }
     if rng.gen_bool(0.5) {
-        rc += &format!(":0\n* ^TO_lists\\.net\nlists{s}\n\n");
+        b.lists().folder("lists");
     }
     if rng.gen_bool(0.5) {
-        rc += &format!(":0 c\n* ^X-Priority: 1\nurgent{s}\n\n");
+        b.copy().priority().folder("urgent");
     }
     let n = rng.gen_range(1..=ADDRS.len());
     let mut addrs: Vec<_> = ADDRS.to_vec();
     addrs.shuffle(rng);
     for addr in &addrs[..n] {
-        let name = addr.split('@').next().unwrap();
-        let escaped = addr.replace('.', "\\.");
-        rc += &format!(":0\n* ^From:.*{escaped}\n{name}{s}\n\n");
+        b.from(addr).folder(addr.split('@').next().unwrap());
     }
     if rng.gen_bool(0.5) {
-        rc += &format!(":0\n* ^Subject:.*URGENT\nurgent{s}\n");
+        b.subject("URGENT").folder("urgent");
     }
-    rc
+    b.build()
 }
 
 fn build_random_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
@@ -342,27 +283,27 @@ fn build_random_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
         .collect()
 }
 
-fn run_random(suffix: &str, cmp: fn(&Path, &Path)) {
+fn run_random(kind: FolderType) {
     let mut rng = rand::thread_rng();
-    let rc = build_random_rc(&mut rng, suffix);
+    let rc = build_random_rc(&mut rng, kind);
     let msgs = build_random_msgs(&mut rng);
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(rc, &refs, None, cmp);
+    run_gold_with(rc, &refs, None, assert_dirs);
 }
 
 #[test]
 fn complex_filtering_random_mbox() {
-    run_random("", assert_dirs);
+    run_random(FolderType::File);
 }
 
 #[test]
 fn complex_filtering_random_maildir() {
-    run_random("/", assert_dirs);
+    run_random(FolderType::Maildir);
 }
 
 #[test]
 fn complex_filtering_random_mh() {
-    run_random("/.", assert_dirs);
+    run_random(FolderType::Mh);
 }
 
 fn build_size_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
@@ -380,35 +321,35 @@ fn build_size_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
         .collect()
 }
 
-fn build_size_rc(rng: &mut impl Rng) -> String {
+fn build_size_rc(rng: &mut impl Rng, kind: FolderType) -> String {
     let thresh = rng.gen_range(100..=300);
-    let mut rc = format!(
-        "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-
-:0
-* > {thresh}
-big
-
-:0
-* < {thresh}
-small
-
-"
-    );
-    // Negated From rule: deliver to "other" if NOT from a random addr
     let addr = ADDRS.choose(rng).unwrap();
-    let escaped = addr.replace('.', "\\.");
-    rc += &format!(":0\n* ! ^From:.*{escaped}\nother\n");
-    rc
+    let mut b = RcBuilder::new(kind);
+    b.size_gt(thresh).folder("big");
+    b.size_lt(thresh).folder("small");
+    b.negate().from(addr).folder("other");
+    b.build()
 }
 
-#[test]
-fn size_and_negation() {
+fn run_size(kind: FolderType) {
     let mut rng = rand::thread_rng();
-    let rc = build_size_rc(&mut rng);
+    let rc = build_size_rc(&mut rng, kind);
     let msgs = build_size_msgs(&mut rng);
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
     run_gold_with(rc, &refs, None, assert_dirs);
+}
+
+#[test]
+fn size_and_negation_mbox() {
+    run_size(FolderType::File);
+}
+
+#[test]
+fn size_and_negation_maildir() {
+    run_size(FolderType::Maildir);
+}
+
+#[test]
+fn size_and_negation_mh() {
+    run_size(FolderType::Mh);
 }

@@ -112,6 +112,10 @@ where
     }
 
     /// Set a local variable, applying side effects for special variables.
+    pub fn namer(&mut self) -> &mut Namer {
+        &mut self.namer
+    }
+
     pub fn set_var(&mut self, name: &str, value: &str) {
         self.vars.insert(name.to_string(), value.to_string());
         self.apply_side_effect(name, value);

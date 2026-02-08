@@ -11,6 +11,8 @@ use std::sync::OnceLock;
 
 use tempfile::TempDir;
 
+use corpmail::delivery::FolderType;
+
 /// Run a binary with args and stdin, returning (stdout, exit_code).
 pub fn run(
     dir: &Path, bin: &str, args: &[&str], input: &[u8],
@@ -264,4 +266,108 @@ pub fn diff_dirs(a: &Path, b: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[derive(Default)]
+pub struct RcBuilder {
+    suffix: &'static str,
+    flags: String,
+    negated: bool,
+    conditions: Vec<String>,
+    rules: Vec<String>,
+}
+
+impl RcBuilder {
+    pub fn new(kind: FolderType) -> Self {
+        Self {
+            suffix: kind.suffix(),
+            ..Default::default()
+        }
+    }
+
+    pub fn build(&mut self) -> String {
+        assert!(
+            self.conditions.is_empty(),
+            "pending conditions without folder()"
+        );
+        let suffix = self.suffix;
+        let mut rc =
+            format!("MAILDIR=$MAILDIR\nDEFAULT=$DEFAULT{suffix}\nLOG=log\n");
+        if !self.rules.is_empty() {
+            rc += "\n";
+            rc += &self.rules.join("\n\n");
+            rc += "\n";
+        }
+        rc
+    }
+
+    fn emit(&mut self, action: &str) {
+        let flags = if self.flags.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", self.flags)
+        };
+        let mut rule = format!(":0{flags}");
+        for c in self.conditions.drain(..) {
+            rule += &format!("\n{c}");
+        }
+        rule += &format!("\n{action}");
+        self.rules.push(rule);
+        self.flags.clear();
+    }
+
+    fn cond(&mut self, c: &str) -> &mut Self {
+        let prefix = if self.negated { "* ! " } else { "* " };
+        self.negated = false;
+        self.conditions.push(format!("{prefix}{c}"));
+        self
+    }
+
+    pub fn copy(&mut self) -> &mut Self {
+        self.flags = "c".into();
+        self
+    }
+
+    pub fn negate(&mut self) -> &mut Self {
+        self.negated = true;
+        self
+    }
+
+    pub fn spam(&mut self) -> &mut Self {
+        self.cond("^X-Spam-Flag: YES")
+    }
+    pub fn lists(&mut self) -> &mut Self {
+        self.cond("^TO_lists\\.net")
+    }
+    pub fn priority(&mut self) -> &mut Self {
+        self.cond("^X-Priority: 1")
+    }
+
+    pub fn from(&mut self, addr: &str) -> &mut Self {
+        let escaped = addr.replace('.', "\\.");
+        self.cond(&format!("^From:.*{escaped}"))
+    }
+
+    pub fn subject(&mut self, pat: &str) -> &mut Self {
+        self.cond(&format!("^Subject:.*{pat}"))
+    }
+
+    pub fn size_gt(&mut self, n: usize) -> &mut Self {
+        self.cond(&format!("> {n}"))
+    }
+
+    pub fn size_lt(&mut self, n: usize) -> &mut Self {
+        self.cond(&format!("< {n}"))
+    }
+
+    pub fn folder(&mut self, name: &str) -> &mut Self {
+        let suffix = self.suffix;
+        self.emit(&format!("{name}{suffix}"));
+        self
+    }
+
+    pub fn dev_null(&mut self) -> &mut Self {
+        self.emit("/dev/null");
+        self
+    }
 }

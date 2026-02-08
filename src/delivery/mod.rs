@@ -31,6 +31,15 @@ pub enum FolderType {
 impl FolderType {
     /// Whether this folder type needs a recipe-level lockfile.
     /// Maildir and MH use atomic delivery and need no locking.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Self::File => "",
+            Self::Maildir => "/",
+            Self::Mh => "/.",
+            Self::Dir => "//",
+        }
+    }
+
     pub fn needs_lock(self) -> bool {
         matches!(self, Self::File | Self::Dir)
     }

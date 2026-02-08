@@ -10,6 +10,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use corpmail::config::{self, is_var_name};
+use corpmail::delivery::{DeliveryOpts, FolderType};
 use corpmail::mail::Message;
 use corpmail::recipe::{Engine, Outcome};
 use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
@@ -169,7 +170,7 @@ fn run(args: Args, penv: ProcEnv) -> Result<Option<u8>, Box<dyn Error>> {
     }
 
     if !delivered {
-        deliver_default(&engine, &penv, &msg)?;
+        deliver_default(&mut engine, &penv, &msg)?;
     }
 
     Ok(exit_code(&engine))
@@ -491,7 +492,7 @@ fn resolve_rcpath(path: &str, env: &ProcEnv) -> PathBuf {
 }
 
 fn deliver_default<E>(
-    engine: &Engine<E>, penv: &ProcEnv, msg: &Message,
+    engine: &mut Engine<E>, penv: &ProcEnv, msg: &Message,
 ) -> Result<(), Box<dyn Error>>
 where
     E: Env,
@@ -504,12 +505,13 @@ where
             .map(|v| v.into_owned())
             .unwrap_or_else(|| penv.orgmail.clone());
         if !path.is_empty() {
-            // FIXME ignoring mailbox type
-            corpmail::delivery::mbox(
-                Path::new(&path),
+            let (ft, stripped) = FolderType::parse(&path);
+            ft.deliver(
+                Path::new(stripped),
                 msg,
                 sender,
-                Default::default(),
+                DeliveryOpts::default(),
+                engine.namer(),
             )?;
             return Ok(());
         }
