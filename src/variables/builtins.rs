@@ -38,6 +38,7 @@ pub const VAR_USER_SHELL: &str = "USER_SHELL";
 pub const VAR_PATH: &str = "PATH";
 pub const VAR_TZ: &str = "TZ";
 
+pub const DEF_MAILDIR: &str = "Mail";
 pub const DEF_SHELLMETAS: &str = "&|<>~;?*[";
 pub const DEF_LOCKEXT: &str = ".lock";
 pub const DEF_MSGPREFIX: &str = "msg.";
@@ -53,4 +54,3 @@ pub const MIN_LINEBUF: usize = 128;
 pub const DEF_LOGABSTRACT: i64 = -1;
 pub const DEF_SENDMAILFLAGS: &str = "-oi";
 pub const DEF_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
-pub const DEF_SPATH: &str = "/usr/local/bin:/usr/bin:/bin";

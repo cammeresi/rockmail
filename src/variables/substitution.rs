@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::env;
 
@@ -22,12 +23,19 @@ impl Environment {
         }
     }
 
-    pub fn get(&self, name: &str) -> Option<&str> {
-        self.vars.get(name).map(|s| s.as_str())
+    pub fn get<T>(&self, name: &T) -> Option<&str>
+    where
+        T: Borrow<str> + ?Sized,
+    {
+        self.vars.get(name.borrow()).map(|s| s.as_str())
     }
 
-    pub fn set(&mut self, name: &str, value: &str) {
-        self.vars.insert(name.to_string(), value.to_string());
+    pub fn set<T, U>(&mut self, name: T, value: U)
+    where
+        T: Into<String>,
+        U: Into<String>,
+    {
+        self.vars.insert(name.into(), value.into());
     }
 
     pub fn remove(&mut self, name: &str) {

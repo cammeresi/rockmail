@@ -605,9 +605,7 @@ impl Engine {
                     if !ft.needs_lock() {
                         return None;
                     }
-                    let ext = self
-                        .get_var(VAR_LOCKEXT)
-                        .unwrap_or(DEF_LOCKEXT);
+                    let ext = self.get_var(VAR_LOCKEXT).unwrap_or(DEF_LOCKEXT);
                     Some(expanded + ext)
                 }
                 _ => None,
@@ -667,7 +665,8 @@ impl Engine {
         let wait = recipe.flags.wait;
         let quiet = recipe.flags.quiet;
 
-        let result = delivery::pipe(cmd, &delivery_msg, filter, wait, &self.env);
+        let result =
+            delivery::pipe(cmd, &delivery_msg, filter, wait, &self.env);
 
         // Handle pipe errors based on w/W flags
         let result = match result {
@@ -720,10 +719,7 @@ impl Engine {
             .get_var("SENDMAIL")
             .unwrap_or("/usr/sbin/sendmail")
             .to_owned();
-        let flags = self
-            .get_var("SENDMAILFLAGS")
-            .unwrap_or("-oi")
-            .to_owned();
+        let flags = self.get_var("SENDMAILFLAGS").unwrap_or("-oi").to_owned();
         let msg = self.message_for_delivery(recipe, msg);
 
         // Skip From_ line for forwarding
