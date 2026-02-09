@@ -4,39 +4,38 @@ use std::env;
 #[cfg(test)]
 mod tests;
 
-/// Trait for environment variable access (allows mocking in tests)
-pub trait Env {
-    fn get(&self, name: &str) -> Option<String>;
-}
-
-/// Real environment
-pub struct RealEnv;
-
-impl Env for RealEnv {
-    fn get(&self, name: &str) -> Option<String> {
-        env::var(name).ok()
-    }
-}
-
-/// Mock environment for testing
+/// Canonical variable store for all variable lookups.
 #[derive(Default)]
-pub struct MockEnv {
+pub struct Environment {
     vars: HashMap<String, String>,
 }
 
-impl MockEnv {
+impl Environment {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Copy all current process env vars into a new Environment.
+    pub fn from_process() -> Self {
+        Self {
+            vars: env::vars().collect(),
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.vars.get(name).map(|s| s.as_str())
     }
 
     pub fn set(&mut self, name: &str, value: &str) {
         self.vars.insert(name.to_string(), value.to_string());
     }
-}
 
-impl Env for MockEnv {
-    fn get(&self, name: &str) -> Option<String> {
-        self.vars.get(name).cloned()
+    pub fn remove(&mut self, name: &str) {
+        self.vars.remove(name);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.vars.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 }
 
@@ -72,16 +71,7 @@ impl SubstCtx {
     }
 }
 
-/// Expand variable substitutions using real environment
-pub fn expand(s: &str, ctx: &SubstCtx) -> String {
-    subst(s, ctx, &RealEnv)
-}
-
-/// Expand variable substitutions with custom environment
-pub fn subst<E>(s: &str, ctx: &SubstCtx, env: &E) -> String
-where
-    E: Env,
-{
+pub fn subst(s: &str, ctx: &SubstCtx, env: &Environment) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
 
@@ -107,12 +97,10 @@ where
     out
 }
 
-fn expand_var<E>(
-    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx, env: &E,
-    out: &mut String,
-) where
-    E: Env,
-{
+fn expand_var(
+    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx,
+    env: &Environment, out: &mut String,
+) {
     match chars.peek() {
         None => out.push('$'),
         Some(&'{') => {
@@ -155,19 +143,17 @@ fn expand_var<E>(
         Some(&c) if is_name_start(c) => {
             let name = collect_name(chars);
             if let Some(val) = env.get(&name) {
-                out.push_str(&val);
+                out.push_str(val);
             }
         }
         Some(_) => out.push('$'),
     }
 }
 
-fn expand_braced<E>(
-    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx, env: &E,
-    out: &mut String,
-) where
-    E: Env,
-{
+fn expand_braced(
+    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx,
+    env: &Environment, out: &mut String,
+) {
     let name = collect_name(chars);
     if name.is_empty() {
         skip_to_brace(chars);
@@ -180,7 +166,7 @@ fn expand_braced<E>(
         Some(&'}') => {
             chars.next();
             if let Some(v) = val {
-                out.push_str(&v);
+                out.push_str(v);
             }
         }
         Some(&':') => {
@@ -189,13 +175,13 @@ fn expand_braced<E>(
                 Some('-') => {
                     let alt = collect_to_brace(chars);
                     match val {
-                        Some(ref v) if !v.is_empty() => out.push_str(v),
+                        Some(v) if !v.is_empty() => out.push_str(v),
                         _ => out.push_str(&subst(&alt, ctx, env)),
                     }
                 }
                 Some('+') => {
                     let alt = collect_to_brace(chars);
-                    if let Some(ref v) = val
+                    if let Some(v) = val
                         && !v.is_empty()
                     {
                         out.push_str(&subst(&alt, ctx, env));
@@ -208,7 +194,7 @@ fn expand_braced<E>(
             chars.next();
             let alt = collect_to_brace(chars);
             match val {
-                Some(ref v) => out.push_str(v),
+                Some(v) => out.push_str(v),
                 None => out.push_str(&subst(&alt, ctx, env)),
             }
         }

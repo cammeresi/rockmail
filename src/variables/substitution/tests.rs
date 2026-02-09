@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn simple_var() {
-    let mut env = MockEnv::new();
+    let mut env = Environment::new();
     env.set("TEST_VAR", "hello");
     let ctx = SubstCtx::default();
     assert_eq!(subst("$TEST_VAR", &ctx, &env), "hello");
@@ -11,7 +11,7 @@ fn simple_var() {
 
 #[test]
 fn default_value() {
-    let mut env = MockEnv::new();
+    let mut env = Environment::new();
     let ctx = SubstCtx::default();
     assert_eq!(subst("${UNSET:-fallback}", &ctx, &env), "fallback");
     assert_eq!(subst("${UNSET-fallback}", &ctx, &env), "fallback");
@@ -23,7 +23,7 @@ fn default_value() {
 
 #[test]
 fn alternate() {
-    let mut env = MockEnv::new();
+    let mut env = Environment::new();
     env.set("SET", "value");
     let ctx = SubstCtx::default();
     assert_eq!(subst("${SET:+alt}", &ctx, &env), "alt");
@@ -35,7 +35,7 @@ fn alternate() {
 
 #[test]
 fn special_vars() {
-    let env = MockEnv::new();
+    let env = Environment::new();
     let ctx = SubstCtx {
         argv: vec!["arg1".into(), "arg2".into()],
         last_exit: 42,
@@ -58,7 +58,7 @@ fn special_vars() {
 
 #[test]
 fn escape() {
-    let env = MockEnv::new();
+    let env = Environment::new();
     let ctx = SubstCtx::default();
     assert_eq!(subst("\\$HOME", &ctx, &env), "$HOME");
     assert_eq!(subst("\\\\", &ctx, &env), "\\");
@@ -66,7 +66,7 @@ fn escape() {
 
 #[test]
 fn nested_default() {
-    let mut env = MockEnv::new();
+    let mut env = Environment::new();
     env.set("INNER", "nested");
     let ctx = SubstCtx::default();
     assert_eq!(subst("${OUTER:-$INNER}", &ctx, &env), "nested");
@@ -74,35 +74,35 @@ fn nested_default() {
 
 #[test]
 fn trailing_dollar() {
-    let env = MockEnv::new();
+    let env = Environment::new();
     let ctx = SubstCtx::default();
     assert_eq!(subst("price$", &ctx, &env), "price$");
 }
 
 #[test]
 fn unknown_char_after_dollar() {
-    let env = MockEnv::new();
+    let env = Environment::new();
     let ctx = SubstCtx::default();
     assert_eq!(subst("$@foo", &ctx, &env), "$@foo");
 }
 
 #[test]
 fn empty_braces() {
-    let env = MockEnv::new();
+    let env = Environment::new();
     let ctx = SubstCtx::default();
     assert_eq!(subst("${}", &ctx, &env), "");
 }
 
 #[test]
 fn dollar_zero() {
-    let env = MockEnv::new();
+    let env = Environment::new();
     let ctx = SubstCtx::default();
     assert_eq!(subst("$0", &ctx, &env), "");
 }
 
 #[test]
 fn other_escapes() {
-    let env = MockEnv::new();
+    let env = Environment::new();
     let ctx = SubstCtx::default();
     assert_eq!(subst("\\\"quoted\\\"", &ctx, &env), "\"quoted\"");
     assert_eq!(subst("\\'single\\'", &ctx, &env), "'single'");

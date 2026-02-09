@@ -4,13 +4,13 @@ use tempfile::TempDir;
 
 use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
 use crate::mail::Message;
-use crate::variables::{MockEnv, SubstCtx};
+use crate::variables::{Environment, SubstCtx};
 
 use super::{Engine, EngineError, Outcome};
 
 struct Test {
     tmp: TempDir,
-    engine: Engine<MockEnv>,
+    engine: Engine,
     msg: Message,
 }
 
@@ -22,7 +22,7 @@ impl Test {
     fn with_msg(text: &str) -> Self {
         Self {
             tmp: TempDir::new().unwrap(),
-            engine: Engine::new(MockEnv::new(), SubstCtx::default()),
+            engine: Engine::new(Environment::new(), SubstCtx::default()),
             msg: Message::parse(text.as_bytes()),
         }
     }

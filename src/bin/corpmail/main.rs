@@ -99,13 +99,13 @@ fn main() -> ExitCode {
         EX_CANTCREAT
     };
 
-    let penv = init_env(&args);
+    let env = init_env(&args);
 
     // SAFETY:
     // If some day there should be thread spawning, threads must not be
     // spawned prior to the preceding environment setup.
 
-    match run(args, penv) {
+    match run(args, env) {
         Ok(code) => code.map_or(ExitCode::SUCCESS, ExitCode::from),
         Err(e) => {
             eprintln!("corpmail: {e}");
@@ -114,7 +114,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Args, penv: ProcEnv) -> Result<Option<u8>, Box<dyn Error>> {
+fn run(args: Args, env: Environment) -> Result<Option<u8>, Box<dyn Error>> {
     let mail = read_mail()?;
     let mut msg = Message::parse(&mail);
     let mut delivered = false;
@@ -126,10 +126,9 @@ fn run(args: Args, penv: ProcEnv) -> Result<Option<u8>, Box<dyn Error>> {
     }
 
     let ctx = SubstCtx::new(args.args);
-    let mut engine = Engine::new(RealEnv, ctx);
+    let mut engine = Engine::new(env, ctx);
 
-    // FIXME assignments in rc file
-    if env::var(VAR_VERBOSE).is_ok_and(value_is_true) {
+    if engine.get_var(VAR_VERBOSE).is_some_and(value_is_true) {
         engine.set_verbose(true);
     }
 
@@ -147,7 +146,7 @@ fn run(args: Args, penv: ProcEnv) -> Result<Option<u8>, Box<dyn Error>> {
     }
 
     // Find user rcfile to use
-    let rcfile = find_rcfile(&rcfiles, &penv)?;
+    let rcfile = find_rcfile(&rcfiles, &engine)?;
 
     if let Some(rc) = rcfile {
         let content = read_file(rc.file)?;
@@ -170,21 +169,21 @@ fn run(args: Args, penv: ProcEnv) -> Result<Option<u8>, Box<dyn Error>> {
     }
 
     if !delivered {
-        deliver_default(&mut engine, &penv, &msg)?;
+        deliver_default(&mut engine, &msg)?;
     }
 
     Ok(exit_code(&engine))
 }
 
 /// Check for EXITCODE variable override.
-fn exit_code(engine: &Engine<RealEnv>) -> Option<u8> {
+fn exit_code(engine: &Engine) -> Option<u8> {
     let v = engine.get_var(VAR_EXITCODE)?;
     v.parse::<u8>().ok()
 }
 
 /// Process /etc/procmailrc if it exists.
 fn process_etcrc(
-    engine: &mut Engine<RealEnv>, msg: &mut Message,
+    engine: &mut Engine, msg: &mut Message,
 ) -> Result<Option<Outcome>, Box<dyn Error>> {
     let path = Path::new(ETC_PROCMAILRC);
 
@@ -261,87 +260,65 @@ fn read_mail() -> io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Initialize process environment.  Must be called before any threads spawn.
-fn init_env(args: &Args) -> ProcEnv {
-    let penv = build_env(args);
+/// Build Environment and set user assignments. Must be called before threads.
+fn init_env(args: &Args) -> Environment {
+    let mut env = build_env(args);
 
-    // Set user variable assignments into environment
     let (assignments, _) = parse_rest(&args.rest);
     for (name, value) in assignments {
-        // SAFETY: called before any threads spawn
-        unsafe {
-            env::set_var(&name, &value);
-        }
+        env.set(&name, &value);
     }
 
-    penv
+    env
 }
 
-fn build_env(args: &Args) -> ProcEnv {
-    let mut e = ProcEnv::default();
+fn build_env(args: &Args) -> Environment {
+    let mut env = if args.preserve {
+        Environment::from_process()
+    } else {
+        let mut env = Environment::new();
+        // Preserve TZ from process env
+        if let Ok(tz) = std::env::var(VAR_TZ) {
+            env.set(VAR_TZ, &tz);
+        }
+        env
+    };
+
+    // SAFETY: clear process env for defense in depth (subprocess leaks)
+    unsafe {
+        std::env::vars().for_each(|(k, _)| std::env::remove_var(k));
+    }
 
     let uid = nix::unistd::getuid();
-    if let Some(user) = get_user_by_uid(uid.as_raw()) {
-        e.logname = user.name;
-        e.home = user.home;
-        e.shell = user.shell;
+    let (logname, home, shell) = if let Some(u) = get_user_by_uid(uid.as_raw())
+    {
+        (u.name, u.home, u.shell)
     } else {
-        e.logname = format!("#{}", uid);
-        e.home = "/".into();
-        e.shell = "/bin/sh".into();
-    }
+        (format!("#{}", uid), "/".into(), "/bin/sh".into())
+    };
 
-    e.maildir = format!("{}/Mail", e.home);
-    e.orgmail = format!("{}/{}", MAIL_SPOOL, e.logname);
+    let maildir = format!("{home}/Mail");
+    let orgmail = format!("{MAIL_SPOOL}/{logname}");
+    let host = nix::unistd::gethostname()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
 
-    if let Ok(name) = nix::unistd::gethostname() {
-        e.host = name.to_string_lossy().into_owned();
-    }
+    env.set(VAR_HOME, &home);
+    env.set(VAR_LOGNAME, &logname);
+    env.set(VAR_SHELL, &shell);
+    env.set(VAR_PATH, DEF_PATH);
+    env.set(VAR_MAILDIR, &maildir);
+    env.set(VAR_ORGMAIL, &orgmail);
+    env.set(VAR_DEFAULT, &orgmail);
+    env.set(VAR_HOST, &host);
+    env.set(VAR_SENDMAILFLAGS, DEF_SENDMAILFLAGS);
+    env.set(VAR_PROCMAIL_VERSION, VERSION);
+    env.set(VAR_USER_SHELL, &shell);
+    env.set(VAR_NORESRETRY, &DEF_NORESRETRY.to_string());
+    env.set(VAR_SUSPEND, &DEF_SUSPEND.to_string());
+    env.set(VAR_LOGABSTRACT, &DEF_LOGABSTRACT.to_string());
 
-    // SAFETY: called before any threads spawn
-    unsafe {
-        if !args.preserve {
-            env::vars().for_each(|(k, _)| {
-                if k != VAR_TZ {
-                    env::remove_var(k);
-                }
-            });
-        }
-
-        env::set_var(VAR_HOME, &e.home);
-        env::set_var(VAR_LOGNAME, &e.logname);
-        env::set_var(VAR_SHELL, &e.shell);
-        env::set_var(VAR_PATH, DEF_PATH);
-        env::set_var(VAR_MAILDIR, &e.maildir);
-        env::set_var(VAR_ORGMAIL, &e.orgmail);
-        env::set_var(VAR_DEFAULT, &e.orgmail);
-        env::set_var(VAR_HOST, &e.host);
-        env::set_var(VAR_SENDMAILFLAGS, DEF_SENDMAILFLAGS);
-        env::set_var(VAR_PROCMAIL_VERSION, VERSION);
-        env::set_var(VAR_USER_SHELL, &e.shell);
-        env::set_var(VAR_NORESRETRY, DEF_NORESRETRY.to_string());
-        env::set_var(VAR_SUSPEND, DEF_SUSPEND.to_string());
-        env::set_var(VAR_LOGABSTRACT, DEF_LOGABSTRACT.to_string());
-    }
-
-    e
-}
-
-/// Process environment for mail delivery.
-#[derive(Default)]
-struct ProcEnv {
-    /// User's login name.
-    logname: String,
-    /// User's home directory.
-    home: String,
-    /// User's shell.
-    shell: String,
-    /// User's mail directory (~/Mail).
-    maildir: String,
-    /// System mailbox (/var/mail/$LOGNAME).
-    orgmail: String,
-    /// System hostname.
-    host: String,
+    env
 }
 
 /// User information from passwd database.
@@ -380,11 +357,12 @@ fn parse_rest(rest: &[String]) -> (Vec<(String, String)>, Vec<String>) {
 }
 
 fn find_rcfile(
-    files: &[String], env: &ProcEnv,
+    files: &[String], engine: &Engine,
 ) -> Result<Option<ValidatedRcfile>, Box<dyn Error>> {
-    // Command line rcfiles
+    let home = engine.get_var(VAR_HOME).unwrap_or("");
+
     for f in files {
-        let path = resolve_rcpath(f, env);
+        let path = resolve_rcpath(f, home);
         if let Some(rc) = open_and_check(&path, false)? {
             return Ok(Some(rc));
         }
@@ -392,7 +370,7 @@ fn find_rcfile(
 
     // Default: ~/.procmailrc
     if files.is_empty() {
-        let default = PathBuf::from(&env.home).join(".procmailrc");
+        let default = PathBuf::from(home).join(".procmailrc");
         if let Some(rc) = open_and_check(&default, true)? {
             return Ok(Some(rc));
         }
@@ -482,28 +460,22 @@ fn check_dir_security(path: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn resolve_rcpath(path: &str, env: &ProcEnv) -> PathBuf {
+fn resolve_rcpath(path: &str, home: &str) -> PathBuf {
     let p = Path::new(path);
     if p.is_absolute() || path.starts_with("./") {
         p.to_path_buf()
     } else {
-        PathBuf::from(&env.home).join(path)
+        PathBuf::from(home).join(path)
     }
 }
 
-fn deliver_default<E>(
-    engine: &mut Engine<E>, penv: &ProcEnv, msg: &Message,
-) -> Result<(), Box<dyn Error>>
-where
-    E: Env,
-{
+fn deliver_default(
+    engine: &mut Engine, msg: &Message,
+) -> Result<(), Box<dyn Error>> {
     let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
 
     for name in [VAR_DEFAULT, VAR_ORGMAIL] {
-        let path = engine
-            .get_var(name)
-            .map(|v| v.into_owned())
-            .unwrap_or_else(|| penv.orgmail.clone());
+        let path = engine.get_var(name).unwrap_or("").to_owned();
         if !path.is_empty() {
             let (ft, stripped) = FolderType::parse(&path);
             ft.deliver(

@@ -14,7 +14,7 @@ use nix::fcntl::{Flock, FlockArg};
 
 use corpmail::formail::{Field, FieldList, read_header};
 use corpmail::util;
-use corpmail::variables::{Env, RealEnv};
+use corpmail::variables::Environment;
 
 #[cfg(test)]
 mod tests;
@@ -624,7 +624,7 @@ fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
 
 /// Run in split mode - split mailbox/digest into messages.
 fn run_split(args: Args) -> io::Result<i32> {
-    run_split_with_env(args, &RealEnv)
+    run_split_with_env(args, &Environment::from_process())
 }
 
 struct SplitState {
@@ -674,13 +674,11 @@ impl SplitConfig<'_> {
     }
 }
 
-fn run_split_with_env<E>(args: Args, env: &E) -> io::Result<i32>
-where
-    E: Env,
-{
+fn run_split_with_env(args: Args, env: &Environment) -> io::Result<i32> {
     let stdin = io::stdin().lock();
     let mut reader = io::BufReader::new(stdin);
 
+    let fileno = env.get("FILENO");
     let cfg = SplitConfig {
         cmd: args.split.as_ref().unwrap(),
         skip: args.skip.unwrap_or(0),
@@ -688,8 +686,8 @@ where
         minfields: args.minfields.unwrap_or(2),
         every: args.every,
         digest: args.digest,
-        base: env.get("FILENO").and_then(|s| s.parse().ok()).unwrap_or(0),
-        width: env.get("FILENO").map(|s| s.len()).unwrap_or(0),
+        base: fileno.and_then(|s| s.parse().ok()).unwrap_or(0),
+        width: fileno.map(|s| s.len()).unwrap_or(0),
     };
     let mut pool = args.nowait.map(ProcessPool::new);
     let mut state = SplitState::new();

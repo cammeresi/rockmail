@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 
 use super::{DeliveryError, DeliveryResult};
 use crate::mail::Message;
+use crate::variables::Environment;
 
 /// Deliver a message by piping to a command.
 ///
@@ -18,11 +19,13 @@ use crate::mail::Message;
 /// If `wait` is true, returns error on non-zero exit (caller handles messaging).
 /// If `wait` is false, ignores exit status (original behavior for non-w recipes).
 pub fn deliver(
-    cmd: &str, msg: &Message, filter: bool, wait: bool,
+    cmd: &str, msg: &Message, filter: bool, wait: bool, env: &Environment,
 ) -> Result<PipeResult, DeliveryError> {
     let mut child = Command::new("/bin/sh")
         .arg("-c")
         .arg(cmd)
+        .env_clear()
+        .envs(env.iter())
         .stdin(Stdio::piped())
         .stdout(if filter {
             Stdio::piped()
@@ -85,5 +88,5 @@ impl From<PipeResult> for DeliveryResult {
 pub fn deliver_test(
     cmd: &str, msg: &Message, filter: bool,
 ) -> Result<PipeResult, DeliveryError> {
-    deliver(cmd, msg, filter, false)
+    deliver(cmd, msg, filter, false, &Environment::from_process())
 }

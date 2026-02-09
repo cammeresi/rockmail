@@ -2,7 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use super::*;
 use corpmail::recipe::Engine;
-use corpmail::variables::{MockEnv, SubstCtx};
+use corpmail::variables::{Environment, SubstCtx, VAR_DEFAULT, VAR_HOME};
 
 #[test]
 fn parse_rest_assignments() {
@@ -49,32 +49,26 @@ fn is_var_name_invalid() {
 
 #[test]
 fn resolve_rcpath_absolute() {
-    let env = ProcEnv {
-        home: "/home/user".into(),
-        ..Default::default()
-    };
-    let p = resolve_rcpath("/etc/rc", &env);
+    let p = resolve_rcpath("/etc/rc", "/home/user");
     assert_eq!(p, PathBuf::from("/etc/rc"));
 }
 
 #[test]
 fn resolve_rcpath_dotslash() {
-    let env = ProcEnv {
-        home: "/home/user".into(),
-        ..Default::default()
-    };
-    let p = resolve_rcpath("./local.rc", &env);
+    let p = resolve_rcpath("./local.rc", "/home/user");
     assert_eq!(p, PathBuf::from("./local.rc"));
 }
 
 #[test]
 fn resolve_rcpath_relative_normal() {
-    let env = ProcEnv {
-        home: "/home/user".into(),
-        ..Default::default()
-    };
-    let p = resolve_rcpath("mail/filter.rc", &env);
+    let p = resolve_rcpath("mail/filter.rc", "/home/user");
     assert_eq!(p, PathBuf::from("/home/user/mail/filter.rc"));
+}
+
+fn engine_with_home(home: &str) -> Engine {
+    let mut env = Environment::new();
+    env.set(VAR_HOME, home);
+    Engine::new(env, SubstCtx::default())
 }
 
 #[test]
@@ -83,12 +77,9 @@ fn find_rcfile_explicit() {
     let rc = tmp.path().join("test.rc");
     std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env).unwrap();
+    let result = find_rcfile(&files, &engine).unwrap();
     assert_eq!(result.map(|r| r.path), Some(rc));
 }
 
@@ -98,22 +89,16 @@ fn find_rcfile_default_procmailrc() {
     let rc = tmp.path().join(".procmailrc");
     std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
-    let result = find_rcfile(&[], &env).unwrap();
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
+    let result = find_rcfile(&[], &engine).unwrap();
     assert_eq!(result.map(|r| r.path), Some(rc));
 }
 
 #[test]
 fn find_rcfile_no_default() {
     let tmp = tempfile::tempdir().unwrap();
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
-    let result = find_rcfile(&[], &env).unwrap();
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
+    let result = find_rcfile(&[], &engine).unwrap();
     assert!(result.is_none());
 }
 
@@ -122,17 +107,14 @@ fn deliver_default_to_mbox() {
     let tmp = tempfile::tempdir().unwrap();
     let mbox = tmp.path().join("inbox");
 
-    let penv = ProcEnv {
-        orgmail: mbox.to_string_lossy().into(),
-        ..Default::default()
-    };
-    let env = MockEnv::new();
+    let mut env = Environment::new();
+    env.set(VAR_DEFAULT, &mbox.to_string_lossy());
     let mut engine = Engine::new(env, SubstCtx::default());
 
     let msg = Message::parse(
         b"From sender@test Mon Jan 1 00:00:00 2024\nSubject: Test\n\nBody\n",
     );
-    deliver_default(&mut engine, &penv, &msg).unwrap();
+    deliver_default(&mut engine, &msg).unwrap();
 
     let content = std::fs::read_to_string(&mbox).unwrap();
     assert!(content.contains("Subject: Test"));
@@ -147,12 +129,9 @@ fn security_rejects_world_writable() {
     std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o666))
         .unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("world writable"));
 }
@@ -165,11 +144,8 @@ fn security_rejects_group_writable_default() {
     std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o664))
         .unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
-    let result = find_rcfile(&[], &env);
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
+    let result = find_rcfile(&[], &engine);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("group writable"));
 }
@@ -182,12 +158,9 @@ fn security_allows_group_writable_explicit() {
     std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o664))
         .unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_ok());
 }
 
@@ -199,12 +172,9 @@ fn security_accepts_safe_permissions() {
     std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
         .unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -222,12 +192,9 @@ fn dir_security_rejects_world_writable() {
     std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
         .unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("directory"));
 }
@@ -245,11 +212,8 @@ fn dir_security_allows_sticky_world_writable() {
     std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
         .unwrap();
 
-    let env = ProcEnv {
-        home: tmp.path().to_string_lossy().into(),
-        ..Default::default()
-    };
+    let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &env);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_ok());
 }

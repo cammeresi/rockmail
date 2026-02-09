@@ -40,7 +40,7 @@ fn exit_code_ignored_without_wait() {
 fn exit_code_error_with_wait() {
     let m = msg("Subject: Test\n\nBody\n");
     // With wait flag, non-zero exit returns error
-    let r = deliver("exit 1", &m, false, true);
+    let r = deliver("exit 1", &m, false, true, &Environment::from_process());
 
     match r {
         Err(DeliveryError::PipeExit(1)) => {}

@@ -2,7 +2,6 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
@@ -16,8 +15,8 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    DEF_LOCKEXT, Env, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR,
-    VAR_SHELL, VAR_UMASK, VAR_VERBOSE,
+    DEF_LOCKEXT, Environment, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE,
+    VAR_MAILDIR, VAR_SHELL, VAR_UMASK, VAR_VERBOSE,
 };
 use nix::sys::stat::{self, Mode};
 use nix::unistd::dup2;
@@ -73,25 +72,20 @@ pub struct State {
 }
 
 /// Recipe evaluation engine.
-pub struct Engine<E> {
-    env: E,
+pub struct Engine {
+    env: Environment,
     ctx: SubstCtx,
-    vars: HashMap<String, String>,
     verbose: bool,
     /// Kept alive so the fd backing stderr remains valid.
     logfile: Option<File>,
     namer: Namer,
 }
 
-impl<E> Engine<E>
-where
-    E: Env,
-{
-    pub fn new(env: E, ctx: SubstCtx) -> Self {
+impl Engine {
+    pub fn new(env: Environment, ctx: SubstCtx) -> Self {
         Self {
             env,
             ctx,
-            vars: HashMap::new(),
             verbose: false,
             logfile: None,
             namer: Namer::new(),
@@ -102,22 +96,24 @@ where
         self.verbose = v;
     }
 
-    /// Get a variable (local vars override env).
-    pub fn get_var(&self, name: &str) -> Option<Cow<'_, str>> {
-        if let Some(v) = self.vars.get(name) {
-            Some(Cow::Borrowed(v))
-        } else {
-            self.env.get(name).map(Cow::Owned)
-        }
+    pub fn get_var(&self, name: &str) -> Option<&str> {
+        self.env.get(name)
     }
 
-    /// Set a local variable, applying side effects for special variables.
+    pub fn env(&self) -> &Environment {
+        &self.env
+    }
+
+    pub fn env_mut(&mut self) -> &mut Environment {
+        &mut self.env
+    }
+
     pub fn namer(&mut self) -> &mut Namer {
         &mut self.namer
     }
 
     pub fn set_var(&mut self, name: &str, value: &str) {
-        self.vars.insert(name.to_string(), value.to_string());
+        self.env.set(name, value);
         self.apply_side_effect(name, value);
     }
 
@@ -137,7 +133,7 @@ where
                     let cur = env::current_dir()
                         .map(|p| p.to_string_lossy().into_owned())
                         .unwrap_or_else(|_| ".".into());
-                    self.vars.insert(name.to_string(), cur);
+                    self.env.set(name, &cur);
                 }
             }
             VAR_LOG => {
@@ -529,14 +525,22 @@ where
             "H" => String::from_utf8_lossy(msg.header()),
             "B" => String::from_utf8_lossy(msg.body()),
             "HB" | "BH" => String::from_utf8_lossy(msg.as_bytes()),
-            _ => self.get_var(name).unwrap_or_default(),
+            _ => Cow::Borrowed(self.get_var(name).unwrap_or("")),
         }
+    }
+
+    /// Build a Command with a clean env from our Environment.
+    fn spawn(&self, prog: &str) -> Command {
+        let mut cmd = Command::new(prog);
+        cmd.env_clear().envs(self.env.iter());
+        cmd
     }
 
     /// Run a shell command with message as stdin.
     fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<bool> {
-        let shell = self.get_var(VAR_SHELL).unwrap_or(Cow::Borrowed("/bin/sh"));
-        let mut child = Command::new(&*shell)
+        let shell = self.get_var(VAR_SHELL).unwrap_or("/bin/sh").to_owned();
+        let mut child = self
+            .spawn(&shell)
             .arg("-c")
             .arg(cmd)
             .stdin(Stdio::piped())
@@ -603,8 +607,8 @@ where
                     }
                     let ext = self
                         .get_var(VAR_LOCKEXT)
-                        .unwrap_or(Cow::Borrowed(DEF_LOCKEXT));
-                    Some(expanded + &ext)
+                        .unwrap_or(DEF_LOCKEXT);
+                    Some(expanded + ext)
                 }
                 _ => None,
             }
@@ -663,7 +667,7 @@ where
         let wait = recipe.flags.wait;
         let quiet = recipe.flags.quiet;
 
-        let result = delivery::pipe(cmd, &delivery_msg, filter, wait);
+        let result = delivery::pipe(cmd, &delivery_msg, filter, wait, &self.env);
 
         // Handle pipe errors based on w/W flags
         let result = match result {
@@ -714,17 +718,20 @@ where
     ) -> EngineResult<Outcome> {
         let sendmail = self
             .get_var("SENDMAIL")
-            .unwrap_or(Cow::Borrowed("/usr/sbin/sendmail"));
+            .unwrap_or("/usr/sbin/sendmail")
+            .to_owned();
         let flags = self
             .get_var("SENDMAILFLAGS")
-            .unwrap_or(Cow::Borrowed("-oi"));
+            .unwrap_or("-oi")
+            .to_owned();
         let msg = self.message_for_delivery(recipe, msg);
 
         // Skip From_ line for forwarding
         let data = skip_from_line(msg.as_bytes());
 
         let flag_args: Vec<&str> = flags.split_whitespace().collect();
-        let mut child = Command::new(&*sendmail)
+        let mut child = self
+            .spawn(&sendmail)
             .args(&flag_args)
             .args(addrs)
             .stdin(Stdio::piped())
@@ -771,24 +778,7 @@ where
 
     /// Expand variables in a string.
     fn expand(&self, s: &str) -> String {
-        crate::variables::subst(s, &self.ctx, &EnvWrapper { engine: self })
-    }
-}
-
-/// Wrapper to make Engine's get_var available via Env trait.
-struct EnvWrapper<'a, E>
-where
-    E: Env,
-{
-    engine: &'a Engine<E>,
-}
-
-impl<E> Env for EnvWrapper<'_, E>
-where
-    E: Env,
-{
-    fn get(&self, name: &str) -> Option<String> {
-        self.engine.get_var(name).map(|c| c.into_owned())
+        crate::variables::subst(s, &self.ctx, &self.env)
     }
 }
 
