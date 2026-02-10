@@ -1,5 +1,6 @@
-use super::{Action, Condition, Flags, Item, Recipe, is_var_name};
 use thiserror::Error;
+
+use super::{Action, Condition, Flags, Item, Recipe, is_var_name};
 
 #[cfg(test)]
 mod tests;
@@ -37,15 +38,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse entire rcfile into items
-    pub fn parse(&mut self) -> Result<Vec<Item>, ParseError> {
-        let mut items = Vec::new();
-        while let Some(item) = self.next_item()? {
-            items.push(item);
-        }
-        Ok(items)
-    }
-
     fn line_num(&self) -> usize {
         self.pos + 1
     }
@@ -73,33 +65,19 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn next_item(&mut self) -> Result<Option<Item>, ParseError> {
-        loop {
-            self.skip_blank_and_comments();
-            let Some(line) = self.peek() else {
-                return Ok(None);
-            };
+    fn collect_continuation(&mut self, first: &str) -> String {
+        let mut result = first.to_string();
 
-            let trimmed = line.trim();
-
-            // Recipe starts with :
-            if trimmed.starts_with(':') {
-                return self.parse_recipe().map(|r| Some(Item::Recipe(r)));
+        while result.ends_with('\\') {
+            result.pop(); // remove trailing backslash
+            if let Some(next) = self.advance() {
+                result.push_str(next.trim());
+            } else {
+                break;
             }
-
-            // Closing brace: return None to end nested block
-            if trimmed.starts_with('}') {
-                return Ok(None);
-            }
-
-            // Variable assignment: NAME=value or NAME (unset)
-            self.advance();
-            if let Some(item) = self.parse_assignment(trimmed) {
-                return Ok(Some(item));
-            }
-
-            // Unrecognized line: skip and continue loop
         }
+
+        result
     }
 
     fn parse_assignment(&self, line: &str) -> Option<Item> {
@@ -137,6 +115,92 @@ impl<'a> Parser<'a> {
         None
     }
 
+    fn parse_recipe_header(
+        &self, line: &str, line_num: usize,
+    ) -> Result<(Flags, Option<String>), ParseError> {
+        // Format: :0 [flags] [ : [lockfile] ]
+        let line = line.trim();
+        let line = line
+            .strip_prefix(':')
+            .ok_or_else(|| ParseError::Invalid(line_num, line.to_string()))?;
+
+        // Skip the leading number (legacy, usually 0)
+        let line = line.trim_start_matches(|c: char| c.is_ascii_digit());
+        let line = line.trim_start();
+
+        // Check for trailing colon (local lockfile)
+        let (flags_part, lockfile) = if let Some(colon_pos) = line.rfind(':') {
+            let flags_str = line[..colon_pos].trim();
+            let lock_str = line[colon_pos + 1..].trim();
+            let lockfile = if lock_str.is_empty() {
+                Some(String::new()) // auto-generate lockfile
+            } else {
+                Some(lock_str.to_string())
+            };
+            (flags_str, lockfile)
+        } else {
+            (line, None)
+        };
+
+        let flags = Flags::parse(flags_part);
+        Ok((flags, lockfile))
+    }
+
+    fn parse_block(&mut self, start: usize) -> Result<Vec<Item>, ParseError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(ParseError::TooDeep(start));
+        }
+        self.depth += 1;
+        let mut items = Vec::new();
+        loop {
+            self.skip_blank_and_comments();
+            let Some(line) = self.peek() else {
+                self.depth -= 1;
+                return Err(ParseError::UnclosedBlock(start));
+            };
+            if line.trim().starts_with('}') {
+                self.advance();
+                break;
+            }
+            if let Some(item) = self.next_item()? {
+                items.push(item);
+            } else {
+                // next_item returned None, meaning } or EOF
+                // We already checked for } above, so this is EOF
+                self.depth -= 1;
+                return Err(ParseError::UnclosedBlock(start));
+            }
+        }
+        self.depth -= 1;
+        Ok(items)
+    }
+
+    fn parse_action(
+        &mut self, line: &str, line_num: usize,
+    ) -> Result<Action, ParseError> {
+        // Handle nested block
+        if let Some(rest) = line.strip_prefix('{') {
+            let rest = rest.trim();
+            // Check for inline block content: { ... }
+            if let Some(inner) = rest.strip_suffix('}') {
+                let inner = inner.trim();
+                if inner.is_empty() {
+                    return Ok(Action::Nested(vec![]));
+                }
+                // Parse inline content
+                let mut p = Parser::new(inner);
+                p.depth = self.depth;
+                let items = p.parse()?;
+                return Ok(Action::Nested(items));
+            }
+            let items = self.parse_block(line_num)?;
+            return Ok(Action::Nested(items));
+        }
+
+        let full = self.collect_continuation(line);
+        Ok(Action::parse_line(&full))
+    }
+
     fn parse_recipe(&mut self) -> Result<Recipe, ParseError> {
         let line = self.line_num();
         let header = self.advance().ok_or(ParseError::UnexpectedEof(line))?;
@@ -171,105 +235,42 @@ impl<'a> Parser<'a> {
         Ok(Recipe::new(flags, lockfile, conds, action))
     }
 
-    fn parse_recipe_header(
-        &self, line: &str, line_num: usize,
-    ) -> Result<(Flags, Option<String>), ParseError> {
-        // Format: :0 [flags] [ : [lockfile] ]
-        let line = line.trim();
-        let line = line
-            .strip_prefix(':')
-            .ok_or_else(|| ParseError::Invalid(line_num, line.to_string()))?;
-
-        // Skip the leading number (legacy, usually 0)
-        let line = line.trim_start_matches(|c: char| c.is_ascii_digit());
-        let line = line.trim_start();
-
-        // Check for trailing colon (local lockfile)
-        let (flags_part, lockfile) = if let Some(colon_pos) = line.rfind(':') {
-            let flags_str = line[..colon_pos].trim();
-            let lock_str = line[colon_pos + 1..].trim();
-            let lockfile = if lock_str.is_empty() {
-                Some(String::new()) // auto-generate lockfile
-            } else {
-                Some(lock_str.to_string())
-            };
-            (flags_str, lockfile)
-        } else {
-            (line, None)
-        };
-
-        let flags = Flags::parse(flags_part);
-        Ok((flags, lockfile))
-    }
-
-    fn parse_action(
-        &mut self, line: &str, line_num: usize,
-    ) -> Result<Action, ParseError> {
-        // Handle nested block
-        if let Some(rest) = line.strip_prefix('{') {
-            let rest = rest.trim();
-            // Check for inline block content: { ... }
-            if let Some(inner) = rest.strip_suffix('}') {
-                let inner = inner.trim();
-                if inner.is_empty() {
-                    return Ok(Action::Nested(vec![]));
-                }
-                // Parse inline content
-                let mut p = Parser::new(inner);
-                p.depth = self.depth;
-                let items = p.parse()?;
-                return Ok(Action::Nested(items));
-            }
-            let items = self.parse_block(line_num)?;
-            return Ok(Action::Nested(items));
-        }
-
-        let full = self.collect_continuation(line);
-        Ok(Action::parse_line(&full))
-    }
-
-    fn parse_block(&mut self, start: usize) -> Result<Vec<Item>, ParseError> {
-        if self.depth >= MAX_DEPTH {
-            return Err(ParseError::TooDeep(start));
-        }
-        self.depth += 1;
-        let mut items = Vec::new();
+    fn next_item(&mut self) -> Result<Option<Item>, ParseError> {
         loop {
             self.skip_blank_and_comments();
             let Some(line) = self.peek() else {
-                self.depth -= 1;
-                return Err(ParseError::UnclosedBlock(start));
+                return Ok(None);
             };
-            if line.trim().starts_with('}') {
-                self.advance();
-                break;
+
+            let trimmed = line.trim();
+
+            // Recipe starts with :
+            if trimmed.starts_with(':') {
+                return self.parse_recipe().map(|r| Some(Item::Recipe(r)));
             }
-            if let Some(item) = self.next_item()? {
-                items.push(item);
-            } else {
-                // next_item returned None, meaning } or EOF
-                // We already checked for } above, so this is EOF
-                self.depth -= 1;
-                return Err(ParseError::UnclosedBlock(start));
+
+            // Closing brace: return None to end nested block
+            if trimmed.starts_with('}') {
+                return Ok(None);
             }
+
+            // Variable assignment: NAME=value or NAME (unset)
+            self.advance();
+            if let Some(item) = self.parse_assignment(trimmed) {
+                return Ok(Some(item));
+            }
+
+            // Unrecognized line: skip and continue loop
         }
-        self.depth -= 1;
-        Ok(items)
     }
 
-    fn collect_continuation(&mut self, first: &str) -> String {
-        let mut result = first.to_string();
-
-        while result.ends_with('\\') {
-            result.pop(); // remove trailing backslash
-            if let Some(next) = self.advance() {
-                result.push_str(next.trim());
-            } else {
-                break;
-            }
+    /// Parse entire rcfile into items
+    pub fn parse(&mut self) -> Result<Vec<Item>, ParseError> {
+        let mut items = Vec::new();
+        while let Some(item) = self.next_item()? {
+            items.push(item);
         }
-
-        result
+        Ok(items)
     }
 }
 

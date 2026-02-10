@@ -10,6 +10,49 @@ pub struct Weight {
     pub x: f64,
 }
 
+fn is_valid_number(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let s = s.strip_prefix('-').unwrap_or(s);
+    if s.is_empty() {
+        return false;
+    }
+    let dots = s.bytes().filter(|&b| b == b'.').count();
+    dots <= 1 && s.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+}
+
+/// Parse w^x weight prefix from condition. Returns (weight, rest).
+fn parse_weight(s: &str) -> (Option<Weight>, &str) {
+    let s = s.trim_start();
+    let Some(caret) = s.find('^') else {
+        return (None, s);
+    };
+
+    let w_str = &s[..caret];
+    if !is_valid_number(w_str) {
+        return (None, s);
+    }
+
+    let rest = &s[caret + 1..];
+    let x_end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(rest.len());
+    let x_str = &rest[..x_end];
+    if !is_valid_number(x_str) {
+        return (None, s);
+    }
+
+    let Ok(w) = w_str.parse::<f64>() else {
+        return (None, s);
+    };
+    let Ok(x) = x_str.parse::<f64>() else {
+        return (None, s);
+    };
+
+    (Some(Weight { w, x }), rest[x_end..].trim_start())
+}
+
 /// A condition line in a recipe (starts with *)
 #[derive(Debug, Clone)]
 pub enum Condition {
@@ -122,47 +165,4 @@ impl Condition {
             weight,
         })
     }
-}
-
-/// Parse w^x weight prefix from condition. Returns (weight, rest).
-fn parse_weight(s: &str) -> (Option<Weight>, &str) {
-    let s = s.trim_start();
-    let Some(caret) = s.find('^') else {
-        return (None, s);
-    };
-
-    let w_str = &s[..caret];
-    if !is_valid_number(w_str) {
-        return (None, s);
-    }
-
-    let rest = &s[caret + 1..];
-    let x_end = rest
-        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
-        .unwrap_or(rest.len());
-    let x_str = &rest[..x_end];
-    if !is_valid_number(x_str) {
-        return (None, s);
-    }
-
-    let Ok(w) = w_str.parse::<f64>() else {
-        return (None, s);
-    };
-    let Ok(x) = x_str.parse::<f64>() else {
-        return (None, s);
-    };
-
-    (Some(Weight { w, x }), rest[x_end..].trim_start())
-}
-
-fn is_valid_number(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
-    }
-    let s = s.strip_prefix('-').unwrap_or(s);
-    if s.is_empty() {
-        return false;
-    }
-    let dots = s.bytes().filter(|&b| b == b'.').count();
-    dots <= 1 && s.bytes().all(|b| b.is_ascii_digit() || b == b'.')
 }

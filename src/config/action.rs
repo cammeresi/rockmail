@@ -1,5 +1,6 @@
-use super::{Item, is_var_name};
 use std::path::PathBuf;
+
+use super::{Item, is_var_name};
 
 #[cfg(test)]
 mod tests;
