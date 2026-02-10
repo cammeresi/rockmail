@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use std::fs::OpenOptions;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
@@ -9,28 +6,42 @@ use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::locking::FileLock;
 use crate::mail::{Message, generate as from_line};
 
-/// Deliver a message to an mbox file.
-///
-/// Appends the message with proper From_ escaping. A From_ line is
-/// prepended if the message doesn't start with one.
-/// Acquires flock before writing for concurrent safety.
-pub fn deliver(
-    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
-) -> Result<DeliveryResult, DeliveryError> {
-    // Locking /dev/null would be silly (matches procmail behavior).
-    let _guard = if path != Path::new("/dev/null") {
-        Some(FileLock::acquire(path)?)
-    } else {
-        None
-    };
-    deliver_inner(path, msg, sender, opts)
-}
-
 #[cfg(test)]
-pub fn deliver_test(
-    path: &Path, msg: &Message, sender: &str,
-) -> Result<DeliveryResult, DeliveryError> {
-    deliver(path, msg, sender, DeliveryOpts::default())
+mod tests;
+
+/// Write data with From_ escaping.
+///
+/// Lines starting with "From " are escaped by prepending ">".
+fn write_escaped<W>(w: &mut W, data: &[u8]) -> io::Result<usize>
+where
+    W: Write,
+{
+    let mut bytes = 0;
+    let mut start = 0;
+    let mut at_line_start = true;
+
+    for (i, &b) in data.iter().enumerate() {
+        if at_line_start && data[i..].starts_with(b"From ") {
+            // Write any pending data
+            if start < i {
+                w.write_all(&data[start..i])?;
+                bytes += i - start;
+            }
+            // Write escape
+            w.write_all(b">")?;
+            bytes += 1;
+            start = i;
+        }
+        at_line_start = b == b'\n';
+    }
+
+    // Write remaining data
+    if start < data.len() {
+        w.write_all(&data[start..])?;
+        bytes += data.len() - start;
+    }
+
+    Ok(bytes)
 }
 
 fn deliver_inner(
@@ -89,37 +100,26 @@ fn deliver_inner(
     })
 }
 
-/// Write data with From_ escaping.
+/// Deliver a message to an mbox file.
 ///
-/// Lines starting with "From " are escaped by prepending ">".
-fn write_escaped<W>(w: &mut W, data: &[u8]) -> io::Result<usize>
-where
-    W: Write,
-{
-    let mut bytes = 0;
-    let mut start = 0;
-    let mut at_line_start = true;
+/// Appends the message with proper From_ escaping. A From_ line is
+/// prepended if the message doesn't start with one.
+/// Acquires flock before writing for concurrent safety.
+pub fn deliver(
+    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    // Locking /dev/null would be silly (matches procmail behavior).
+    let _guard = if path != Path::new("/dev/null") {
+        Some(FileLock::acquire(path)?)
+    } else {
+        None
+    };
+    deliver_inner(path, msg, sender, opts)
+}
 
-    for (i, &b) in data.iter().enumerate() {
-        if at_line_start && data[i..].starts_with(b"From ") {
-            // Write any pending data
-            if start < i {
-                w.write_all(&data[start..i])?;
-                bytes += i - start;
-            }
-            // Write escape
-            w.write_all(b">")?;
-            bytes += 1;
-            start = i;
-        }
-        at_line_start = b == b'\n';
-    }
-
-    // Write remaining data
-    if start < data.len() {
-        w.write_all(&data[start..])?;
-        bytes += data.len() - start;
-    }
-
-    Ok(bytes)
+#[cfg(test)]
+pub fn deliver_test(
+    path: &Path, msg: &Message, sender: &str,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver(path, msg, sender, DeliveryOpts::default())
 }

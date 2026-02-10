@@ -6,40 +6,89 @@
 
 #![cfg(feature = "gold")]
 
-#[allow(unused)]
-mod common;
-
 use std::borrow::Borrow;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::{env, fs, panic, process};
 
-use common::{
-    Gold, RcBuilder, corpmail, diff_dirs, procmail, run, setup, snapshot,
-};
-use corpmail::delivery::FolderType;
 use rand::Rng;
 use rand::seq::SliceRandom;
 
-fn run_gold_with<S>(
-    rc_template: S, inputs: &[&[u8]], count: Option<usize>,
-    cmp: fn(&Path, &Path),
-) where
-    S: Borrow<str>,
-{
-    let rc_template = rc_template.borrow();
-    let g = Gold::new();
-    setup(g.rust_dir.path(), rc_template);
-    setup(g.proc_dir.path(), rc_template);
+use corpmail::delivery::FolderType;
 
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        run_gold_inner(&g, inputs, count, cmp);
-    }));
-    if let Err(e) = result {
-        let dir = preserve_failure(&g, rc_template, inputs);
-        eprintln!("preserved failure artifacts in {}", dir.display());
-        panic::resume_unwind(e);
+#[allow(unused)]
+mod common;
+
+use common::{
+    Gold, RcBuilder, corpmail, diff_dirs, procmail, run, setup, snapshot,
+};
+
+const MSGS: &[&[u8]] = &[
+    b"From: a@host\nSubject: one\n\nBody one\n",
+    b"From: b@host\nSubject: two\n\nBody two\n",
+    b"From: c@host\nSubject: three\n\nBody three\n",
+    b"From: d@host\nSubject: four\n\nBody four\n",
+    b"From: e@host\nSubject: five\n\nBody five\n",
+];
+
+const ADDRS: &[&str] = &[
+    "alice@example.com",
+    "bob@work.org",
+    "carol@lists.net",
+    "dave@spam.biz",
+    "eve@friend.io",
+];
+
+const SUBJECTS: &[&str] = &[
+    "Meeting tomorrow",
+    "URGENT deal",
+    "Re: project update",
+    "Newsletter #42",
+    "Invitation to connect",
+];
+
+const LISTS: &[&str] =
+    &["dev@lists.net", "announce@lists.net", "security@lists.net"];
+
+fn file_count(dir: &Path) -> usize {
+    snapshot(dir).len()
+}
+
+fn copy_dir(src: &Path, dst: &Path) {
+    let _ = fs::create_dir_all(dst);
+    let Ok(entries) = fs::read_dir(src) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        let target = dst.join(e.file_name());
+        if p.is_dir() {
+            copy_dir(&p, &target);
+        } else {
+            fs::copy(&p, &target).ok();
+        }
     }
+}
+
+fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
+    let dir =
+        env::temp_dir().join(format!("corpmail-gold-fail-{}", process::id(),));
+    let _ = fs::create_dir_all(&dir);
+    fs::write(dir.join("rcfile"), rc_template).ok();
+    for (i, msg) in inputs.iter().enumerate() {
+        fs::write(dir.join(format!("msg-{i:02}")), msg).ok();
+    }
+
+    // Copy the maildir trees for comparison
+    let rust_out = dir.join("rust");
+    let proc_out = dir.join("proc");
+    copy_dir(&g.rust_dir.path().join("maildir"), &rust_out);
+    copy_dir(&g.proc_dir.path().join("maildir"), &proc_out);
+    dir
+}
+
+fn assert_dirs(a: &Path, b: &Path) {
+    diff_dirs(a, b).unwrap();
 }
 
 fn run_gold_inner(
@@ -62,101 +111,30 @@ fn run_gold_inner(
     cmp(r, &g.proc_dir.path().join("maildir"));
 }
 
-fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
-    let dir =
-        env::temp_dir().join(format!("corpmail-gold-fail-{}", process::id(),));
-    let _ = fs::create_dir_all(&dir);
-    fs::write(dir.join("rcfile"), rc_template).ok();
-    for (i, msg) in inputs.iter().enumerate() {
-        fs::write(dir.join(format!("msg-{i:02}")), msg).ok();
+fn run_gold_with<S>(
+    rc_template: S, inputs: &[&[u8]], count: Option<usize>,
+    cmp: fn(&Path, &Path),
+) where
+    S: Borrow<str>,
+{
+    let rc_template = rc_template.borrow();
+    let g = Gold::new();
+    setup(g.rust_dir.path(), rc_template);
+    setup(g.proc_dir.path(), rc_template);
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        run_gold_inner(&g, inputs, count, cmp);
+    }));
+    if let Err(e) = result {
+        let dir = preserve_failure(&g, rc_template, inputs);
+        eprintln!("preserved failure artifacts in {}", dir.display());
+        panic::resume_unwind(e);
     }
-
-    // Copy the maildir trees for comparison
-    let rust_out = dir.join("rust");
-    let proc_out = dir.join("proc");
-    copy_dir(&g.rust_dir.path().join("maildir"), &rust_out);
-    copy_dir(&g.proc_dir.path().join("maildir"), &proc_out);
-    dir
-}
-
-fn copy_dir(src: &Path, dst: &Path) {
-    let _ = fs::create_dir_all(dst);
-    let Ok(entries) = fs::read_dir(src) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let p = e.path();
-        let target = dst.join(e.file_name());
-        if p.is_dir() {
-            copy_dir(&p, &target);
-        } else {
-            fs::copy(&p, &target).ok();
-        }
-    }
-}
-
-fn assert_dirs(a: &Path, b: &Path) {
-    diff_dirs(a, b).unwrap();
 }
 
 fn run_gold(rc_template: &str, inputs: &[&[u8]], count: usize) {
     run_gold_with(rc_template, inputs, Some(count), assert_dirs);
 }
-
-fn file_count(dir: &Path) -> usize {
-    snapshot(dir).len()
-}
-
-const MSGS: &[&[u8]] = &[
-    b"From: a@host\nSubject: one\n\nBody one\n",
-    b"From: b@host\nSubject: two\n\nBody two\n",
-    b"From: c@host\nSubject: three\n\nBody three\n",
-    b"From: d@host\nSubject: four\n\nBody four\n",
-    b"From: e@host\nSubject: five\n\nBody five\n",
-];
-
-#[test]
-fn deliver_mbox() {
-    let rc = RcBuilder::new(FolderType::File).folder("inbox").build();
-    run_gold(&rc, MSGS, 1);
-}
-
-#[test]
-fn deliver_maildir() {
-    let rc = RcBuilder::new(FolderType::Maildir).folder("inbox").build();
-    run_gold_with(rc, MSGS, Some(5), assert_dirs);
-}
-
-#[test]
-fn deliver_mh() {
-    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
-    run_gold(&rc, MSGS, 5);
-}
-
-#[test]
-fn deliver_dev_null() {
-    let rc = RcBuilder::new(FolderType::File).dev_null().build();
-    run_gold(&rc, MSGS, 0);
-}
-
-const ADDRS: &[&str] = &[
-    "alice@example.com",
-    "bob@work.org",
-    "carol@lists.net",
-    "dave@spam.biz",
-    "eve@friend.io",
-];
-
-const SUBJECTS: &[&str] = &[
-    "Meeting tomorrow",
-    "URGENT deal",
-    "Re: project update",
-    "Newsletter #42",
-    "Invitation to connect",
-];
-
-const LISTS: &[&str] =
-    &["dev@lists.net", "announce@lists.net", "security@lists.net"];
 
 fn build_complex_rc(kind: FolderType) -> String {
     let mut b = RcBuilder::new(kind);
@@ -208,6 +186,132 @@ fn build_complex_msgs() -> Vec<Vec<u8>> {
     ]
 }
 
+fn build_random_rc<R>(rng: &mut R, kind: FolderType) -> String
+where
+    R: Rng,
+{
+    let mut b = RcBuilder::new(kind);
+    if rng.gen_bool(0.5) {
+        b.spam().folder("spam");
+    }
+    if rng.gen_bool(0.5) {
+        b.lists().folder("lists");
+    }
+    if rng.gen_bool(0.5) {
+        b.copy().priority().folder("urgent");
+    }
+    let n = rng.gen_range(1..=ADDRS.len());
+    let mut addrs: Vec<_> = ADDRS.to_vec();
+    addrs.shuffle(rng);
+    for addr in &addrs[..n] {
+        b.from(addr).folder(addr.split('@').next().unwrap());
+    }
+    if rng.gen_bool(0.5) {
+        b.subject("URGENT").folder("urgent");
+    }
+    b.build()
+}
+
+fn build_random_msgs<R>(rng: &mut R) -> Vec<Vec<u8>>
+where
+    R: Rng,
+{
+    let n = rng.gen_range(10..=20);
+    let msg = |from: &str, to: &str, subj: &str, extra: &str| {
+        let hdrs = if extra.is_empty() {
+            format!("From: {from}\nTo: {to}\nSubject: {subj}")
+        } else {
+            format!("From: {from}\nTo: {to}\nSubject: {subj}\n{extra}")
+        };
+        format!("{hdrs}\n\nBody\n").into_bytes()
+    };
+    let extras = ["", "", "", "X-Spam-Flag: YES", "X-Priority: 1"];
+    (0..n)
+        .map(|_| {
+            let from = ADDRS.choose(rng).unwrap();
+            let to = if rng.gen_bool(0.3) {
+                LISTS.choose(rng).unwrap()
+            } else {
+                ADDRS.choose(rng).unwrap()
+            };
+            let subj = SUBJECTS.choose(rng).unwrap();
+            let extra = extras.choose(rng).unwrap();
+            msg(from, to, subj, extra)
+        })
+        .collect()
+}
+
+fn build_size_msgs<R>(rng: &mut R) -> Vec<Vec<u8>>
+where
+    R: Rng,
+{
+    let n = rng.gen_range(10..=20);
+    (0..n)
+        .map(|_| {
+            let from = ADDRS.choose(rng).unwrap();
+            let to = ADDRS.choose(rng).unwrap();
+            let subj = SUBJECTS.choose(rng).unwrap();
+            let body_len = rng.gen_range(10..=500);
+            let body: String = (0..body_len).map(|_| 'x').collect();
+            format!("From: {from}\nTo: {to}\nSubject: {subj}\n\n{body}\n")
+                .into_bytes()
+        })
+        .collect()
+}
+
+fn build_size_rc<R>(rng: &mut R, kind: FolderType) -> String
+where
+    R: Rng,
+{
+    let thresh = rng.gen_range(100..=300);
+    let addr = ADDRS.choose(rng).unwrap();
+    let mut b = RcBuilder::new(kind);
+    b.size_gt(thresh).folder("big");
+    b.size_lt(thresh).folder("small");
+    b.negate().from(addr).folder("other");
+    b.build()
+}
+
+fn run_random(kind: FolderType) {
+    let mut rng = rand::thread_rng();
+    let rc = build_random_rc(&mut rng, kind);
+    let msgs = build_random_msgs(&mut rng);
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    run_gold_with(rc, &refs, None, assert_dirs);
+}
+
+fn run_size(kind: FolderType) {
+    let mut rng = rand::thread_rng();
+    let rc = build_size_rc(&mut rng, kind);
+    let msgs = build_size_msgs(&mut rng);
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    run_gold_with(rc, &refs, None, assert_dirs);
+}
+
+#[test]
+fn deliver_mbox() {
+    let rc = RcBuilder::new(FolderType::File).folder("inbox").build();
+    run_gold(&rc, MSGS, 1);
+}
+
+#[test]
+fn deliver_maildir() {
+    let rc = RcBuilder::new(FolderType::Maildir).folder("inbox").build();
+    run_gold_with(rc, MSGS, Some(5), assert_dirs);
+}
+
+#[test]
+fn deliver_mh() {
+    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
+    run_gold(&rc, MSGS, 5);
+}
+
+#[test]
+fn deliver_dev_null() {
+    let rc = RcBuilder::new(FolderType::File).dev_null().build();
+    run_gold(&rc, MSGS, 0);
+}
+
 #[test]
 fn complex_filtering_static_mbox() {
     let msgs = build_complex_msgs();
@@ -234,63 +338,6 @@ fn complex_filtering_static_mh() {
     run_gold_with(build_complex_rc(FolderType::Mh), &refs, None, assert_dirs);
 }
 
-fn build_random_rc(rng: &mut impl Rng, kind: FolderType) -> String {
-    let mut b = RcBuilder::new(kind);
-    if rng.gen_bool(0.5) {
-        b.spam().folder("spam");
-    }
-    if rng.gen_bool(0.5) {
-        b.lists().folder("lists");
-    }
-    if rng.gen_bool(0.5) {
-        b.copy().priority().folder("urgent");
-    }
-    let n = rng.gen_range(1..=ADDRS.len());
-    let mut addrs: Vec<_> = ADDRS.to_vec();
-    addrs.shuffle(rng);
-    for addr in &addrs[..n] {
-        b.from(addr).folder(addr.split('@').next().unwrap());
-    }
-    if rng.gen_bool(0.5) {
-        b.subject("URGENT").folder("urgent");
-    }
-    b.build()
-}
-
-fn build_random_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
-    let n = rng.gen_range(10..=20);
-    let msg = |from: &str, to: &str, subj: &str, extra: &str| {
-        let hdrs = if extra.is_empty() {
-            format!("From: {from}\nTo: {to}\nSubject: {subj}")
-        } else {
-            format!("From: {from}\nTo: {to}\nSubject: {subj}\n{extra}")
-        };
-        format!("{hdrs}\n\nBody\n").into_bytes()
-    };
-    let extras = ["", "", "", "X-Spam-Flag: YES", "X-Priority: 1"];
-    (0..n)
-        .map(|_| {
-            let from = ADDRS.choose(rng).unwrap();
-            let to = if rng.gen_bool(0.3) {
-                LISTS.choose(rng).unwrap()
-            } else {
-                ADDRS.choose(rng).unwrap()
-            };
-            let subj = SUBJECTS.choose(rng).unwrap();
-            let extra = extras.choose(rng).unwrap();
-            msg(from, to, subj, extra)
-        })
-        .collect()
-}
-
-fn run_random(kind: FolderType) {
-    let mut rng = rand::thread_rng();
-    let rc = build_random_rc(&mut rng, kind);
-    let msgs = build_random_msgs(&mut rng);
-    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(rc, &refs, None, assert_dirs);
-}
-
 #[test]
 fn complex_filtering_random_mbox() {
     run_random(FolderType::File);
@@ -304,39 +351,6 @@ fn complex_filtering_random_maildir() {
 #[test]
 fn complex_filtering_random_mh() {
     run_random(FolderType::Mh);
-}
-
-fn build_size_msgs(rng: &mut impl Rng) -> Vec<Vec<u8>> {
-    let n = rng.gen_range(10..=20);
-    (0..n)
-        .map(|_| {
-            let from = ADDRS.choose(rng).unwrap();
-            let to = ADDRS.choose(rng).unwrap();
-            let subj = SUBJECTS.choose(rng).unwrap();
-            let body_len = rng.gen_range(10..=500);
-            let body: String = (0..body_len).map(|_| 'x').collect();
-            format!("From: {from}\nTo: {to}\nSubject: {subj}\n\n{body}\n")
-                .into_bytes()
-        })
-        .collect()
-}
-
-fn build_size_rc(rng: &mut impl Rng, kind: FolderType) -> String {
-    let thresh = rng.gen_range(100..=300);
-    let addr = ADDRS.choose(rng).unwrap();
-    let mut b = RcBuilder::new(kind);
-    b.size_gt(thresh).folder("big");
-    b.size_lt(thresh).folder("small");
-    b.negate().from(addr).folder("other");
-    b.build()
-}
-
-fn run_size(kind: FolderType) {
-    let mut rng = rand::thread_rng();
-    let rc = build_size_rc(&mut rng, kind);
-    let msgs = build_size_msgs(&mut rng);
-    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(rc, &refs, None, assert_dirs);
 }
 
 #[test]

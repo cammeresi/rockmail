@@ -1,100 +1,9 @@
-use corpmail::config::{Action, Condition, Flags, Item, Recipe, Weight, parse};
 use std::cmp::Ordering;
+use std::env;
 use std::fs;
+use std::process;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <procmailrc>", args[0]);
-        std::process::exit(1);
-    }
-
-    let path = &args[1];
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error reading {}: {}", path, e);
-            std::process::exit(1);
-        }
-    };
-
-    match parse(&content) {
-        Ok(items) => {
-            println!("Parsed {} items from {}\n", items.len(), path);
-            for (i, item) in items.iter().enumerate() {
-                print_item(item, i + 1, 0);
-            }
-        }
-        Err(e) => {
-            eprintln!("Parse error: {}", e);
-            std::process::exit(1);
-        }
-    }
-}
-
-fn print_item(item: &Item, num: usize, depth: usize) {
-    let indent = "  ".repeat(depth);
-    match item {
-        Item::Assign { name, value } => {
-            if value.is_empty() {
-                println!("{}{:3}. [UNSET] {}", indent, num, name);
-            } else {
-                println!(
-                    "{}{:3}. [ASSIGN] {} = {:?}",
-                    indent, num, name, value
-                );
-            }
-        }
-        Item::Recipe(r) => {
-            println!("{}{:3}. [RECIPE]", indent, num);
-            print_recipe(r, depth + 1);
-        }
-        Item::Include(path) => {
-            println!("{}{:3}. [INCLUDERC] {:?}", indent, num, path);
-        }
-        Item::Switch(path) => {
-            if path.is_empty() {
-                println!("{}{:3}. [SWITCHRC] (abort)", indent, num);
-            } else {
-                println!("{}{:3}. [SWITCHRC] {:?}", indent, num, path);
-            }
-        }
-    }
-    println!();
-}
-
-fn print_recipe(r: &Recipe, depth: usize) {
-    let indent = "  ".repeat(depth);
-
-    // Flags
-    let flags = format_flags(&r.flags);
-    if !flags.is_empty() {
-        println!("{}Flags: {}", indent, flags);
-    }
-
-    // Lockfile
-    if let Some(ref lock) = r.lockfile {
-        if lock.is_empty() {
-            println!("{}Lock: (auto)", indent);
-        } else {
-            println!("{}Lock: {}", indent, lock);
-        }
-    }
-
-    // Delivering?
-    println!("{}Delivering: {}", indent, r.is_delivering());
-
-    // Conditions
-    if !r.conds.is_empty() {
-        println!("{}Conditions:", indent);
-        for (i, c) in r.conds.iter().enumerate() {
-            println!("{}  {}. {}", indent, i + 1, format_condition(c));
-        }
-    }
-
-    // Action
-    println!("{}Action: {}", indent, format_action(&r.action, depth));
-}
+use corpmail::config::{Action, Condition, Flags, Item, Recipe, Weight, parse};
 
 fn format_flags(f: &Flags) -> String {
     let mut parts = Vec::new();
@@ -295,6 +204,100 @@ fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
             } else {
                 format!("{}{:3}. [SWITCHRC] {:?}\n", indent, num, path)
             }
+        }
+    }
+}
+
+fn print_recipe(r: &Recipe, depth: usize) {
+    let indent = "  ".repeat(depth);
+
+    // Flags
+    let flags = format_flags(&r.flags);
+    if !flags.is_empty() {
+        println!("{}Flags: {}", indent, flags);
+    }
+
+    // Lockfile
+    if let Some(ref lock) = r.lockfile {
+        if lock.is_empty() {
+            println!("{}Lock: (auto)", indent);
+        } else {
+            println!("{}Lock: {}", indent, lock);
+        }
+    }
+
+    // Delivering?
+    println!("{}Delivering: {}", indent, r.is_delivering());
+
+    // Conditions
+    if !r.conds.is_empty() {
+        println!("{}Conditions:", indent);
+        for (i, c) in r.conds.iter().enumerate() {
+            println!("{}  {}. {}", indent, i + 1, format_condition(c));
+        }
+    }
+
+    // Action
+    println!("{}Action: {}", indent, format_action(&r.action, depth));
+}
+
+fn print_item(item: &Item, num: usize, depth: usize) {
+    let indent = "  ".repeat(depth);
+    match item {
+        Item::Assign { name, value } => {
+            if value.is_empty() {
+                println!("{}{:3}. [UNSET] {}", indent, num, name);
+            } else {
+                println!(
+                    "{}{:3}. [ASSIGN] {} = {:?}",
+                    indent, num, name, value
+                );
+            }
+        }
+        Item::Recipe(r) => {
+            println!("{}{:3}. [RECIPE]", indent, num);
+            print_recipe(r, depth + 1);
+        }
+        Item::Include(path) => {
+            println!("{}{:3}. [INCLUDERC] {:?}", indent, num, path);
+        }
+        Item::Switch(path) => {
+            if path.is_empty() {
+                println!("{}{:3}. [SWITCHRC] (abort)", indent, num);
+            } else {
+                println!("{}{:3}. [SWITCHRC] {:?}", indent, num, path);
+            }
+        }
+    }
+    println!();
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <procmailrc>", args[0]);
+        process::exit(1);
+    }
+
+    let path = &args[1];
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error reading {}: {}", path, e);
+            process::exit(1);
+        }
+    };
+
+    match parse(&content) {
+        Ok(items) => {
+            println!("Parsed {} items from {}\n", items.len(), path);
+            for (i, item) in items.iter().enumerate() {
+                print_item(item, i + 1, 0);
+            }
+        }
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            process::exit(1);
         }
     }
 }

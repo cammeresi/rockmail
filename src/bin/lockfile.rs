@@ -1,5 +1,6 @@
 #![cfg(feature = "nfs")]
 
+use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::thread::sleep;
@@ -55,73 +56,34 @@ struct Args {
     files: Vec<PathBuf>,
 }
 
-fn main() -> ExitCode {
-    let args = Args::parse();
-    signals::setup();
+fn mailbox_lock() -> Option<PathBuf> {
+    let user = env::var("LOGNAME").or_else(|_| env::var("USER")).ok()?;
+    let path = format!("/var/mail/{}.lock", user);
+    Some(PathBuf::from(path))
+}
 
-    let invert = args.invert % 2 == 1;
-    let mut retries = args.retries;
-    let mut acquired: Vec<PathBuf> = Vec::with_capacity(args.files.len());
-    let mut retval = EX_OK;
-
-    if args.unlock_mail {
-        if let Some(mb) = mailbox_lock() {
-            if let Err(e) = remove_lock(&mb) {
-                eprintln!("lockfile: Can't unlock \"{}\": {}", mb.display(), e);
-            }
-        } else {
-            eprintln!("lockfile: Can't determine your mailbox");
-            return exit(EX_OSERR);
+fn maybe_invert(code: u8, invert: bool) -> ExitCode {
+    if invert {
+        match code {
+            EX_OK => exit(EX_CANTCREAT),
+            EX_CANTCREAT => exit(EX_OK),
+            other => exit(other),
         }
-        return maybe_invert(EX_OK, invert);
+    } else {
+        exit(code)
     }
+}
 
-    if args.lock_mail {
-        if let Some(mb) = mailbox_lock() {
-            match try_lock(
-                &mb,
-                args.sleeptime,
-                &mut retries,
-                args.locktimeout,
-                args.suspend,
-                &mut acquired,
-            ) {
-                Ok(()) => {}
-                Err(code) => {
-                    cleanup(&acquired);
-                    return maybe_invert(code, invert);
-                }
-            }
-        } else {
-            eprintln!("lockfile: Can't determine your mailbox");
-            return exit(EX_OSERR);
+fn cleanup(acquired: &[PathBuf]) {
+    for path in acquired {
+        if let Err(e) = remove_lock(path) {
+            eprintln!(
+                "lockfile: warning: cleanup failed for \"{}\": {}",
+                path.display(),
+                e
+            );
         }
     }
-
-    if args.files.is_empty() && !args.lock_mail {
-        eprintln!("lockfile: No files specified");
-        return exit(EX_USAGE);
-    }
-
-    for path in &args.files {
-        match try_lock(
-            path,
-            args.sleeptime,
-            &mut retries,
-            args.locktimeout,
-            args.suspend,
-            &mut acquired,
-        ) {
-            Ok(()) => {}
-            Err(code) => {
-                retval = code;
-                cleanup(&acquired);
-                return maybe_invert(retval, invert);
-            }
-        }
-    }
-
-    maybe_invert(retval, invert)
 }
 
 fn check_signal(path: &Path) -> Result<(), u8> {
@@ -215,34 +177,71 @@ fn try_lock(
     }
 }
 
-fn cleanup(acquired: &[PathBuf]) {
-    for path in acquired {
-        if let Err(e) = remove_lock(path) {
-            eprintln!(
-                "lockfile: warning: cleanup failed for \"{}\": {}",
-                path.display(),
-                e
-            );
+fn main() -> ExitCode {
+    let args = Args::parse();
+    signals::setup();
+
+    let invert = args.invert % 2 == 1;
+    let mut retries = args.retries;
+    let mut acquired: Vec<PathBuf> = Vec::with_capacity(args.files.len());
+    let mut retval = EX_OK;
+
+    if args.unlock_mail {
+        if let Some(mb) = mailbox_lock() {
+            if let Err(e) = remove_lock(&mb) {
+                eprintln!("lockfile: Can't unlock \"{}\": {}", mb.display(), e);
+            }
+        } else {
+            eprintln!("lockfile: Can't determine your mailbox");
+            return exit(EX_OSERR);
+        }
+        return maybe_invert(EX_OK, invert);
+    }
+
+    if args.lock_mail {
+        if let Some(mb) = mailbox_lock() {
+            match try_lock(
+                &mb,
+                args.sleeptime,
+                &mut retries,
+                args.locktimeout,
+                args.suspend,
+                &mut acquired,
+            ) {
+                Ok(()) => {}
+                Err(code) => {
+                    cleanup(&acquired);
+                    return maybe_invert(code, invert);
+                }
+            }
+        } else {
+            eprintln!("lockfile: Can't determine your mailbox");
+            return exit(EX_OSERR);
         }
     }
-}
 
-fn maybe_invert(code: u8, invert: bool) -> ExitCode {
-    if invert {
-        match code {
-            EX_OK => exit(EX_CANTCREAT),
-            EX_CANTCREAT => exit(EX_OK),
-            other => exit(other),
-        }
-    } else {
-        exit(code)
+    if args.files.is_empty() && !args.lock_mail {
+        eprintln!("lockfile: No files specified");
+        return exit(EX_USAGE);
     }
-}
 
-fn mailbox_lock() -> Option<PathBuf> {
-    let user = std::env::var("LOGNAME")
-        .or_else(|_| std::env::var("USER"))
-        .ok()?;
-    let path = format!("/var/mail/{}.lock", user);
-    Some(PathBuf::from(path))
+    for path in &args.files {
+        match try_lock(
+            path,
+            args.sleeptime,
+            &mut retries,
+            args.locktimeout,
+            args.suspend,
+            &mut acquired,
+        ) {
+            Ok(()) => {}
+            Err(code) => {
+                retval = code;
+                cleanup(&acquired);
+                return maybe_invert(retval, invert);
+            }
+        }
+    }
+
+    maybe_invert(retval, invert)
 }

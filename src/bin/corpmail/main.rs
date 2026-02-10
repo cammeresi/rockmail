@@ -288,7 +288,8 @@ fn find_rcfile(
 
         // /etc/procmailrc
         if let Some(args) = args
-            && !args.preserve {
+            && !args.preserve
+        {
             let path = Path::new(ETC_PROCMAILRC);
             open_and_check(path, true, true)
         } else {

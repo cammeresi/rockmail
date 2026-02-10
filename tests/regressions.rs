@@ -68,6 +68,11 @@ fn compare(
         .map_err(|e| e.into())
 }
 
+fn tarball_name(path: &Path) -> Option<String> {
+    let s = path.file_name()?.to_str()?;
+    s.strip_suffix(".tar.gz").map(String::from)
+}
+
 fn replay(tarball: &Path) -> Result<(), Failed> {
     let tmp = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
     let f = File::open(tarball).map_err(|e| format!("open: {e}"))?;
@@ -85,11 +90,6 @@ fn replay(tarball: &Path) -> Result<(), Failed> {
     let ra: Vec<&str> = vec!["-f", "sender@test", rrc.to_str().unwrap()];
 
     compare(root, &rc_tmpl, rdir.path(), &msgs, &ra)
-}
-
-fn tarball_name(path: &Path) -> Option<String> {
-    let s = path.file_name()?.to_str()?;
-    s.strip_suffix(".tar.gz").map(String::from)
 }
 
 fn main() {

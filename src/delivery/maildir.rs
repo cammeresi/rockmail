@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -9,6 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::mail::{Message, skip_from_lines};
+
+#[cfg(test)]
+mod tests;
 
 /// State for unique filename generation (preserves serial across calls).
 #[derive(Debug)]
@@ -29,6 +29,7 @@ impl Default for Namer {
 }
 
 impl Namer {
+    /// Create a new namer.
     pub fn new() -> Self {
         Self::default()
     }
@@ -56,57 +57,11 @@ impl Namer {
     }
 }
 
-#[cfg(test)]
-pub fn deliver_test(
-    path: &Path, msg: &Message,
-) -> Result<DeliveryResult, DeliveryError> {
-    deliver_with(&mut Namer::new(), path, msg, DeliveryOpts::default())
-}
-
-/// Deliver a message directly to a directory (procmail // mode).
-///
-/// Unlike Maildir, writes directly without tmp/new/cur structure.
-pub fn deliver_dir(
-    path: &Path, msg: &Message, opts: DeliveryOpts,
-) -> Result<DeliveryResult, DeliveryError> {
-    fs::create_dir_all(path)?;
-
-    let name = Namer::new().filename()?;
-    let dest = path.join(format!("msg.{}", name));
-
-    let bytes = write_msg(&dest, msg, opts)?;
-
-    Ok(DeliveryResult {
-        bytes,
-        path: dest.display().to_string(),
-    })
-}
-
-/// Deliver a message to a Maildir folder.
-///
-/// Creates the Maildir structure (tmp, new, cur) if needed.
-/// Writes to tmp/ then hard-links to new/ for atomic delivery.
-pub fn deliver_with(
-    namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
-) -> Result<DeliveryResult, DeliveryError> {
-    ensure_dirs(path)?;
-
-    let name = namer.filename()?;
-    let tmp = path.join("tmp").join(&name);
-    let new = path.join("new").join(&name);
-
-    let bytes = write_msg(&tmp, msg, opts)?;
-
-    if fs::hard_link(&tmp, &new).is_err() {
-        fs::rename(&tmp, &new)?;
-    } else {
-        let _ = fs::remove_file(&tmp);
-    }
-
-    Ok(DeliveryResult {
-        bytes,
-        path: new.display().to_string(),
-    })
+fn hostname() -> String {
+    nix::unistd::gethostname()
+        .ok()
+        .and_then(|s| s.into_string().ok())
+        .unwrap_or_else(|| "localhost".to_string())
 }
 
 fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
@@ -114,13 +69,6 @@ fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
         fs::create_dir_all(path.join(sub))?;
     }
     Ok(())
-}
-
-fn hostname() -> String {
-    nix::unistd::gethostname()
-        .ok()
-        .and_then(|s| s.into_string().ok())
-        .unwrap_or_else(|| "localhost".to_string())
 }
 
 fn write_msg(
@@ -153,4 +101,57 @@ fn write_msg(
     file.sync_all()?;
 
     Ok(bytes + extra)
+}
+
+/// Deliver a message directly to a directory (procmail // mode).
+///
+/// Unlike Maildir, writes directly without tmp/new/cur structure.
+pub fn deliver_dir(
+    path: &Path, msg: &Message, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    fs::create_dir_all(path)?;
+
+    let name = Namer::new().filename()?;
+    let dest = path.join(format!("msg.{}", name));
+
+    let bytes = write_msg(&dest, msg, opts)?;
+
+    Ok(DeliveryResult {
+        bytes,
+        path: dest.display().to_string(),
+    })
+}
+
+/// Deliver a message to a Maildir folder.
+///
+/// Creates the Maildir structure (tmp, new, cur) if needed.
+/// Writes to tmp/ then hard-links to new/ for atomic delivery.
+pub fn deliver(
+    namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    ensure_dirs(path)?;
+
+    let name = namer.filename()?;
+    let tmp = path.join("tmp").join(&name);
+    let new = path.join("new").join(&name);
+
+    let bytes = write_msg(&tmp, msg, opts)?;
+
+    if fs::hard_link(&tmp, &new).is_err() {
+        fs::rename(&tmp, &new)?;
+    } else {
+        let _ = fs::remove_file(&tmp);
+    }
+
+    Ok(DeliveryResult {
+        bytes,
+        path: new.display().to_string(),
+    })
+}
+
+#[cfg(test)]
+pub fn deliver_test(
+    path: &Path, msg: &Message,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver(&mut Namer::new(), path, msg, DeliveryOpts::default())
 }

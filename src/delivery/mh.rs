@@ -1,12 +1,12 @@
-#[cfg(test)]
-mod tests;
-
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::mail::Message;
+
+#[cfg(test)]
+mod tests;
 
 /// State for MH message numbering (caches next number across deliveries).
 #[derive(Debug, Default)]
@@ -20,36 +20,17 @@ impl Namer {
     }
 }
 
-/// Deliver a message to an MH folder.
-///
-/// MH folders use numbered files (1, 2, 3, ...).
-/// Creates the folder directory if needed.
-pub fn deliver(
-    path: &Path, msg: &Message, opts: DeliveryOpts,
-) -> Result<DeliveryResult, DeliveryError> {
-    deliver_with(&mut Namer::new(), path, msg, opts)
-}
-
-#[cfg(test)]
-pub fn deliver_test(
-    path: &Path, msg: &Message,
-) -> Result<DeliveryResult, DeliveryError> {
-    deliver(path, msg, DeliveryOpts::default())
-}
-
-/// Deliver with explicit namer (for batch deliveries).
-pub fn deliver_with(
-    namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
-) -> Result<DeliveryResult, DeliveryError> {
-    fs::create_dir_all(path)?;
-
-    let (file, dest) = create_unique(namer, path)?;
-    let bytes = write_msg(file, msg, opts)?;
-
-    Ok(DeliveryResult {
-        bytes,
-        path: dest.display().to_string(),
-    })
+fn scan_max(path: &Path) -> Result<u64, DeliveryError> {
+    let mut max = 0u64;
+    let entries = fs::read_dir(path)?;
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(s) = name.to_str() else { continue };
+        let Ok(n) = s.parse::<u64>() else { continue };
+        max = max.max(n);
+    }
+    Ok(max)
 }
 
 fn create_unique(
@@ -67,19 +48,6 @@ fn create_unique(
             Err(e) => return Err(e.into()),
         }
     }
-}
-
-fn scan_max(path: &Path) -> Result<u64, DeliveryError> {
-    let mut max = 0u64;
-    let entries = fs::read_dir(path)?;
-    for entry in entries {
-        let entry = entry?;
-        let name = entry.file_name();
-        let Some(s) = name.to_str() else { continue };
-        let Ok(n) = s.parse::<u64>() else { continue };
-        max = max.max(n);
-    }
-    Ok(max)
 }
 
 fn write_msg(
@@ -105,4 +73,36 @@ fn write_msg(
     file.sync_all()?;
 
     Ok(bytes + extra)
+}
+
+/// Deliver a message to an MH folder.
+///
+/// MH folders use numbered files (1, 2, 3, ...).
+/// Creates the folder directory if needed.
+pub fn deliver(
+    path: &Path, msg: &Message, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver_with(&mut Namer::new(), path, msg, opts)
+}
+
+/// Deliver with explicit namer (for batch deliveries).
+pub fn deliver_with(
+    namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    fs::create_dir_all(path)?;
+
+    let (file, dest) = create_unique(namer, path)?;
+    let bytes = write_msg(file, msg, opts)?;
+
+    Ok(DeliveryResult {
+        bytes,
+        path: dest.display().to_string(),
+    })
+}
+
+#[cfg(test)]
+pub fn deliver_test(
+    path: &Path, msg: &Message,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver(path, msg, DeliveryOpts::default())
 }

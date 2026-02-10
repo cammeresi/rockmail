@@ -13,6 +13,18 @@ use tempfile::TempDir;
 
 use corpmail::delivery::FolderType;
 
+pub fn corpmail() -> &'static str {
+    env!("CARGO_BIN_EXE_corpmail")
+}
+
+pub fn procmail() -> &'static str {
+    static P: OnceLock<String> = OnceLock::new();
+    P.get_or_init(|| {
+        env::var("PROCMAIL_PROCMAIL")
+            .expect("PROCMAIL_PROCMAIL env var required")
+    })
+}
+
 /// Run a binary with args and stdin, returning (stdout, exit_code).
 pub fn run(
     dir: &Path, bin: &str, args: &[&str], input: &[u8],
@@ -33,6 +45,60 @@ pub fn run(
     }
     let out = child.wait_with_output().expect("failed to wait");
     (out.stdout, out.status.code().unwrap_or(-1))
+}
+
+/// Set up a directory with a maildir and an rcfile expanded from a template.
+pub fn setup(dir: &Path, tmpl: &str) {
+    let maildir = dir.join("maildir");
+    fs::create_dir(&maildir).unwrap();
+    let rc = tmpl
+        .replace("$MAILDIR", maildir.to_str().unwrap())
+        .replace("$DEFAULT", maildir.join("default").to_str().unwrap());
+    let p = dir.join("rcfile");
+    fs::write(&p, &rc).unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+/// Result of running both Rust and procmail implementations.
+#[must_use]
+pub struct GoldResult {
+    pub rust_out: Vec<u8>,
+    pub rust_code: i32,
+    pub proc_out: Vec<u8>,
+    pub proc_code: i32,
+}
+
+impl GoldResult {
+    pub fn assert_codes_eq(rust: i32, proc: i32) {
+        assert_eq!(
+            rust, proc,
+            "exit codes differ: rust={}, proc={}",
+            rust, proc
+        );
+    }
+
+    pub fn assert_output_eq(rust: &[u8], proc: &[u8]) {
+        if rust != proc {
+            panic!(
+                "stdout differs:\n--- rust ---\n{}\n--- proc ---\n{}",
+                String::from_utf8_lossy(rust),
+                String::from_utf8_lossy(proc)
+            );
+        }
+    }
+
+    pub fn assert_eq(self) {
+        Self::assert_codes_eq(self.rust_code, self.proc_code);
+        Self::assert_output_eq(&self.rust_out, &self.proc_out);
+    }
+
+    pub fn assert_eq_with<F>(self, norm: F)
+    where
+        F: Fn(&[u8]) -> Vec<u8>,
+    {
+        Self::assert_codes_eq(self.rust_code, self.proc_code);
+        Self::assert_output_eq(&norm(&self.rust_out), &norm(&self.proc_out));
+    }
 }
 
 /// Paired temp directories for running Rust and procmail side by side.
@@ -74,67 +140,19 @@ impl Gold {
     }
 }
 
-/// Result of running both Rust and procmail implementations.
-#[must_use]
-pub struct GoldResult {
-    pub rust_out: Vec<u8>,
-    pub rust_code: i32,
-    pub proc_out: Vec<u8>,
-    pub proc_code: i32,
+pub fn normalize_from_line(data: &[u8]) -> Vec<u8> {
+    let re = regex::bytes::Regex::new(
+        r"(?m)^From (\S+) +\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}\n",
+    )
+    .unwrap();
+    re.replace_all(data, b"From $1 TIMESTAMP\n".as_slice())
+        .into_owned()
 }
 
-impl GoldResult {
-    pub fn assert_codes_eq(rust: i32, proc: i32) {
-        assert_eq!(
-            rust, proc,
-            "exit codes differ: rust={}, proc={}",
-            rust, proc
-        );
-    }
-
-    pub fn assert_output_eq(rust: &[u8], proc: &[u8]) {
-        if rust != proc {
-            panic!(
-                "stdout differs:\n--- rust ---\n{}\n--- proc ---\n{}",
-                String::from_utf8_lossy(rust),
-                String::from_utf8_lossy(proc)
-            );
-        }
-    }
-
-    pub fn assert_eq(self) {
-        Self::assert_codes_eq(self.rust_code, self.proc_code);
-        Self::assert_output_eq(&self.rust_out, &self.proc_out);
-    }
-
-    pub fn assert_eq_with<F: Fn(&[u8]) -> Vec<u8>>(self, norm: F) {
-        Self::assert_codes_eq(self.rust_code, self.proc_code);
-        Self::assert_output_eq(&norm(&self.rust_out), &norm(&self.proc_out));
-    }
-}
-
-pub fn corpmail() -> &'static str {
-    env!("CARGO_BIN_EXE_corpmail")
-}
-
-pub fn procmail() -> &'static str {
-    static P: OnceLock<String> = OnceLock::new();
-    P.get_or_init(|| {
-        env::var("PROCMAIL_PROCMAIL")
-            .expect("PROCMAIL_PROCMAIL env var required")
-    })
-}
-
-/// Set up a directory with a maildir and an rcfile expanded from a template.
-pub fn setup(dir: &Path, tmpl: &str) {
-    let maildir = dir.join("maildir");
-    fs::create_dir(&maildir).unwrap();
-    let rc = tmpl
-        .replace("$MAILDIR", maildir.to_str().unwrap())
-        .replace("$DEFAULT", maildir.join("default").to_str().unwrap());
-    let p = dir.join("rcfile");
-    fs::write(&p, &rc).unwrap();
-    fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+pub fn normalize_message_id(data: &[u8]) -> Vec<u8> {
+    let re = regex::bytes::Regex::new(r"Message-ID: <[^>]+>").unwrap();
+    re.replace_all(data, b"Message-ID: <GENERATED>".as_slice())
+        .into_owned()
 }
 
 fn walk(base: &Path, dir: &Path, map: &mut BTreeMap<String, Vec<u8>>) {
@@ -161,21 +179,6 @@ pub fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
         walk(dir, dir, &mut map);
     }
     map
-}
-
-pub fn normalize_from_line(data: &[u8]) -> Vec<u8> {
-    let re = regex::bytes::Regex::new(
-        r"(?m)^From (\S+) +\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}\n",
-    )
-    .unwrap();
-    re.replace_all(data, b"From $1 TIMESTAMP\n".as_slice())
-        .into_owned()
-}
-
-pub fn normalize_message_id(data: &[u8]) -> Vec<u8> {
-    let re = regex::bytes::Regex::new(r"Message-ID: <[^>]+>").unwrap();
-    re.replace_all(data, b"Message-ID: <GENERATED>".as_slice())
-        .into_owned()
 }
 
 fn is_maildir(base: &Path, top: &str) -> bool {

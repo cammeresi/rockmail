@@ -1,12 +1,30 @@
-#[cfg(test)]
-mod tests;
-
 use std::io::{ErrorKind, Write};
 use std::process::{Command, Stdio};
 
 use super::{DeliveryError, DeliveryResult};
 use crate::mail::Message;
 use crate::variables::Environment;
+
+#[cfg(test)]
+mod tests;
+
+/// Result of pipe delivery.
+#[derive(Debug)]
+pub struct PipeResult {
+    /// Bytes written to command.
+    pub bytes: usize,
+    /// Captured stdout if filter mode.
+    pub output: Option<Vec<u8>>,
+}
+
+impl From<PipeResult> for DeliveryResult {
+    fn from(r: PipeResult) -> Self {
+        DeliveryResult {
+            bytes: r.bytes,
+            path: "|command".to_string(),
+        }
+    }
+}
 
 /// Deliver a message by piping to a command.
 ///
@@ -64,24 +82,6 @@ pub fn deliver(
         bytes: data.len(),
         output: if filter { Some(output.stdout) } else { None },
     })
-}
-
-/// Result of pipe delivery.
-#[derive(Debug)]
-pub struct PipeResult {
-    /// Bytes written to command.
-    pub bytes: usize,
-    /// Captured stdout if filter mode.
-    pub output: Option<Vec<u8>>,
-}
-
-impl From<PipeResult> for DeliveryResult {
-    fn from(r: PipeResult) -> Self {
-        DeliveryResult {
-            bytes: r.bytes,
-            path: "|command".to_string(),
-        }
-    }
 }
 
 #[cfg(test)]

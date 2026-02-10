@@ -1,8 +1,5 @@
 //! Integration tests for the corpmail binary.
 
-#[allow(unused)]
-mod common;
-
 use std::fs;
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -10,6 +7,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use tempfile::TempDir;
+
+#[allow(unused)]
+mod common;
 
 fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
     let mut child = Command::new(common::corpmail())

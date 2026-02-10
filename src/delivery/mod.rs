@@ -1,19 +1,63 @@
-#[cfg(test)]
-mod tests;
-
-mod maildir;
-mod mbox;
-mod mh;
-mod pipe;
+//! Mail delivery to folders and pipes.
 
 use std::io;
 use std::path::Path;
 
 use crate::mail::Message;
 
+mod maildir;
+mod mbox;
+mod mh;
+mod pipe;
+#[cfg(test)]
+mod tests;
+
 pub use maildir::Namer;
-pub use mbox::deliver as mbox;
 pub use pipe::deliver as pipe;
+
+/// Options for delivery operations.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeliveryOpts {
+    /// Raw mode: don't ensure trailing newline.
+    pub raw: bool,
+}
+
+/// Result of a delivery operation.
+#[derive(Debug)]
+pub struct DeliveryResult {
+    /// Bytes written.
+    pub bytes: usize,
+    /// Path where message was delivered (for logging).
+    pub path: String,
+}
+
+/// Common delivery error type.
+#[derive(Debug, thiserror::Error)]
+pub enum DeliveryError {
+    /// I/O error during delivery.
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+
+    /// Failed to create a unique filename (maildir/MH).
+    #[error("failed to create unique filename")]
+    UniqueFile,
+
+    /// Failed to link temp file to final location.
+    #[error("failed to link to final location")]
+    Link,
+
+    /// Failed to acquire lockfile.
+    #[error("failed to acquire lock: {0}")]
+    Lock(#[from] crate::util::LockError),
+
+    /// Pipe command exited with non-zero status.
+    #[error("pipe command failed with exit code {0}")]
+    PipeExit(i32),
+
+    /// Pipe command killed by signal.
+    #[error("pipe command killed by signal {0}")]
+    PipeSignal(i32),
+}
 
 /// Folder type as determined by path suffix or filesystem state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +84,7 @@ impl FolderType {
         }
     }
 
+    /// Whether this folder type needs a recipe-level lockfile.
     pub fn needs_lock(self) -> bool {
         matches!(self, Self::File | Self::Dir)
     }
@@ -57,73 +102,30 @@ impl FolderType {
         let len = bytes.len();
 
         if len >= 2 && bytes[len - 1] == b'.' && bytes[len - 2] == b'/' {
-            // foo/. → MH
             let stripped = &path[..len - 2];
             let stripped = stripped.trim_end_matches('/');
             (FolderType::Mh, stripped)
         } else if len >= 2 && bytes[len - 1] == b'/' && bytes[len - 2] == b'/' {
-            // foo// → Dir
             let stripped = path.trim_end_matches('/');
             (FolderType::Dir, stripped)
         } else if len >= 1 && bytes[len - 1] == b'/' {
-            // foo/ → Maildir
             let stripped = path.trim_end_matches('/');
             (FolderType::Maildir, stripped)
         } else {
-            // foo → File (or Dir based on fs check, handled elsewhere)
             (FolderType::File, path)
         }
     }
 
+    /// Deliver a message to this folder type.
     pub fn deliver(
         self, path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
         namer: &mut Namer,
     ) -> Result<DeliveryResult, DeliveryError> {
         match self {
             FolderType::File => mbox::deliver(path, msg, sender, opts),
-            FolderType::Maildir => {
-                maildir::deliver_with(namer, path, msg, opts)
-            }
+            FolderType::Maildir => maildir::deliver(namer, path, msg, opts),
             FolderType::Mh => mh::deliver(path, msg, opts),
             FolderType::Dir => maildir::deliver_dir(path, msg, opts),
         }
     }
-}
-
-/// Options for delivery operations.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DeliveryOpts {
-    /// Raw mode: don't ensure trailing newline.
-    pub raw: bool,
-}
-
-/// Result of a delivery operation.
-#[derive(Debug)]
-pub struct DeliveryResult {
-    /// Bytes written.
-    pub bytes: usize,
-    /// Path where message was delivered (for logging).
-    pub path: String,
-}
-
-/// Common delivery error type.
-#[derive(Debug, thiserror::Error)]
-pub enum DeliveryError {
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
-
-    #[error("failed to create unique filename")]
-    UniqueFile,
-
-    #[error("failed to link to final location")]
-    Link,
-
-    #[error("failed to acquire lock: {0}")]
-    Lock(#[from] crate::util::LockError),
-
-    #[error("pipe command failed with exit code {0}")]
-    PipeExit(i32),
-
-    #[error("pipe command killed by signal {0}")]
-    PipeSignal(i32),
 }

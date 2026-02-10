@@ -93,3 +93,8 @@ without arguments is supported, which outputs split messages to stdout.
 ## formail: -B flag
 
 Splitting BABYL format mailboxes is unsupported.
+
+## /etc/procmail.conf configuration file
+
+Although this file is undocumented, procmail will read sitewide configuration,
+but not rules, from this file.  Corpmail ignores this file.
