@@ -61,12 +61,11 @@ fn write_msg(
     let bytes = data.len();
 
     let mut extra = 0;
-    if !opts.raw && !data.ends_with(b"\n") {
+    if !opts.raw && !data.ends_with(b"\n\n") {
+        // weirdly, procmail checks for two then adds only one
         w.write_all(b"\n")?;
         extra += 1;
     }
-    w.write_all(b"\n")?;
-    extra += 1;
 
     w.flush()?;
     let file = w.into_inner().map_err(|e| e.into_error())?;

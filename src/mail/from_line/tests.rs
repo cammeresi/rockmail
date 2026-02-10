@@ -9,15 +9,6 @@ fn generate_from_line() {
 }
 
 #[test]
-fn starts_with_from_detects_mbox_line() {
-    assert!(starts_with_from(
-        b"From user@host Mon Jan 1 00:00:00 2024\n"
-    ));
-    assert!(!starts_with_from(b"From: user@host\n"));
-    assert!(!starts_with_from(b"Subject: test\n"));
-}
-
-#[test]
 fn skip_from() {
     let data = b"From user Mon Jan 1 00:00:00 2024\nSubject: Test\n\nBody";
     let rest = skip_from_lines(data);

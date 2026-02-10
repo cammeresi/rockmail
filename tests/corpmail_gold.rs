@@ -367,3 +367,10 @@ fn size_and_negation_maildir() {
 fn size_and_negation_mh() {
     run_size(FolderType::Mh);
 }
+
+#[test]
+fn mh_trailing_blank() {
+    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];
+    run_gold(&rc, msgs, 1);
+}

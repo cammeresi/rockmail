@@ -139,8 +139,9 @@ pub fn deliver(
 
     if fs::hard_link(&tmp, &new).is_err() {
         fs::rename(&tmp, &new)?;
-    } else {
-        let _ = fs::remove_file(&tmp);
+    } else if let Err(e) = fs::remove_file(&tmp) {
+        let tmp = tmp.display();
+        eprintln!("error unlinking {tmp}: {e}");
     }
 
     Ok(DeliveryResult {

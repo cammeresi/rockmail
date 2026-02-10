@@ -5,6 +5,75 @@ use tempfile::tempdir;
 use super::*;
 use crate::delivery::tests::msg;
 
+fn escaped(data: &[u8]) -> (Vec<u8>, usize) {
+    let mut buf = Vec::new();
+    let n = write_escaped(&mut buf, data).unwrap();
+    (buf, n)
+}
+
+#[test]
+fn escaped_empty() {
+    let (buf, n) = escaped(b"");
+    assert_eq!(buf, b"");
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn escaped_no_from() {
+    let (buf, n) = escaped(b"hello world\n");
+    assert_eq!(buf, b"hello world\n");
+    assert_eq!(n, 12);
+}
+
+#[test]
+fn escaped_from_at_start() {
+    let (buf, n) = escaped(b"From someone\n");
+    assert_eq!(buf, b">From someone\n");
+    assert_eq!(n, 14);
+}
+
+#[test]
+fn escaped_from_after_newline() {
+    let (buf, n) = escaped(b"ok\nFrom bar\n");
+    assert_eq!(buf, b"ok\n>From bar\n");
+    assert_eq!(n, 13);
+}
+
+#[test]
+fn escaped_multiple_froms() {
+    let (buf, _) = escaped(b"From a\nFrom b\nFrom c\n");
+    assert_eq!(buf, b">From a\n>From b\n>From c\n");
+}
+
+#[test]
+fn escaped_from_mid_line() {
+    // "From " not at line start should not be escaped
+    let (buf, n) = escaped(b"x From y\n");
+    assert_eq!(buf, b"x From y\n");
+    assert_eq!(n, 9);
+}
+
+#[test]
+fn escaped_from_without_space() {
+    // "From" without trailing space is not a From_ line
+    let (buf, _) = escaped(b"Fromage\n");
+    assert_eq!(buf, b"Fromage\n");
+}
+
+#[test]
+fn escaped_no_trailing_newline() {
+    let (buf, n) = escaped(b"From x");
+    assert_eq!(buf, b">From x");
+    assert_eq!(n, 7);
+}
+
+#[test]
+fn escaped_already_escaped() {
+    // >From at line start is not double-escaped
+    let (buf, _) = escaped(b">From x\n");
+    assert_eq!(buf, b">From x\n");
+}
+
 #[test]
 fn deliver_simple() {
     let dir = tempdir().unwrap();

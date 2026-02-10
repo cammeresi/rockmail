@@ -123,8 +123,8 @@ impl FolderType {
     ) -> Result<DeliveryResult, DeliveryError> {
         match self {
             FolderType::File => mbox::deliver(path, msg, sender, opts),
-            FolderType::Maildir => maildir::deliver(namer, path, msg, opts),
             FolderType::Mh => mh::deliver(path, msg, opts),
+            FolderType::Maildir => maildir::deliver(namer, path, msg, opts),
             FolderType::Dir => maildir::deliver_dir(path, msg, opts),
         }
     }

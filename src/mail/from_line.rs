@@ -7,7 +7,7 @@ mod tests;
 
 /// Generate a From_ line for mbox format.
 ///
-/// Format: "From sender date\n"
+/// Format: "From sender  date\n"
 /// Date is in ctime format: "Mon Jan  1 00:00:00 2024"
 ///
 /// # Panics
@@ -27,13 +27,12 @@ where
 {
     assert!(!sender.is_empty(), "sender must not be empty");
     assert!(
-        !sender
-            .bytes()
-            .any(|b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r'),
+        !sender.bytes().any(|b| b.is_ascii_whitespace()),
         "sender must not contain whitespace"
     );
 
-    // "From " (5) + sender + "  " (2) + ctime (24) + "\n" (1) = 32 + sender.len()
+    // "From " (5) + sender + "  " (2) + ctime (24) + "\n" (1) = 32 +
+    // sender.len()
     let mut line = String::with_capacity(32 + sender.len());
     line.push_str("From ");
     line.push_str(sender);
@@ -44,15 +43,10 @@ where
     line.into_bytes()
 }
 
-/// Check if data starts with a From_ line.
-pub fn starts_with_from(data: &[u8]) -> bool {
-    data.starts_with(b"From ")
-}
-
 /// Skip From_ line(s) at start of data.
 /// Also skips >From_ continuation lines (for forwarded mail).
 pub fn skip_from_lines(mut data: &[u8]) -> &[u8] {
-    while starts_with_from(data) || data.starts_with(b">From ") {
+    while data.starts_with(b"From ") || data.starts_with(b">From ") {
         if let Some(pos) = data.iter().position(|&b| b == b'\n') {
             data = &data[pos + 1..];
         } else {
