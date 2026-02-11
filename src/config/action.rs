@@ -36,8 +36,7 @@ impl Action {
             // Empty forward falls through to folder
         }
 
-        // Pipe: [VAR=]| cmd
-        // Check for VAR=| pattern
+        // Pipe: VAR=| cmd
         if let Some(eq) = s.find('=') {
             let before = &s[..eq];
             let after = s[eq + 1..].trim_start();

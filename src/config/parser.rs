@@ -1,9 +1,15 @@
+use std::borrow::Borrow;
+use std::iter::Peekable;
+use std::str::Lines;
+
 use thiserror::Error;
 
 use super::{Action, Condition, Flags, Item, Recipe, is_var_name};
 
 #[cfg(test)]
 mod tests;
+
+const MAX_DEPTH: usize = 100;
 
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -19,20 +25,20 @@ pub enum ParseError {
     TooDeep(usize),
 }
 
-const MAX_DEPTH: usize = 100;
-
 /// Parser state
 pub struct Parser<'a> {
-    lines: Vec<&'a str>,
+    lines: Peekable<Lines<'a>>,
     pos: usize,
     depth: usize,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(input: &'a str) -> Self {
-        let lines: Vec<_> = input.lines().collect();
+    pub fn new<T>(input: &'a T) -> Self
+    where
+        T: Borrow<str> + ?Sized,
+    {
         Self {
-            lines,
+            lines: input.borrow().lines().peekable(),
             pos: 0,
             depth: 0,
         }
@@ -42,12 +48,12 @@ impl<'a> Parser<'a> {
         self.pos + 1
     }
 
-    fn peek(&self) -> Option<&'a str> {
-        self.lines.get(self.pos).copied()
+    fn peek(&mut self) -> Option<&'a str> {
+        self.lines.peek().map(|v| &**v)
     }
 
     fn advance(&mut self) -> Option<&'a str> {
-        let line = self.lines.get(self.pos).copied();
+        let line = self.lines.next();
         if line.is_some() {
             self.pos += 1;
         }
@@ -69,7 +75,7 @@ impl<'a> Parser<'a> {
         let mut result = first.to_string();
 
         while result.ends_with('\\') {
-            result.pop(); // remove trailing backslash
+            result.pop();
             if let Some(next) = self.advance() {
                 result.push_str(next.trim());
             } else {
@@ -81,38 +87,40 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_assignment(&self, line: &str) -> Option<Item> {
-        // Find = sign
         if let Some(eq) = line.find('=') {
             let name = line[..eq].trim();
             let value = line[eq + 1..].trim();
             if is_var_name(name) {
-                // Check for special directives
                 if name == "INCLUDERC" {
-                    return Some(Item::Include(value.to_string()));
+                    Some(Item::Include(value.to_string()))
+                } else if name == "SWITCHRC" {
+                    Some(Item::Switch(value.to_string()))
+                } else {
+                    Some(Item::Assign {
+                        name: name.to_string(),
+                        value: value.to_string(),
+                    })
                 }
-                if name == "SWITCHRC" {
-                    return Some(Item::Switch(value.to_string()));
-                }
-                return Some(Item::Assign {
-                    name: name.to_string(),
-                    value: value.to_string(),
-                });
+            } else {
+                None
             }
         } else {
-            // Unset: just the variable name
+            // unset
             let name = line.trim();
             if is_var_name(name) {
-                // SWITCHRC without value aborts processing
                 if name == "SWITCHRC" {
-                    return Some(Item::Switch(String::new()));
+                    // aborts processing
+                    Some(Item::Switch(String::new()))
+                } else {
+                    Some(Item::Assign {
+                        name: name.to_string(),
+                        value: String::new(),
+                    })
                 }
-                return Some(Item::Assign {
-                    name: name.to_string(),
-                    value: String::new(),
-                });
+            } else {
+                None
             }
         }
-        None
     }
 
     fn parse_recipe_header(

@@ -92,7 +92,8 @@ impl Recipe {
         }
     }
 
-    /// Returns true if this is a delivering recipe (writes to file/forwards/pipes without capture)
+    /// Returns true if this is a delivering recipe (writes to 
+    /// file/forwards/pipes without capture)
     pub fn is_delivering(&self) -> bool {
         match &self.action {
             Action::Folder(_) => true,
