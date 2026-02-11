@@ -12,7 +12,7 @@ use clap::Parser;
 use corpmail::config::{self, is_var_name};
 use corpmail::delivery::{DeliveryOpts, FolderType};
 use corpmail::mail::Message;
-use corpmail::recipe::{Engine, Outcome};
+use corpmail::engine::{Engine, Outcome};
 use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
 use corpmail::variables::*;
 use nix::unistd::{ROOT, Uid, User};

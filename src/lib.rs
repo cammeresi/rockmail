@@ -4,6 +4,6 @@ pub mod formail;
 pub mod locking;
 pub mod mail;
 pub mod re;
-pub mod recipe;
+pub mod engine;
 pub mod util;
 pub mod variables;

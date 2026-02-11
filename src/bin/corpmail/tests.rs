@@ -1,7 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
-use corpmail::recipe::Engine;
+use corpmail::engine::Engine;
 use corpmail::variables::{Environment, SubstCtx, VAR_DEFAULT, VAR_HOME};
 
 #[test]
