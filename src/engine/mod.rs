@@ -4,10 +4,13 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::io::{self, ErrorKind, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::{Command, Stdio};
+
+use nix::sys::stat::{self, Mode};
+use nix::unistd::dup2;
 
 use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
@@ -18,11 +21,12 @@ use crate::variables::{
     DEF_LOCKEXT, Environment, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE,
     VAR_MAILDIR, VAR_SHELL, VAR_UMASK, VAR_VERBOSE,
 };
-use nix::sys::stat::{self, Mode};
-use nix::unistd::dup2;
 
 #[cfg(test)]
 mod tests;
+
+const MAX_INCLUDE_DEPTH: usize = 32;
+const WEIGHT_EPSILON: f64 = 1e-10;
 
 /// Result of processing all recipes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,22 +42,25 @@ pub enum Outcome {
 /// Error during recipe evaluation.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
+    /// Regex compilation or matching error.
     #[error("regex error: {0}")]
     Regex(#[from] crate::re::PatternError),
+    /// Delivery failure (folder, pipe, or forward).
     #[error("delivery error: {0}")]
     Delivery(#[from] DeliveryError),
+    /// I/O error during processing.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    /// Failed to acquire a lockfile.
     #[error("failed to acquire lock: {0}")]
     Lock(String),
+    /// INCLUDERC/SWITCHRC nesting too deep.
     #[error("INCLUDERC recursion depth exceeded")]
     RecursionLimit,
 }
 
 /// Result of engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;
-
-const MAX_INCLUDE_DEPTH: usize = 32;
 
 /// Mutable state during recipe processing.
 #[derive(Default)]
@@ -71,6 +78,63 @@ pub struct State {
     pub depth: usize,
 }
 
+/// Result of evaluating a single condition.
+struct ConditionResult {
+    /// Whether the condition matched.
+    matched: bool,
+    /// Score delta (nonzero only when scored).
+    score: f64,
+    /// Whether this was a weighted (scoring) condition.
+    scored: bool,
+}
+
+impl ConditionResult {
+    fn simple(matched: bool) -> Self {
+        Self {
+            matched,
+            score: 0.0,
+            scored: false,
+        }
+    }
+
+    fn scored(score: f64) -> Self {
+        Self {
+            matched: true,
+            score,
+            scored: true,
+        }
+    }
+}
+
+/// Compute weighted score from count of matches.
+/// Formula: w * (x^n - 1) / (x - 1) when x != 1, or w * n when x == 1.
+fn compute_weighted_score(wt: Weight, n: usize) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    let n = n as f64;
+    let score = if (wt.x - 1.0).abs() < WEIGHT_EPSILON {
+        wt.w * n
+    } else {
+        wt.w * (wt.x.powf(n) - 1.0) / (wt.x - 1.0)
+    };
+    if score.is_nan() || score.is_infinite() {
+        0.0
+    } else {
+        score
+    }
+}
+
+/// Skip mbox From_ line if present.
+fn skip_from_line(data: &[u8]) -> &[u8] {
+    if data.starts_with(b"From ")
+        && let Some(pos) = data.iter().position(|&b| b == b'\n')
+    {
+        return &data[pos + 1..];
+    }
+    data
+}
+
 /// Recipe evaluation engine.
 pub struct Engine {
     env: Environment,
@@ -82,6 +146,7 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Create an engine with the given environment and substitution context.
     pub fn new(env: Environment, ctx: SubstCtx) -> Self {
         Self {
             env,
@@ -92,26 +157,22 @@ impl Engine {
         }
     }
 
-    pub fn set_verbose(&mut self, v: bool) {
-        self.verbose = v;
-    }
-
-    pub fn get_var(&self, name: &str) -> Option<&str> {
-        self.env.get(name)
-    }
-
-    pub fn env(&self) -> &Environment {
-        &self.env
-    }
-
-    pub fn env_mut(&mut self) -> &mut Environment {
-        &mut self.env
-    }
-
+    /// Borrow the maildir unique-name generator.
     pub fn namer(&mut self) -> &mut Namer {
         &mut self.namer
     }
 
+    /// Enable or disable verbose logging.
+    pub fn set_verbose(&mut self, v: bool) {
+        self.verbose = v;
+    }
+
+    /// Look up a variable by name.
+    pub fn get_var(&self, name: &str) -> Option<&str> {
+        self.env.get(name)
+    }
+
+    /// Set a variable and apply any side effects.
     pub fn set_var(&mut self, name: &str, value: &str) {
         self.env.set(name, value);
         self.apply_side_effect(name, value);
@@ -157,353 +218,23 @@ impl Engine {
             eprintln!("failed to open logfile: {}", path);
             return;
         };
-        if dup2(f.as_raw_fd(), 2).is_err() {
+        if dup2(f.as_raw_fd(), io::stderr().as_raw_fd()).is_err() {
             eprintln!("failed to redirect stderr to logfile: {}", path);
             return;
         }
         self.logfile = Some(f);
     }
 
-    /// Process a list of items (rcfile contents).
-    pub fn process(
-        &mut self, items: &[Item], msg: &mut Message,
-    ) -> EngineResult<Outcome> {
-        let mut state = State::default();
-        self.process_items(items, msg, &mut state)
+    /// Expand variables in a string.
+    fn expand(&self, s: &str) -> String {
+        crate::variables::subst(s, &self.ctx, &self.env)
     }
 
-    fn process_items(
-        &mut self, items: &[Item], msg: &mut Message, state: &mut State,
-    ) -> EngineResult<Outcome> {
-        for item in items {
-            match item {
-                Item::Assign { name, value } => {
-                    let expanded = self.expand(value);
-                    self.set_var(name, &expanded);
-                }
-                Item::Recipe(recipe) => {
-                    let outcome = self.eval_recipe(recipe, msg, state)?;
-                    match outcome {
-                        Outcome::Delivered(_) => return Ok(outcome),
-                        Outcome::Continue | Outcome::Default => {}
-                    }
-                }
-                Item::Include(path) => {
-                    let expanded = self.expand(path);
-                    self.set_var("INCLUDERC", &expanded);
-                    if state.depth >= MAX_INCLUDE_DEPTH {
-                        return Err(EngineError::RecursionLimit);
-                    }
-                    if let Some(items) = self.load_rcfile(&expanded) {
-                        state.depth += 1;
-                        let outcome = self.process_items(&items, msg, state);
-                        state.depth -= 1;
-                        if matches!(outcome, Ok(Outcome::Delivered(_))) {
-                            return outcome;
-                        }
-                        outcome?;
-                    }
-                }
-                Item::Switch(path) => {
-                    if path.is_empty() {
-                        return Ok(Outcome::Default);
-                    }
-                    let expanded = self.expand(path);
-                    self.set_var("SWITCHRC", &expanded);
-                    if state.depth >= MAX_INCLUDE_DEPTH {
-                        return Err(EngineError::RecursionLimit);
-                    }
-                    if let Some(items) = self.load_rcfile(&expanded) {
-                        state.depth += 1;
-                        let outcome = self.process_items(&items, msg, state);
-                        state.depth -= 1;
-                        return outcome;
-                    }
-                }
-            }
-        }
-        Ok(Outcome::Default)
-    }
-
-    /// Load and parse an rcfile. Returns None if file doesn't exist or fails
-    /// to parse.
-    fn load_rcfile(&self, path: &str) -> Option<Vec<Item>> {
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(e) => {
-                if e.kind() != ErrorKind::NotFound && path != "/dev/null" {
-                    eprintln!("failed to read rcfile {}: {}", path, e);
-                }
-                return None;
-            }
-        };
-
-        match crate::config::parse(&content) {
-            Ok(items) => Some(items),
-            Err(e) => {
-                eprintln!("failed to parse rcfile {}: {}", path, e);
-                None
-            }
-        }
-    }
-
-    /// Evaluate a single recipe.
-    fn eval_recipe(
-        &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
-    ) -> EngineResult<Outcome> {
-        if !self.check_chain_flags(&recipe.flags, state) {
-            return Ok(Outcome::Default);
-        }
-
-        let (matched, score) = self.eval_conditions(recipe, msg)?;
-
-        // Update state for next recipe
-        if !recipe.flags.chain && !recipe.flags.succ {
-            state.last_cond = matched;
-        }
-        if !recipe.flags.else_ {
-            state.prev_cond = matched;
-        }
-
-        if !matched {
-            return Ok(Outcome::Default);
-        }
-
-        let result = self.perform_action(recipe, msg, state)?;
-
-        state.last_succ =
-            matches!(result, Outcome::Delivered(_) | Outcome::Continue);
-        self.ctx.last_score = score as i64;
-
-        // Copy flag means continue processing even after delivery
-        if recipe.flags.copy && matches!(result, Outcome::Delivered(_)) {
-            return Ok(Outcome::Continue);
-        }
-
-        Ok(result)
-    }
-
-    /// Check if chain flags allow this recipe to run.
-    fn check_chain_flags(&self, flags: &Flags, state: &State) -> bool {
-        // A flag: only if previous condition matched
-        if flags.chain && !state.last_cond {
-            return false;
-        }
-        // a flag: only if previous condition matched AND action succeeded
-        if flags.succ && !(state.last_cond && state.last_succ) {
-            return false;
-        }
-        // E flag: only if previous condition did NOT match
-        if flags.else_ && state.prev_cond {
-            return false;
-        }
-        // e flag: only if previous condition matched but action failed
-        if flags.err && (!state.prev_cond || state.last_succ) {
-            return false;
-        }
-        true
-    }
-
-    /// Evaluate all conditions, returns (matched, score).
-    fn eval_conditions(
-        &mut self, recipe: &Recipe, msg: &Message,
-    ) -> EngineResult<(bool, f64)> {
-        if recipe.conds.is_empty() {
-            return Ok((true, 0.0));
-        }
-
-        let mut score = 0.0f64;
-        let mut has_score = false;
-
-        for cond in &recipe.conds {
-            let (ok, s, scored) = self.eval_condition(cond, recipe, msg)?;
-            if scored {
-                score += s;
-                has_score = true;
-            } else if !ok {
-                return Ok((false, score));
-            }
-        }
-
-        // If we used scoring, match requires score > 0
-        if has_score {
-            Ok((score > 0.0, score))
-        } else {
-            Ok((true, 0.0))
-        }
-    }
-
-    /// Evaluate a single condition. Returns (matched, score_delta, is_scored).
-    fn eval_condition(
-        &mut self, cond: &Condition, recipe: &Recipe, msg: &Message,
-    ) -> EngineResult<(bool, f64, bool)> {
-        match cond {
-            Condition::Regex {
-                pattern,
-                negate,
-                weight,
-            } => self.eval_regex(pattern, *negate, *weight, recipe, msg),
-            Condition::Size { op, bytes, weight } => {
-                self.eval_size(*op, *bytes, *weight, msg)
-            }
-            Condition::Shell { cmd, weight } => {
-                self.eval_shell(cmd, *weight, recipe, msg)
-            }
-            Condition::Variable {
-                name,
-                pattern,
-                weight,
-            } => self.eval_variable(name, pattern, *weight, recipe, msg),
-            Condition::Subst { inner, negate } => {
-                let (ok, score, scored) =
-                    self.eval_condition(inner, recipe, msg)?;
-                Ok((ok ^ negate, score, scored))
-            }
-        }
-    }
-
-    fn eval_size(
-        &self, op: Ordering, bytes: u64, weight: Option<Weight>, msg: &Message,
-    ) -> EngineResult<(bool, f64, bool)> {
-        let size = msg.len() as u64;
-        let matched = match op {
-            Ordering::Less => size < bytes,
-            Ordering::Greater => size > bytes,
-            Ordering::Equal => size == bytes,
-        };
-
-        if self.verbose {
-            let sym = match op {
-                Ordering::Less => '<',
-                Ordering::Greater => '>',
-                Ordering::Equal => '=',
-            };
-            eprintln!(
-                "{} on {}{}",
-                if matched { "Match" } else { "No match" },
-                sym,
-                bytes
-            );
-        }
-
-        let Some(wt) = weight else {
-            return Ok((matched, 0.0, false));
-        };
-
-        // Weighted size: w * (M/L)^x or w * (L/M)^x
-        let ratio = match op {
-            Ordering::Greater => size as f64 / bytes.max(1) as f64,
-            Ordering::Less => bytes as f64 / size.max(1) as f64,
-            Ordering::Equal => 1.0,
-        };
-        let score = wt.w * ratio.powf(wt.x);
-        Ok((true, score, true))
-    }
-
-    fn eval_shell(
-        &mut self, cmd: &str, weight: Option<Weight>, recipe: &Recipe,
-        msg: &Message,
-    ) -> EngineResult<(bool, f64, bool)> {
-        let expanded = self.expand(cmd);
-        let text = self.grep_text(msg, &recipe.flags);
-        let ok = self.run_shell(&expanded, text.as_bytes())?;
-
-        if self.verbose {
-            eprintln!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
-        }
-
-        let Some(wt) = weight else {
-            return Ok((ok, 0.0, false));
-        };
-
-        // Weighted shell: success = w, failure = x
-        let score = if ok { wt.w } else { wt.x };
-        Ok((true, score, true))
-    }
-
-    fn eval_regex(
-        &mut self, pattern: &str, negate: bool, weight: Option<Weight>,
-        recipe: &Recipe, msg: &Message,
-    ) -> EngineResult<(bool, f64, bool)> {
-        let text = self.grep_text(msg, &recipe.flags);
-        let expanded = self.expand(pattern);
-        let case_insens = !recipe.flags.case;
-        let matcher = Matcher::new(&expanded, case_insens)?;
-
-        let Some(wt) = weight else {
-            let result = matcher.exec(&text);
-            if result.matched
-                && let Some(cap) = result.capture
-            {
-                self.set_var("MATCH", cap);
-            }
-            let matched = result.matched ^ negate;
-            if self.verbose {
-                eprintln!(
-                    "{} on \"{}\"",
-                    if matched { "Match" } else { "No match" },
-                    pattern
-                );
-            }
-            return Ok((matched, 0.0, false));
-        };
-
-        let result = matcher.exec(&text);
-        if result.matched
-            && let Some(cap) = result.capture
-        {
-            self.set_var("MATCH", cap);
-        }
-
-        let count = matcher.count_matches(&text);
-        let score = compute_weighted_score(wt, count);
-        let score = if negate { -score } else { score };
-
-        if self.verbose {
-            eprintln!("Score {} ({} matches) on \"{}\"", score, count, pattern);
-        }
-
-        Ok((true, score, true))
-    }
-
-    fn eval_variable(
-        &mut self, name: &str, pattern: &str, weight: Option<Weight>,
-        recipe: &Recipe, msg: &Message,
-    ) -> EngineResult<(bool, f64, bool)> {
-        let text = self.get_variable_text(name, msg).into_owned();
-        let expanded = self.expand(pattern);
-        let case_insens = !recipe.flags.case;
-        let matcher = Matcher::new(&expanded, case_insens)?;
-
-        let Some(wt) = weight else {
-            let result = matcher.exec(&text);
-            if result.matched
-                && let Some(cap) = result.capture
-            {
-                self.set_var("MATCH", cap);
-            }
-            if self.verbose {
-                eprintln!(
-                    "{} on {} ?? {}",
-                    if result.matched { "Match" } else { "No match" },
-                    name,
-                    pattern
-                );
-            }
-            return Ok((result.matched, 0.0, false));
-        };
-
-        let count = matcher.count_matches(&text);
-        let score = compute_weighted_score(wt, count);
-
-        if self.verbose {
-            eprintln!(
-                "Score {} ({} matches) on {} ?? {}",
-                score, count, name, pattern
-            );
-        }
-
-        Ok((true, score, true))
+    /// Build a Command with a clean env from our Environment.
+    fn spawn(&self, prog: &str) -> Command {
+        let mut cmd = Command::new(prog);
+        cmd.env_clear().envs(self.env.iter());
+        cmd
     }
 
     /// Get text to grep based on H/B flags.
@@ -529,11 +260,16 @@ impl Engine {
         }
     }
 
-    /// Build a Command with a clean env from our Environment.
-    fn spawn(&self, prog: &str) -> Command {
-        let mut cmd = Command::new(prog);
-        cmd.env_clear().envs(self.env.iter());
-        cmd
+    /// Create message for delivery based on h/b flags.
+    fn message_for_delivery<'a>(
+        &self, recipe: &Recipe, msg: &'a Message,
+    ) -> Cow<'a, Message> {
+        match (recipe.flags.pass_head, recipe.flags.pass_body) {
+            (true, true) => Cow::Borrowed(msg),
+            (true, false) => Cow::Owned(Message::from_parts(msg.header(), &[])),
+            (false, true) => Cow::Owned(Message::from_parts(&[], msg.body())),
+            (false, false) => Cow::Owned(Message::from_parts(&[], &[])),
+        }
     }
 
     /// Run a shell command with message as stdin.
@@ -560,37 +296,208 @@ impl Engine {
         Ok(status.success())
     }
 
-    /// Perform the recipe's action.
-    fn perform_action(
-        &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
-    ) -> EngineResult<Outcome> {
-        // Acquire lockfile if specified
-        let _guard = if let Some(p) = self.resolve_lockfile(recipe) {
-            Some(FileLock::acquire_temp(Path::new(&p)).map_err(|e| {
-                eprintln!("failed to acquire lock {}: {}", p, e);
-                EngineError::Lock(p)
-            })?)
-        } else {
-            None
+    fn eval_size(
+        &self, op: Ordering, bytes: u64, weight: Option<Weight>, msg: &Message,
+    ) -> EngineResult<ConditionResult> {
+        let size = msg.len() as u64;
+        let matched = match op {
+            Ordering::Less => size < bytes,
+            Ordering::Equal => size == bytes,
+            Ordering::Greater => size > bytes,
         };
 
-        match &recipe.action {
-            Action::Folder(path) => {
-                let path_str = path.to_string_lossy();
-                let expanded = self.expand(&path_str);
-                self.deliver_to_folder(&expanded, recipe, msg)
-            }
-            Action::Pipe { cmd, capture } => {
-                let expanded = self.expand(cmd);
-                self.deliver_to_pipe(&expanded, recipe, msg, capture.as_deref())
-            }
-            Action::Forward(addrs) => {
-                let expanded: Vec<_> =
-                    addrs.iter().map(|a| self.expand(a)).collect();
-                self.forward(recipe, msg, &expanded)
-            }
-            Action::Nested(items) => self.process_items(items, msg, state),
+        if self.verbose {
+            let sym = match op {
+                Ordering::Less => '<',
+                Ordering::Greater => '>',
+                Ordering::Equal => '=',
+            };
+            eprintln!(
+                "{} on {}{}",
+                if matched { "Match" } else { "No match" },
+                sym,
+                bytes
+            );
         }
+
+        let Some(wt) = weight else {
+            return Ok(ConditionResult::simple(matched));
+        };
+
+        // Weighted size: w * (M/L)^x or w * (L/M)^x
+        let ratio = match op {
+            Ordering::Less => bytes as f64 / size.max(1) as f64,
+            Ordering::Equal => 1.0,
+            Ordering::Greater => size as f64 / bytes.max(1) as f64,
+        };
+        let score = wt.w * ratio.powf(wt.x);
+        Ok(ConditionResult::scored(score))
+    }
+
+    fn eval_shell(
+        &mut self, cmd: &str, weight: Option<Weight>, recipe: &Recipe,
+        msg: &Message,
+    ) -> EngineResult<ConditionResult> {
+        let expanded = self.expand(cmd);
+        let text = self.grep_text(msg, &recipe.flags);
+        let ok = self.run_shell(&expanded, text.as_bytes())?;
+
+        if self.verbose {
+            eprintln!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
+        }
+
+        let Some(wt) = weight else {
+            return Ok(ConditionResult::simple(ok));
+        };
+
+        // Weighted shell: success = w, failure = x
+        let score = if ok { wt.w } else { wt.x };
+        Ok(ConditionResult::scored(score))
+    }
+
+    /// Match a pattern against text, handling MATCH capture and weighting.
+    fn eval_pattern(
+        &mut self, text: &str, pattern: &str, negate: bool,
+        weight: Option<Weight>, case_insens: bool, label: &str,
+    ) -> EngineResult<ConditionResult> {
+        let expanded = self.expand(pattern);
+        let matcher = Matcher::new(&expanded, case_insens)?;
+
+        let result = matcher.exec(text);
+        if result.matched
+            && let Some(cap) = result.capture
+        {
+            self.set_var("MATCH", cap);
+        }
+
+        let Some(wt) = weight else {
+            let matched = result.matched ^ negate;
+            if self.verbose {
+                eprintln!(
+                    "{} on {}",
+                    if matched { "Match" } else { "No match" },
+                    label
+                );
+            }
+            return Ok(ConditionResult::simple(matched));
+        };
+
+        let count = matcher.count_matches(text);
+        let score = compute_weighted_score(wt, count);
+        let score = if negate { -score } else { score };
+
+        if self.verbose {
+            eprintln!("Score {} ({} matches) on {}", score, count, label);
+        }
+
+        Ok(ConditionResult::scored(score))
+    }
+
+    fn eval_regex(
+        &mut self, pattern: &str, negate: bool, weight: Option<Weight>,
+        recipe: &Recipe, msg: &Message,
+    ) -> EngineResult<ConditionResult> {
+        let text = self.grep_text(msg, &recipe.flags);
+        let label = format!("\"{}\"", pattern);
+        self.eval_pattern(
+            &text,
+            pattern,
+            negate,
+            weight,
+            !recipe.flags.case,
+            &label,
+        )
+    }
+
+    fn eval_variable(
+        &mut self, name: &str, pattern: &str, weight: Option<Weight>,
+        recipe: &Recipe, msg: &Message,
+    ) -> EngineResult<ConditionResult> {
+        let text = self.get_variable_text(name, msg).into_owned();
+        let label = format!("{} ?? {}", name, pattern);
+        self.eval_pattern(
+            &text,
+            pattern,
+            false,
+            weight,
+            !recipe.flags.case,
+            &label,
+        )
+    }
+
+    /// Evaluate a single condition. Returns (matched, score_delta, is_scored).
+    fn eval_condition(
+        &mut self, cond: &Condition, recipe: &Recipe, msg: &Message,
+    ) -> EngineResult<ConditionResult> {
+        match cond {
+            Condition::Regex {
+                pattern,
+                negate,
+                weight,
+            } => self.eval_regex(pattern, *negate, *weight, recipe, msg),
+            Condition::Size { op, bytes, weight } => {
+                self.eval_size(*op, *bytes, *weight, msg)
+            }
+            Condition::Shell { cmd, weight } => {
+                self.eval_shell(cmd, *weight, recipe, msg)
+            }
+            Condition::Variable {
+                name,
+                pattern,
+                weight,
+            } => self.eval_variable(name, pattern, *weight, recipe, msg),
+            Condition::Subst { inner, negate } => {
+                let mut r = self.eval_condition(inner, recipe, msg)?;
+                r.matched ^= negate;
+                Ok(r)
+            }
+        }
+    }
+
+    /// Evaluate all conditions, returns (matched, score).
+    fn eval_conditions(
+        &mut self, recipe: &Recipe, msg: &Message,
+    ) -> EngineResult<(bool, f64)> {
+        if recipe.conds.is_empty() {
+            return Ok((true, 0.0));
+        }
+
+        let mut score = 0.0f64;
+        let mut has_score = false;
+
+        for cond in &recipe.conds {
+            let r = self.eval_condition(cond, recipe, msg)?;
+            if !r.matched {
+                return Ok((false, score));
+            } else if r.scored {
+                score += r.score;
+                has_score = true;
+            }
+        }
+
+        // If we used scoring, match requires score > 0
+        Ok((!has_score || score > 0.0, score))
+    }
+
+    /// Check if chain flags allow this recipe to run.
+    fn check_chain_flags(&self, flags: &Flags, state: &State) -> bool {
+        // only if previous condition matched
+        if flags.chain && !state.last_cond {
+            return false;
+        }
+        // only if previous condition matched AND action succeeded
+        if flags.succ && !(state.last_cond && state.last_succ) {
+            return false;
+        }
+        // only if previous condition did NOT match
+        if flags.r#else && state.prev_cond {
+            return false;
+        }
+        // only if previous condition matched but action failed
+        if flags.err && (!state.prev_cond || state.last_succ) {
+            return false;
+        }
+        true
     }
 
     /// Resolve the lockfile path for a recipe.
@@ -760,51 +667,172 @@ impl Engine {
         Ok(Outcome::Delivered(dest))
     }
 
-    /// Create message for delivery based on h/b flags.
-    fn message_for_delivery<'a>(
-        &self, recipe: &Recipe, msg: &'a Message,
-    ) -> Cow<'a, Message> {
-        match (recipe.flags.pass_head, recipe.flags.pass_body) {
-            (true, true) => Cow::Borrowed(msg),
-            (true, false) => Cow::Owned(Message::from_parts(msg.header(), &[])),
-            (false, true) => Cow::Owned(Message::from_parts(&[], msg.body())),
-            (false, false) => Cow::Owned(Message::from_parts(&[], &[])),
+    /// Perform the recipe's action.
+    fn perform_action(
+        &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
+    ) -> EngineResult<Outcome> {
+        // Acquire lockfile if specified
+        let _lock = if let Some(p) = self.resolve_lockfile(recipe) {
+            Some(FileLock::acquire_temp(Path::new(&p)).map_err(|e| {
+                eprintln!("failed to acquire lock {}: {}", p, e);
+                EngineError::Lock(p)
+            })?)
+        } else {
+            None
+        };
+
+        match &recipe.action {
+            Action::Folder(path) => {
+                let path_str = path.to_string_lossy();
+                let expanded = self.expand(&path_str);
+                self.deliver_to_folder(&expanded, recipe, msg)
+            }
+            Action::Pipe { cmd, capture } => {
+                let expanded = self.expand(cmd);
+                self.deliver_to_pipe(&expanded, recipe, msg, capture.as_deref())
+            }
+            Action::Forward(addrs) => {
+                let expanded: Vec<_> =
+                    addrs.iter().map(|a| self.expand(a)).collect();
+                self.forward(recipe, msg, &expanded)
+            }
+            Action::Nested(items) => self.process_items(items, msg, state),
         }
     }
 
-    /// Expand variables in a string.
-    fn expand(&self, s: &str) -> String {
-        crate::variables::subst(s, &self.ctx, &self.env)
-    }
-}
+    /// Evaluate a single recipe.
+    fn eval_recipe(
+        &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
+    ) -> EngineResult<Outcome> {
+        if !self.check_chain_flags(&recipe.flags, state) {
+            return Ok(Outcome::Default);
+        }
 
-const WEIGHT_EPSILON: f64 = 1e-10;
+        let (matched, score) = self.eval_conditions(recipe, msg)?;
 
-/// Compute weighted score from count of matches.
-/// Formula: w * (x^n - 1) / (x - 1) when x != 1, or w * n when x == 1.
-fn compute_weighted_score(wt: Weight, n: usize) -> f64 {
-    if n == 0 {
-        return 0.0;
-    }
-    let n = n as f64;
-    let score = if (wt.x - 1.0).abs() < WEIGHT_EPSILON {
-        wt.w * n
-    } else {
-        wt.w * (wt.x.powf(n) - 1.0) / (wt.x - 1.0)
-    };
-    if score.is_nan() || score.is_infinite() {
-        0.0
-    } else {
-        score
-    }
-}
+        // Update state for next recipe
+        if !recipe.flags.chain && !recipe.flags.succ {
+            state.last_cond = matched;
+        }
+        if !recipe.flags.r#else {
+            state.prev_cond = matched;
+        }
 
-/// Skip mbox From_ line if present.
-fn skip_from_line(data: &[u8]) -> &[u8] {
-    if data.starts_with(b"From ")
-        && let Some(pos) = data.iter().position(|&b| b == b'\n')
-    {
-        return &data[pos + 1..];
+        if !matched {
+            return Ok(Outcome::Default);
+        }
+
+        let result = self.perform_action(recipe, msg, state)?;
+
+        state.last_succ =
+            matches!(result, Outcome::Delivered(_) | Outcome::Continue);
+        self.ctx.last_score = score as i64;
+
+        // Copy flag means continue processing even after delivery
+        if recipe.flags.copy && matches!(result, Outcome::Delivered(_)) {
+            return Ok(Outcome::Continue);
+        }
+
+        Ok(result)
     }
-    data
+
+    /// Load and parse an rcfile. Returns None if file doesn't exist or fails
+    /// to parse.
+    fn load_rcfile(&self, path: &str) -> Option<Vec<Item>> {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                if e.kind() != ErrorKind::NotFound && path != "/dev/null" {
+                    eprintln!("failed to read rcfile {}: {}", path, e);
+                }
+                return None;
+            }
+        };
+
+        match crate::config::parse(&content) {
+            Ok(items) => Some(items),
+            Err(e) => {
+                eprintln!("failed to parse rcfile {}: {}", path, e);
+                None
+            }
+        }
+    }
+
+    /// Load and run an rcfile. Returns `Some` if the caller should return.
+    fn process_rcfile(
+        &mut self, path: &str, var: &str, switch: bool, msg: &mut Message,
+        state: &mut State,
+    ) -> EngineResult<Option<Outcome>> {
+        let expanded = self.expand(path);
+        self.set_var(var, &expanded);
+        if state.depth >= MAX_INCLUDE_DEPTH {
+            return Err(EngineError::RecursionLimit);
+        }
+        let Some(items) = self.load_rcfile(&expanded) else {
+            return Ok(None);
+        };
+        state.depth += 1;
+        let outcome = self.process_items(&items, msg, state);
+        state.depth -= 1;
+        if switch {
+            return outcome.map(Some);
+        }
+        match outcome {
+            Ok(Outcome::Delivered(_)) => outcome.map(Some),
+            other => {
+                other?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn process_items(
+        &mut self, items: &[Item], msg: &mut Message, state: &mut State,
+    ) -> EngineResult<Outcome> {
+        for item in items {
+            match item {
+                Item::Assign { name, value } => {
+                    let expanded = self.expand(value);
+                    self.set_var(name, &expanded);
+                }
+                Item::Recipe(recipe) => {
+                    let outcome = self.eval_recipe(recipe, msg, state)?;
+                    match outcome {
+                        Outcome::Delivered(_) => return Ok(outcome),
+                        Outcome::Continue | Outcome::Default => {}
+                    }
+                }
+                Item::Include(path) => {
+                    if let Some(o) = self.process_rcfile(
+                        path,
+                        "INCLUDERC",
+                        false,
+                        msg,
+                        state,
+                    )? {
+                        return Ok(o);
+                    }
+                }
+                Item::Switch(path) => {
+                    if path.is_empty() {
+                        return Ok(Outcome::Default);
+                    }
+                    if let Some(o) =
+                        self.process_rcfile(path, "SWITCHRC", true, msg, state)?
+                    {
+                        return Ok(o);
+                    }
+                }
+            }
+        }
+        Ok(Outcome::Default)
+    }
+
+    /// Process a list of items (rcfile contents).
+    pub fn process(
+        &mut self, items: &[Item], msg: &mut Message,
+    ) -> EngineResult<Outcome> {
+        let mut state = State::default();
+        self.process_items(items, msg, &mut state)
+    }
 }

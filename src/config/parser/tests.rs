@@ -438,8 +438,7 @@ fn header_explicit_lockfile() {
 #[test]
 fn header_flags_and_lockfile() {
     let p = Parser::new("");
-    let (flags, lock) =
-        p.parse_recipe_header(":0 HBc:mylock", 1).unwrap();
+    let (flags, lock) = p.parse_recipe_header(":0 HBc:mylock", 1).unwrap();
     assert!(flags.head);
     assert!(flags.body);
     assert!(flags.copy);
@@ -480,8 +479,7 @@ fn header_no_colon_prefix() {
 #[test]
 fn header_lockfile_with_spaces() {
     let p = Parser::new("");
-    let (_, lock) =
-        p.parse_recipe_header(":0 : mylock ", 1).unwrap();
+    let (_, lock) = p.parse_recipe_header(":0 : mylock ", 1).unwrap();
     assert_eq!(lock.as_deref(), Some("mylock"));
 }
 
@@ -526,13 +524,19 @@ fn block_skips_blanks_and_comments() {
 #[test]
 fn block_unclosed() {
     let mut p = Parser::new("VAR=x\n");
-    assert!(matches!(p.parse_block(1), Err(ParseError::UnclosedBlock(_))));
+    assert!(matches!(
+        p.parse_block(1),
+        Err(ParseError::UnclosedBlock(_))
+    ));
 }
 
 #[test]
 fn block_unclosed_empty() {
     let mut p = Parser::new("");
-    assert!(matches!(p.parse_block(1), Err(ParseError::UnclosedBlock(_))));
+    assert!(matches!(
+        p.parse_block(1),
+        Err(ParseError::UnclosedBlock(_))
+    ));
 }
 
 #[test]
@@ -607,7 +611,10 @@ fn recipe_flags_and_lockfile() {
 #[test]
 fn recipe_missing_action() {
     let mut p = Parser::new(":0\n* ^From:.*x\n");
-    assert!(matches!(p.parse_recipe(), Err(ParseError::MissingAction(_))));
+    assert!(matches!(
+        p.parse_recipe(),
+        Err(ParseError::MissingAction(_))
+    ));
 }
 
 #[test]

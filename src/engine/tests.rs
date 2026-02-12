@@ -168,10 +168,10 @@ fn chain_a_flag_skips_when_prev_false() {
 }
 
 #[test]
-fn else_e_flag_runs_when_prev_false() {
+fn else_flag_runs_when_prev_false() {
     let mut t = Test::new();
     let mut flags = Flags::new();
-    flags.else_ = true;
+    flags.r#else = true;
 
     let items = vec![
         regex_recipe("X-NotPresent:", &t.maildir("first")),

@@ -53,7 +53,7 @@ fn flag_succ_a() {
 #[test]
 fn flag_else() {
     let f = Flags::parse("E");
-    assert!(f.else_);
+    assert!(f.r#else);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn flag_empty() {
     assert!(!f.case);
     assert!(!f.chain);
     assert!(!f.succ);
-    assert!(!f.else_);
+    assert!(!f.r#else);
     assert!(!f.err);
     assert!(!f.filter);
     assert!(!f.copy);
@@ -147,7 +147,7 @@ fn flag_all_combined() {
     assert!(f.case);
     assert!(f.chain);
     assert!(f.succ);
-    assert!(f.else_);
+    assert!(f.r#else);
     assert!(f.err);
     assert!(f.pass_head);
     assert!(f.pass_body);

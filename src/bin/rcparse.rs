@@ -29,7 +29,7 @@ fn format_flags(f: &Flags) -> String {
     if f.succ {
         parts.push("a (chain on success)");
     }
-    if f.else_ {
+    if f.r#else {
         parts.push("E (else branch)");
     }
     if f.err {

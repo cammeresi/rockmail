@@ -6,13 +6,13 @@ mod tests;
 /// All 15 procmail recipe flags
 #[derive(Debug, Clone, Default)]
 pub struct Flags {
-    pub head: bool,  // H - grep header (default true)
-    pub body: bool,  // B - grep body
-    pub case: bool,  // D - case sensitive
-    pub chain: bool, // A - chain on prior condition match
-    pub succ: bool,  // a - chain on prior success
-    pub else_: bool, // E - else branch
-    pub err: bool,   // e - error handler
+    pub head: bool,   // H - grep header (default true)
+    pub body: bool,   // B - grep body
+    pub case: bool,   // D - case sensitive
+    pub chain: bool,  // A - chain on prior condition match
+    pub succ: bool,   // a - chain on prior success
+    pub r#else: bool, // E - else branch
+    pub err: bool,    // e - error handler
 
     pub pass_head: bool, // h - pass header (default true)
     pub pass_body: bool, // b - pass body (default true)
@@ -49,7 +49,7 @@ impl Flags {
                 'D' => f.case = true,
                 'A' => f.chain = true,
                 'a' => f.succ = true,
-                'E' => f.else_ = true,
+                'E' => f.r#else = true,
                 'e' => f.err = true,
                 'h' => f.pass_head = true,
                 'b' => f.pass_body = true,
@@ -92,7 +92,7 @@ impl Recipe {
         }
     }
 
-    /// Returns true if this is a delivering recipe (writes to 
+    /// Returns true if this is a delivering recipe (writes to
     /// file/forwards/pipes without capture)
     pub fn is_delivering(&self) -> bool {
         match &self.action {
