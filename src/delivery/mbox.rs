@@ -5,6 +5,7 @@ use std::path::Path;
 use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::locking::FileLock;
 use crate::mail::{Message, generate as from_line};
+use crate::variables::DEV_NULL;
 
 #[cfg(test)]
 mod tests;
@@ -90,7 +91,7 @@ fn deliver_inner(
     w.flush()?;
     let file = w.into_inner().map_err(|e| e.into_error())?;
     // fsync on /dev/null returns EINVAL.
-    if path != Path::new("/dev/null") {
+    if path != Path::new(DEV_NULL) {
         file.sync_all()?;
     }
 
@@ -109,7 +110,7 @@ pub fn deliver(
     path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
     // Locking /dev/null would be silly (matches procmail behavior).
-    let _guard = if path != Path::new("/dev/null") {
+    let _guard = if path != Path::new(DEV_NULL) {
         Some(FileLock::acquire(path)?)
     } else {
         None

@@ -353,7 +353,7 @@ unsafe fn init_env(
             u.shell.to_string_lossy().into_owned(),
         )
     } else {
-        (format!("#{}", uid), "/".into(), "/bin/sh".into())
+        (format!("#{}", uid), "/".into(), DEF_SHELL.into())
     };
 
     let maildir = format!("{home}/{DEF_MAILDIR}");

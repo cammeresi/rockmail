@@ -18,8 +18,10 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    DEF_LOCKEXT, Environment, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE,
-    VAR_MAILDIR, VAR_SHELL, VAR_UMASK, VAR_VERBOSE,
+    DEF_LOCKEXT, DEF_SENDMAIL, DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS,
+    DEV_NULL, Environment, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE,
+    VAR_MAILDIR, VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL, VAR_UMASK,
+    VAR_VERBOSE,
 };
 
 #[cfg(test)]
@@ -274,10 +276,10 @@ impl Engine {
 
     /// Run a shell command with message as stdin.
     fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<bool> {
-        let shell = self.get_var(VAR_SHELL).unwrap_or("/bin/sh").to_owned();
+        let shell = self.get_var(VAR_SHELL).unwrap_or(DEF_SHELL).to_owned();
         let mut child = self
             .spawn(&shell)
-            .arg("-c")
+            .arg(DEF_SHELLFLAGS)
             .arg(cmd)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -623,10 +625,13 @@ impl Engine {
         &mut self, recipe: &Recipe, msg: &Message, addrs: &[String],
     ) -> EngineResult<Outcome> {
         let sendmail = self
-            .get_var("SENDMAIL")
-            .unwrap_or("/usr/sbin/sendmail")
+            .get_var(VAR_SENDMAIL)
+            .unwrap_or(DEF_SENDMAIL)
             .to_owned();
-        let flags = self.get_var("SENDMAILFLAGS").unwrap_or("-oi").to_owned();
+        let flags = self
+            .get_var(VAR_SENDMAILFLAGS)
+            .unwrap_or(DEF_SENDMAILFLAGS)
+            .to_owned();
         let msg = self.message_for_delivery(recipe, msg);
 
         // Skip From_ line for forwarding
@@ -742,7 +747,7 @@ impl Engine {
         let content = match fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                if e.kind() != ErrorKind::NotFound && path != "/dev/null" {
+                if e.kind() != ErrorKind::NotFound && path != DEV_NULL {
                     eprintln!("failed to read rcfile {}: {}", path, e);
                 }
                 return None;

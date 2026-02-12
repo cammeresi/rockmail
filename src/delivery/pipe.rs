@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 
 use super::{DeliveryError, DeliveryResult};
 use crate::mail::Message;
-use crate::variables::Environment;
+use crate::variables::{DEF_SHELL, DEF_SHELLFLAGS, Environment};
 
 #[cfg(test)]
 mod tests;
@@ -39,8 +39,8 @@ impl From<PipeResult> for DeliveryResult {
 pub fn deliver(
     cmd: &str, msg: &Message, filter: bool, wait: bool, env: &Environment,
 ) -> Result<PipeResult, DeliveryError> {
-    let mut child = Command::new("/bin/sh")
-        .arg("-c")
+    let mut child = Command::new(DEF_SHELL)
+        .arg(DEF_SHELLFLAGS)
         .arg(cmd)
         .env_clear()
         .envs(env.iter())
