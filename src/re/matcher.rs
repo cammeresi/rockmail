@@ -91,8 +91,7 @@ fn expand_macros(pat: &str) -> String {
 /// Process a single char inside a `\/` capture region.
 /// Returns true if `^^` was seen at pattern end (signals anchor_end).
 fn push_char(
-    out: &mut String, c: char, chars: &mut Peekable<Chars>,
-    groups: &mut usize,
+    out: &mut String, c: char, chars: &mut Peekable<Chars>, groups: &mut usize,
 ) -> bool {
     match c {
         '\\' => match chars.peek() {

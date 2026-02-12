@@ -174,6 +174,14 @@ impl Engine {
         self.env.get(name)
     }
 
+    /// Look up a numeric variable, parsing via `value_as_int`.
+    pub fn get_var_as_num(&self, name: &str, def: i64) -> i64 {
+        match self.env.get(name) {
+            Some(v) => crate::variables::value_as_int(v, def),
+            None => def,
+        }
+    }
+
     /// Set a variable and apply any side effects.
     pub fn set_var(&mut self, name: &str, value: &str) {
         self.env.set(name, value);
@@ -183,7 +191,7 @@ impl Engine {
     fn apply_side_effect(&mut self, name: &str, value: &str) {
         match name {
             VAR_VERBOSE => {
-                self.verbose = matches!(value, "on" | "yes" | "1");
+                self.verbose = crate::variables::value_is_true(value);
             }
             VAR_UMASK => {
                 if let Ok(m) = u32::from_str_radix(value, 8) {
