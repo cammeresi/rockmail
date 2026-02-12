@@ -1,11 +1,13 @@
-use crate::util::{LockError, now_secs};
-use nix::unistd::getpid;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::UNIX_EPOCH;
+
+use nix::unistd::getpid;
+
+use crate::util::{LockError, now_secs};
 
 #[cfg(test)]
 mod tests;
@@ -80,6 +82,20 @@ impl Drop for TmpGuard<'_> {
     }
 }
 
+/// Get the modification time of a lockfile.
+pub fn lock_mtime(target: &Path) -> Option<u64> {
+    fs::metadata(target)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+}
+
+/// Remove a lockfile.
+pub fn remove_lock(target: &Path) -> Result<(), LockError> {
+    fs::remove_file(target).map_err(LockError::Io)
+}
+
 /// Create a lockfile using NFS-safe technique: create unique file, then rename.
 pub fn create_lock(target: &Path) -> Result<(), LockError> {
     let dir = target.parent().unwrap_or(Path::new("."));
@@ -92,8 +108,8 @@ pub fn create_lock(target: &Path) -> Result<(), LockError> {
         .mode(0o644)
         .open(&tmp)
         .map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => LockError::Exists,
-            std::io::ErrorKind::NotFound => LockError::Unavailable,
+            io::ErrorKind::AlreadyExists => LockError::Exists,
+            io::ErrorKind::NotFound => LockError::Unavailable,
             _ => LockError::Io(e),
         })?;
 
@@ -123,25 +139,11 @@ pub fn create_lock(target: &Path) -> Result<(), LockError> {
                 let _ = fs::remove_file(&tmp);
                 return Ok(());
             }
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
+            if e.kind() == io::ErrorKind::AlreadyExists {
                 Err(LockError::Exists)
             } else {
                 Err(LockError::Io(e))
             }
         }
     }
-}
-
-/// Remove a lockfile.
-pub fn remove_lock(target: &Path) -> Result<(), LockError> {
-    fs::remove_file(target).map_err(LockError::Io)
-}
-
-/// Get the modification time of a lockfile.
-pub fn lock_mtime(target: &Path) -> Option<u64> {
-    fs::metadata(target)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
 }

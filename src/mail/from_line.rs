@@ -5,17 +5,6 @@ use chrono::{DateTime, Local, TimeZone};
 #[cfg(test)]
 mod tests;
 
-/// Generate a From_ line for mbox format.
-///
-/// Format: "From sender  date\n"
-/// Date is in ctime format: "Mon Jan  1 00:00:00 2024"
-///
-/// # Panics
-/// Panics if sender is empty or contains whitespace/newlines.
-pub fn generate(sender: &str) -> Vec<u8> {
-    generate_with_time(sender, Local::now())
-}
-
 /// Generate From_ line with explicit timestamp.
 ///
 /// # Panics
@@ -41,6 +30,17 @@ where
     write!(line, "{}", time.format("%a %b %e %H:%M:%S %Y")).unwrap();
     line.push('\n');
     line.into_bytes()
+}
+
+/// Generate a From_ line for mbox format.
+///
+/// Format: "From sender  date\n"
+/// Date is in ctime format: "Mon Jan  1 00:00:00 2024"
+///
+/// # Panics
+/// Panics if sender is empty or contains whitespace/newlines.
+pub fn generate(sender: &str) -> Vec<u8> {
+    generate_with_time(sender, Local::now())
 }
 
 /// Skip From_ line(s) at start of data.

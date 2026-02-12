@@ -1,7 +1,38 @@
 //! Header field handling for formail.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::mem;
+
+/// Find the end of the field name (position after the colon).
+/// Returns None if this doesn't look like a valid header field.
+fn find_field_name_end(data: &[u8]) -> Option<usize> {
+    // From_ line is special
+    if data.starts_with(b"From ") {
+        return Some(5);
+    }
+
+    let mut i = 0;
+    while i < data.len() {
+        match data[i] {
+            b':' => return Some(i + 1),
+            b' ' | b'\t' => {
+                // Whitespace before colon is allowed
+                let mut j = i + 1;
+                while j < data.len() && (data[j] == b' ' || data[j] == b'\t') {
+                    j += 1;
+                }
+                if j < data.len() && data[j] == b':' {
+                    return Some(j + 1);
+                }
+                return None;
+            }
+            b'\n' | b'\r' => return None,
+            c if c.is_ascii_control() => return None,
+            _ => i += 1,
+        }
+    }
+    None
+}
 
 /// A parsed email header field.
 #[derive(Debug, Clone)]
@@ -241,9 +272,10 @@ impl FieldList {
     }
 
     /// Write all fields to a writer.
-    pub fn write_to<W: std::io::Write>(
-        &self, w: &mut W,
-    ) -> std::io::Result<()> {
+    pub fn write_to<W>(&self, w: &mut W) -> io::Result<()>
+    where
+        W: Write,
+    {
         for field in &self.fields {
             w.write_all(&field.text)?;
         }
@@ -266,42 +298,12 @@ impl FieldList {
     }
 }
 
-/// Find the end of the field name (position after the colon).
-/// Returns None if this doesn't look like a valid header field.
-fn find_field_name_end(data: &[u8]) -> Option<usize> {
-    // From_ line is special
-    if data.starts_with(b"From ") {
-        return Some(5);
-    }
-
-    let mut i = 0;
-    while i < data.len() {
-        match data[i] {
-            b':' => return Some(i + 1),
-            b' ' | b'\t' => {
-                // Whitespace before colon is allowed
-                let mut j = i + 1;
-                while j < data.len() && (data[j] == b' ' || data[j] == b'\t') {
-                    j += 1;
-                }
-                if j < data.len() && data[j] == b':' {
-                    return Some(j + 1);
-                }
-                return None;
-            }
-            b'\n' | b'\r' => return None,
-            c if c.is_ascii_control() => return None,
-            _ => i += 1,
-        }
-    }
-    None
-}
-
 /// Read header fields from a reader.
 /// Stops at the first blank line (end of headers).
-pub fn read_header<R: Read>(
-    reader: R,
-) -> std::io::Result<(FieldList, Vec<u8>)> {
+pub fn read_header<R>(reader: R) -> io::Result<(FieldList, Vec<u8>)>
+where
+    R: Read,
+{
     let mut reader = BufReader::new(reader);
     let mut fields = FieldList::new();
     let mut buf = Vec::new();

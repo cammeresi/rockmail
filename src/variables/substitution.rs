@@ -1,6 +1,8 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::env;
+use std::iter::Peekable;
+use std::str::Chars;
 
 #[cfg(test)]
 mod tests;
@@ -79,88 +81,64 @@ impl SubstCtx {
     }
 }
 
-pub fn subst(s: &str, ctx: &SubstCtx, env: &Environment) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(&next) = chars.peek()
-                && (next == '$'
-                    || next == '\\'
-                    || next == '"'
-                    || next == '\''
-                    || next == '`')
-            {
-                out.push(chars.next().unwrap());
-                continue;
-            }
-            out.push(c);
-        } else if c == '$' {
-            expand_var(&mut chars, ctx, env, &mut out);
-        } else {
-            out.push(c);
-        }
-    }
-    out
+fn is_name_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_'
 }
 
-fn expand_var(
-    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx,
-    env: &Environment, out: &mut String,
-) {
-    match chars.peek() {
-        None => out.push('$'),
-        Some(&'{') => {
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+fn collect_name(chars: &mut Peekable<Chars>) -> String {
+    let mut name = String::new();
+    while let Some(&c) = chars.peek() {
+        if is_name_char(c) {
+            name.push(c);
             chars.next();
-            expand_braced(chars, ctx, env, out);
+        } else {
+            break;
         }
-        Some(&'$') => {
-            chars.next();
-            out.push_str(&ctx.pid.to_string());
+    }
+    name
+}
+
+fn collect_to_brace(chars: &mut Peekable<Chars>) -> String {
+    let mut s = String::new();
+    let mut depth = 1;
+    for c in chars.by_ref() {
+        if c == '{' {
+            depth += 1;
+            s.push(c);
+        } else if c == '}' {
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+            s.push(c);
+        } else {
+            s.push(c);
         }
-        Some(&'?') => {
-            chars.next();
-            out.push_str(&ctx.last_exit.to_string());
-        }
-        Some(&'#') => {
-            chars.next();
-            out.push_str(&ctx.argv.len().to_string());
-        }
-        Some(&'_') => {
-            chars.next();
-            out.push_str(&ctx.rcfile);
-        }
-        Some(&'-') => {
-            chars.next();
-            out.push_str(&ctx.lastfolder);
-        }
-        Some(&'=') => {
-            chars.next();
-            out.push_str(&ctx.last_score.to_string());
-        }
-        Some(&c) if c.is_ascii_digit() => {
-            chars.next();
-            let idx = (c as usize) - ('0' as usize);
-            if idx == 0 {
-                // $0 is program name, not tracked here
-            } else if let Some(arg) = ctx.argv.get(idx - 1) {
-                out.push_str(arg);
+    }
+    s
+}
+
+fn skip_to_brace(chars: &mut Peekable<Chars>) {
+    let mut depth = 1;
+    for c in chars.by_ref() {
+        if c == '{' {
+            depth += 1;
+        } else if c == '}' {
+            depth -= 1;
+            if depth == 0 {
+                break;
             }
         }
-        Some(&c) if is_name_start(c) => {
-            let name = collect_name(chars);
-            if let Some(val) = env.get(&name) {
-                out.push_str(val);
-            }
-        }
-        Some(_) => out.push('$'),
     }
 }
 
 fn expand_braced(
-    chars: &mut std::iter::Peekable<std::str::Chars>, ctx: &SubstCtx,
-    env: &Environment, out: &mut String,
+    chars: &mut Peekable<Chars>, ctx: &SubstCtx, env: &Environment,
+    out: &mut String,
 ) {
     let name = collect_name(chars);
     if name.is_empty() {
@@ -217,59 +195,81 @@ fn expand_braced(
     }
 }
 
-fn is_name_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
-}
-
-fn is_name_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
-}
-
-fn collect_name(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
-    let mut name = String::new();
-    while let Some(&c) = chars.peek() {
-        if is_name_char(c) {
-            name.push(c);
+fn expand_var(
+    chars: &mut Peekable<Chars>, ctx: &SubstCtx, env: &Environment,
+    out: &mut String,
+) {
+    match chars.peek() {
+        None => out.push('$'),
+        Some(&'{') => {
             chars.next();
-        } else {
-            break;
+            expand_braced(chars, ctx, env, out);
         }
-    }
-    name
-}
-
-fn collect_to_brace(
-    chars: &mut std::iter::Peekable<std::str::Chars>,
-) -> String {
-    let mut s = String::new();
-    let mut depth = 1;
-    for c in chars.by_ref() {
-        if c == '{' {
-            depth += 1;
-            s.push(c);
-        } else if c == '}' {
-            depth -= 1;
-            if depth == 0 {
-                break;
-            }
-            s.push(c);
-        } else {
-            s.push(c);
+        Some(&'$') => {
+            chars.next();
+            out.push_str(&ctx.pid.to_string());
         }
-    }
-    s
-}
-
-fn skip_to_brace(chars: &mut std::iter::Peekable<std::str::Chars>) {
-    let mut depth = 1;
-    for c in chars.by_ref() {
-        if c == '{' {
-            depth += 1;
-        } else if c == '}' {
-            depth -= 1;
-            if depth == 0 {
-                break;
+        Some(&'?') => {
+            chars.next();
+            out.push_str(&ctx.last_exit.to_string());
+        }
+        Some(&'#') => {
+            chars.next();
+            out.push_str(&ctx.argv.len().to_string());
+        }
+        Some(&'_') => {
+            chars.next();
+            out.push_str(&ctx.rcfile);
+        }
+        Some(&'-') => {
+            chars.next();
+            out.push_str(&ctx.lastfolder);
+        }
+        Some(&'=') => {
+            chars.next();
+            out.push_str(&ctx.last_score.to_string());
+        }
+        Some(&c) if c.is_ascii_digit() => {
+            chars.next();
+            let idx = (c as usize) - ('0' as usize);
+            if idx == 0 {
+                // $0 is program name, not tracked here
+            } else if let Some(arg) = ctx.argv.get(idx - 1) {
+                out.push_str(arg);
             }
         }
+        Some(&c) if is_name_start(c) => {
+            let name = collect_name(chars);
+            if let Some(val) = env.get(&name) {
+                out.push_str(val);
+            }
+        }
+        Some(_) => out.push('$'),
     }
+}
+
+pub fn subst(s: &str, ctx: &SubstCtx, env: &Environment) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(&next) = chars.peek()
+                && (next == '$'
+                    || next == '\\'
+                    || next == '"'
+                    || next == '\''
+                    || next == '`')
+            {
+                out.push(chars.next().unwrap());
+                continue;
+            }
+            out.push(c);
+        } else if c == '$' {
+            expand_var(&mut chars, ctx, env, &mut out);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }

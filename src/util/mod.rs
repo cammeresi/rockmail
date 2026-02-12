@@ -1,10 +1,10 @@
+use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 mod error;
 pub mod signals;
 
 pub use error::*;
-
-use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const EX_OK: u8 = 0;
 pub const EX_USAGE: u8 = 64;

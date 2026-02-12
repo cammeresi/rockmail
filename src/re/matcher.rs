@@ -11,9 +11,10 @@
 //! - `^FROM_DAEMON`: macro for daemon senders
 //! - `^FROM_MAILER`: macro for mailer-daemon senders
 
-use regex::{Regex, RegexBuilder};
 use std::iter::Peekable;
 use std::str::Chars;
+
+use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
 #[cfg(test)]
@@ -67,6 +68,178 @@ pub struct MatchResult<'a> {
     pub matched: bool,
     /// Text captured after `\/` (for $MATCH variable).
     pub capture: Option<&'a str>,
+}
+
+fn expand_macros(pat: &str) -> String {
+    // Order matters: ^TO_ must be checked before ^TO
+    let macros = [
+        (TO_KEY, TO_SUBSTITUTE),
+        (TO2_KEY, TO2_SUBSTITUTE),
+        (FROMD_KEY, FROMD_SUBSTITUTE),
+        (FROMM_KEY, FROMM_SUBSTITUTE),
+    ];
+
+    let mut result = pat.to_string();
+    for (key, sub) in macros {
+        if let Some(pos) = result.find(key) {
+            result.replace_range(pos..pos + key.len(), sub);
+        }
+    }
+    result
+}
+
+/// Process a single char inside a `\/` capture region.
+/// Returns true if `^^` was seen at pattern end (signals anchor_end).
+fn push_char(
+    out: &mut String, c: char, chars: &mut Peekable<Chars>,
+    groups: &mut usize,
+) -> bool {
+    match c {
+        '\\' => match chars.peek() {
+            Some('<') | Some('>') => {
+                chars.next();
+                out.push_str(r"\b");
+            }
+            Some(&c2) => {
+                chars.next();
+                out.push('\\');
+                out.push(c2);
+            }
+            None => {
+                out.push_str("\\\\");
+            }
+        },
+        '(' => {
+            if chars.peek() != Some(&'?') {
+                *groups += 1;
+            }
+            out.push('(');
+        }
+        '^' if chars.peek() == Some(&'^') => {
+            chars.next();
+            // ^^ at end of pattern means anchor_end
+            if chars.peek().is_none() {
+                return true;
+            }
+        }
+        _ => {
+            out.push(c);
+        }
+    }
+    false
+}
+
+/// Handle backslash escapes during compilation.
+fn handle_escape(
+    chars: &mut Peekable<Chars>, out: &mut String, group_count: &mut usize,
+    anchor_end: &mut bool,
+) {
+    match chars.peek() {
+        Some('<') | Some('>') => {
+            chars.next();
+            out.push_str(r"\b");
+        }
+        Some('/') => {
+            chars.next();
+            *group_count += 1;
+            out.push('(');
+            while let Some(c2) = chars.next() {
+                if push_char(out, c2, chars, group_count) {
+                    *anchor_end = true;
+                }
+            }
+            out.push(')');
+        }
+        Some(&c2) => {
+            chars.next();
+            out.push('\\');
+            out.push(c2);
+        }
+        None => out.push_str("\\\\"),
+    }
+}
+
+fn compile(pat: &str) -> String {
+    // Capacity: worst case is \< or \> expanding to \b (same size),
+    // plus \A and \z anchors (4 bytes total)
+    let mut out = String::with_capacity(pat.len() + 4);
+    let mut chars = pat.chars().peekable();
+    let mut group_count = 0usize;
+    let mut anchor_start = false;
+    let mut anchor_end = false;
+    let mut at_start = true;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '^' if chars.peek() == Some(&'^') => {
+                chars.next();
+                if at_start {
+                    anchor_start = true;
+                }
+                if chars.peek().is_none() {
+                    anchor_end = true;
+                }
+            }
+            '\\' => handle_escape(
+                &mut chars,
+                &mut out,
+                &mut group_count,
+                &mut anchor_end,
+            ),
+            '(' => {
+                if chars.peek() != Some(&'?') {
+                    group_count += 1;
+                }
+                out.push('(');
+            }
+            _ => out.push(c),
+        }
+        at_start = false;
+    }
+
+    // Prepend/append anchors to compiled pattern
+    let mut result = String::with_capacity(out.len() + 4);
+    if anchor_start {
+        result.push_str(r"\A");
+    }
+    result.push_str(&out);
+    if anchor_end {
+        result.push_str(r"\z");
+    }
+    result
+}
+
+/// Compute capture group index for a pattern (for \/ extraction).
+fn compiled_capture_group(pat: &str) -> Option<usize> {
+    let mut chars = pat.chars().peekable();
+    let mut group_count = 0usize;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '^' if chars.peek() == Some(&'^') => {
+                chars.next();
+            }
+            '\\' => match chars.peek() {
+                Some('<') | Some('>') => {
+                    chars.next();
+                }
+                Some('/') => {
+                    chars.next();
+                    group_count += 1;
+                    return Some(group_count);
+                }
+                Some(_) => {
+                    chars.next();
+                }
+                None => {}
+            },
+            '(' if chars.peek() != Some(&'?') => {
+                group_count += 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Compiled procmail regex matcher.
@@ -135,176 +308,4 @@ impl Matcher {
     pub fn count_matches(&self, text: &str) -> usize {
         self.regex.find_iter(text).count()
     }
-}
-
-fn expand_macros(pat: &str) -> String {
-    // Order matters: ^TO_ must be checked before ^TO
-    let macros = [
-        (TO_KEY, TO_SUBSTITUTE),
-        (TO2_KEY, TO2_SUBSTITUTE),
-        (FROMD_KEY, FROMD_SUBSTITUTE),
-        (FROMM_KEY, FROMM_SUBSTITUTE),
-    ];
-
-    let mut result = pat.to_string();
-    for (key, sub) in macros {
-        if let Some(pos) = result.find(key) {
-            result.replace_range(pos..pos + key.len(), sub);
-        }
-    }
-    result
-}
-
-fn compile(pat: &str) -> String {
-    // Capacity: worst case is \< or \> expanding to \b (same size),
-    // plus \A and \z anchors (4 bytes total)
-    let mut out = String::with_capacity(pat.len() + 4);
-    let mut chars = pat.chars().peekable();
-    let mut group_count = 0usize;
-    let mut anchor_start = false;
-    let mut anchor_end = false;
-    let mut at_start = true;
-
-    while let Some(c) = chars.next() {
-        match c {
-            '^' if chars.peek() == Some(&'^') => {
-                chars.next();
-                if at_start {
-                    anchor_start = true;
-                }
-                if chars.peek().is_none() {
-                    anchor_end = true;
-                }
-            }
-            '\\' => handle_escape(
-                &mut chars,
-                &mut out,
-                &mut group_count,
-                &mut anchor_end,
-            ),
-            '(' => {
-                if chars.peek() != Some(&'?') {
-                    group_count += 1;
-                }
-                out.push('(');
-            }
-            _ => out.push(c),
-        }
-        at_start = false;
-    }
-
-    // Prepend/append anchors to compiled pattern
-    let mut result = String::with_capacity(out.len() + 4);
-    if anchor_start {
-        result.push_str(r"\A");
-    }
-    result.push_str(&out);
-    if anchor_end {
-        result.push_str(r"\z");
-    }
-    result
-}
-
-/// Handle backslash escapes during compilation.
-fn handle_escape(
-    chars: &mut Peekable<Chars>, out: &mut String, group_count: &mut usize,
-    anchor_end: &mut bool,
-) {
-    match chars.peek() {
-        Some('<') | Some('>') => {
-            chars.next();
-            out.push_str(r"\b");
-        }
-        Some('/') => {
-            chars.next();
-            *group_count += 1;
-            out.push('(');
-            while let Some(c2) = chars.next() {
-                if push_char(out, c2, chars, group_count) {
-                    *anchor_end = true;
-                }
-            }
-            out.push(')');
-        }
-        Some(&c2) => {
-            chars.next();
-            out.push('\\');
-            out.push(c2);
-        }
-        None => out.push_str("\\\\"),
-    }
-}
-
-/// Compute capture group index for a pattern (for \/ extraction).
-fn compiled_capture_group(pat: &str) -> Option<usize> {
-    let mut chars = pat.chars().peekable();
-    let mut group_count = 0usize;
-
-    while let Some(c) = chars.next() {
-        match c {
-            '^' if chars.peek() == Some(&'^') => {
-                chars.next();
-            }
-            '\\' => match chars.peek() {
-                Some('<') | Some('>') => {
-                    chars.next();
-                }
-                Some('/') => {
-                    chars.next();
-                    group_count += 1;
-                    return Some(group_count);
-                }
-                Some(_) => {
-                    chars.next();
-                }
-                None => {}
-            },
-            '(' if chars.peek() != Some(&'?') => {
-                group_count += 1;
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Process a single char inside a `\/` capture region.
-/// Returns true if `^^` was seen at pattern end (signals anchor_end).
-fn push_char(
-    out: &mut String, c: char,
-    chars: &mut std::iter::Peekable<std::str::Chars>, groups: &mut usize,
-) -> bool {
-    match c {
-        '\\' => match chars.peek() {
-            Some('<') | Some('>') => {
-                chars.next();
-                out.push_str(r"\b");
-            }
-            Some(&c2) => {
-                chars.next();
-                out.push('\\');
-                out.push(c2);
-            }
-            None => {
-                out.push_str("\\\\");
-            }
-        },
-        '(' => {
-            if chars.peek() != Some(&'?') {
-                *groups += 1;
-            }
-            out.push('(');
-        }
-        '^' if chars.peek() == Some(&'^') => {
-            chars.next();
-            // ^^ at end of pattern means anchor_end
-            if chars.peek().is_none() {
-                return true;
-            }
-        }
-        _ => {
-            out.push(c);
-        }
-    }
-    false
 }

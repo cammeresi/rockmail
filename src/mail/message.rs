@@ -1,4 +1,154 @@
 use std::borrow::Cow;
+use std::str;
+
+#[cfg(test)]
+mod tests;
+
+/// Normalize CRLF to LF.
+fn normalize_crlf(data: &[u8]) -> Vec<u8> {
+    if !data.contains(&b'\r') {
+        return data.to_vec();
+    }
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == b'\r' && i + 1 < data.len() && data[i + 1] == b'\n' {
+            out.push(b'\n');
+            i += 2;
+        } else {
+            out.push(data[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Skip leading blank lines.
+fn skip_leading_newlines(data: &[u8]) -> usize {
+    data.iter().take_while(|&&b| b == b'\n').count()
+}
+
+/// Find header/body boundary.
+/// Returns (header_end, body_start).
+/// header_end is position after last header byte (before blank line separator).
+/// body_start is position of first body byte (after blank line separator).
+fn find_boundary(data: &[u8]) -> (usize, usize) {
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == b'\n' {
+            // Check for blank line
+            if i + 1 < data.len() && data[i + 1] == b'\n' {
+                // header ends at i+1 (include the first \n)
+                // body starts at i+2 (after the second \n)
+                return (i + 1, i + 2);
+            }
+        }
+        i += 1;
+    }
+    // No blank line found - everything is header, no body
+    (data.len(), data.len())
+}
+
+fn unfold_header(data: &[u8]) -> Cow<'_, str> {
+    // Fast path: no newlines means no unfolding needed
+    if !data.contains(&b'\n') {
+        return String::from_utf8_lossy(data);
+    }
+
+    let mut result = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == b'\n' && i + 1 < data.len() {
+            // Replace newline + whitespace with single space
+            result.push(b' ');
+            i += 1;
+            // Skip leading whitespace on continuation line
+            while i < data.len() && (data[i] == b' ' || data[i] == b'\t') {
+                i += 1;
+            }
+        } else {
+            result.push(data[i]);
+            i += 1;
+        }
+    }
+
+    Cow::Owned(String::from_utf8_lossy(&result).into_owned())
+}
+
+fn parse_header_field(field: &[u8]) -> Option<(Cow<'_, str>, Cow<'_, str>)> {
+    let colon = field.iter().position(|&b| b == b':')?;
+    let name = &field[..colon];
+    let mut value = &field[colon + 1..];
+
+    // Trim leading whitespace after colon (RFC 5322 OWS)
+    while !value.is_empty() && (value[0] == b' ' || value[0] == b'\t') {
+        value = &value[1..];
+    }
+
+    // Trim trailing newline
+    if value.ends_with(b"\n") {
+        value = &value[..value.len() - 1];
+    }
+
+    // Unfold continuation lines: replace \n followed by whitespace with single space
+    let name = String::from_utf8_lossy(name);
+    let value = unfold_header(value);
+
+    Some((name, value))
+}
+
+/// Iterates over headers, handling continuation lines.
+pub struct HeaderIter<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Iterator for HeaderIter<'a> {
+    type Item = (Cow<'a, str>, Cow<'a, str>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.pos >= self.data.len() {
+                return None;
+            }
+
+            let start = self.pos;
+            let mut end = start;
+
+            // Find end of header field (including continuation lines)
+            loop {
+                // Find end of current line
+                while end < self.data.len() && self.data[end] != b'\n' {
+                    end += 1;
+                }
+                // Skip the newline
+                if end < self.data.len() {
+                    end += 1;
+                }
+                // Check for continuation (next line starts with space/tab)
+                if end < self.data.len()
+                    && (self.data[end] == b' ' || self.data[end] == b'\t')
+                {
+                    continue;
+                }
+                break;
+            }
+
+            self.pos = end;
+            let field = &self.data[start..end];
+
+            // Skip From_ line (mbox envelope, not a header)
+            if field.starts_with(b"From ") {
+                continue;
+            }
+
+            // Skip malformed headers (no colon), continue to next
+            if let Some(parsed) = parse_header_field(field) {
+                return Some(parsed);
+            }
+        }
+    }
+}
 
 /// An email message parsed into headers and body.
 ///
@@ -145,7 +295,7 @@ impl Message {
         // Skip "From " prefix, take until whitespace
         let rest = &line[5..];
         let end = rest.iter().position(|&b| b == b' ').unwrap_or(rest.len());
-        std::str::from_utf8(&rest[..end]).ok()
+        str::from_utf8(&rest[..end]).ok()
     }
 
     /// Set or replace the From_ line with a new sender.
@@ -190,152 +340,3 @@ impl Message {
         }
     }
 }
-
-/// Iterates over headers, handling continuation lines.
-pub struct HeaderIter<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Iterator for HeaderIter<'a> {
-    type Item = (Cow<'a, str>, Cow<'a, str>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.pos >= self.data.len() {
-                return None;
-            }
-
-            let start = self.pos;
-            let mut end = start;
-
-            // Find end of header field (including continuation lines)
-            loop {
-                // Find end of current line
-                while end < self.data.len() && self.data[end] != b'\n' {
-                    end += 1;
-                }
-                // Skip the newline
-                if end < self.data.len() {
-                    end += 1;
-                }
-                // Check for continuation (next line starts with space/tab)
-                if end < self.data.len()
-                    && (self.data[end] == b' ' || self.data[end] == b'\t')
-                {
-                    continue;
-                }
-                break;
-            }
-
-            self.pos = end;
-            let field = &self.data[start..end];
-
-            // Skip From_ line (mbox envelope, not a header)
-            if field.starts_with(b"From ") {
-                continue;
-            }
-
-            // Skip malformed headers (no colon), continue to next
-            if let Some(parsed) = parse_header_field(field) {
-                return Some(parsed);
-            }
-        }
-    }
-}
-
-fn parse_header_field(field: &[u8]) -> Option<(Cow<'_, str>, Cow<'_, str>)> {
-    let colon = field.iter().position(|&b| b == b':')?;
-    let name = &field[..colon];
-    let mut value = &field[colon + 1..];
-
-    // Trim leading whitespace after colon (RFC 5322 OWS)
-    while !value.is_empty() && (value[0] == b' ' || value[0] == b'\t') {
-        value = &value[1..];
-    }
-
-    // Trim trailing newline
-    if value.ends_with(b"\n") {
-        value = &value[..value.len() - 1];
-    }
-
-    // Unfold continuation lines: replace \n followed by whitespace with single space
-    let name = String::from_utf8_lossy(name);
-    let value = unfold_header(value);
-
-    Some((name, value))
-}
-
-fn unfold_header(data: &[u8]) -> Cow<'_, str> {
-    // Fast path: no newlines means no unfolding needed
-    if !data.contains(&b'\n') {
-        return String::from_utf8_lossy(data);
-    }
-
-    let mut result = Vec::with_capacity(data.len());
-    let mut i = 0;
-    while i < data.len() {
-        if data[i] == b'\n' && i + 1 < data.len() {
-            // Replace newline + whitespace with single space
-            result.push(b' ');
-            i += 1;
-            // Skip leading whitespace on continuation line
-            while i < data.len() && (data[i] == b' ' || data[i] == b'\t') {
-                i += 1;
-            }
-        } else {
-            result.push(data[i]);
-            i += 1;
-        }
-    }
-
-    Cow::Owned(String::from_utf8_lossy(&result).into_owned())
-}
-
-/// Normalize CRLF to LF.
-fn normalize_crlf(data: &[u8]) -> Vec<u8> {
-    if !data.contains(&b'\r') {
-        return data.to_vec();
-    }
-    let mut out = Vec::with_capacity(data.len());
-    let mut i = 0;
-    while i < data.len() {
-        if data[i] == b'\r' && i + 1 < data.len() && data[i + 1] == b'\n' {
-            out.push(b'\n');
-            i += 2;
-        } else {
-            out.push(data[i]);
-            i += 1;
-        }
-    }
-    out
-}
-
-/// Skip leading blank lines.
-fn skip_leading_newlines(data: &[u8]) -> usize {
-    data.iter().take_while(|&&b| b == b'\n').count()
-}
-
-/// Find header/body boundary.
-/// Returns (header_end, body_start).
-/// header_end is position after last header byte (before blank line separator).
-/// body_start is position of first body byte (after blank line separator).
-fn find_boundary(data: &[u8]) -> (usize, usize) {
-    let mut i = 0;
-    while i < data.len() {
-        if data[i] == b'\n' {
-            // Check for blank line
-            if i + 1 < data.len() && data[i + 1] == b'\n' {
-                // header ends at i+1 (include the first \n)
-                // body starts at i+2 (after the second \n)
-                return (i + 1, i + 2);
-            }
-        }
-        i += 1;
-    }
-    // No blank line found - everything is header, no body
-    (data.len(), data.len())
-}
-
-#[cfg(test)]
-mod tests;
