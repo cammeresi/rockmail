@@ -321,8 +321,11 @@ where
             break;
         }
 
-        // Check if this looks like a header field
-        if let Some(name_len) = find_field_name_end(&buf) {
+        // Check if this looks like a header field.
+        // From_ only counts as a header if it's the very first field.
+        if let Some(name_len) = find_field_name_end(&buf)
+            && (!buf.starts_with(b"From ") || fields.is_empty())
+        {
             // Read continuation lines
             loop {
                 let mut peek = [0u8; 1];

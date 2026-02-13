@@ -536,3 +536,216 @@ gold!(
     &["-l", "/inbox"],
     b"From user@host Mon Jan  1 00:00:00 2024\nFrom: user@host\nSubject: Test message\n\nBody here\n"
 );
+
+// Sender scoring: generate From_ lines and reply To: headers with various
+// header combinations, comparing against procmail as oracle.
+
+fn norm_from_and_msgid(data: &[u8]) -> Vec<u8> {
+    normalize_message_id(&normalize_from_line(data))
+}
+
+fn make_msg(headers: &[(&str, &str)]) -> Vec<u8> {
+    let mut msg = Vec::new();
+    for &(name, val) in headers {
+        if name == "From " {
+            msg.extend_from_slice(
+                format!("From {} Mon Jan  1 00:00:00 2024\n", val).as_bytes(),
+            );
+        } else {
+            msg.extend_from_slice(format!("{}: {}\n", name, val).as_bytes());
+        }
+    }
+    msg.extend_from_slice(b"\nBody\n");
+    msg
+}
+
+// From_ line generation with various sender headers
+#[test]
+fn sender_from_only() {
+    let msg = make_msg(&[("From", "user@example.com")]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_return_path_and_from() {
+    let msg = make_msg(&[
+        ("Return-Path", "<bounce@example.com>"),
+        ("From", "user@example.com"),
+    ]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_reply_to_from_sender() {
+    let msg = make_msg(&[
+        ("Reply-To", "reply@example.com"),
+        ("From", "from@example.com"),
+        ("Sender", "sender@example.com"),
+    ]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_resent_headers() {
+    let msg = make_msg(&[
+        ("Resent-From", "resent@example.com"),
+        ("From", "from@example.com"),
+    ]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_path_only() {
+    let msg = make_msg(&[("Path", "news!gateway!user")]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_errors_to_only() {
+    let msg = make_msg(&[("Errors-To", "errors@example.com")]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_empty_return_path() {
+    let msg = make_msg(&[("Return-Path", "<>"), ("From", "user@example.com")]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_bare_user_penalty() {
+    // bare user in Reply-To should lose to good address in From
+    let msg = make_msg(&[
+        ("Reply-To", "bareuser"),
+        ("From", "good@host.example.com"),
+    ]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_uucp_penalty() {
+    let msg = make_msg(&[
+        ("Reply-To", "host.UUCP!user"),
+        ("From", "good@host.example.com"),
+    ]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_no_dot_penalty() {
+    let msg = make_msg(&[
+        ("Reply-To", "user@localhost"),
+        ("From", "good@host.example.com"),
+    ]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_from_line_first() {
+    let msg = make_msg(&[
+        ("From ", "envelope@example.com"),
+        ("From", "header@example.com"),
+    ]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_from_line_not_first() {
+    // From_ not first field → should be ignored for sender scoring
+    let msg = make_msg(&[
+        ("From", "header@example.com"),
+        ("From ", "envelope@example.com"),
+    ]);
+    run_once(&["-f"], &msg).assert_eq();
+}
+
+// Reply mode (-r -t) sender selection
+#[test]
+fn reply_sender_trusted_reply_to() {
+    let msg = make_msg(&[
+        ("Reply-To", "reply@example.com"),
+        ("From", "from@example.com"),
+        ("Subject", "Test"),
+    ]);
+    run_once(&["-r", "-t"], &msg).assert_eq_with(normalize_message_id);
+}
+
+#[test]
+fn reply_sender_trusted_from() {
+    let msg = make_msg(&[
+        ("From", "from@example.com"),
+        ("Sender", "sender@example.com"),
+        ("Subject", "Test"),
+    ]);
+    run_once(&["-r", "-t"], &msg).assert_eq_with(normalize_message_id);
+}
+
+#[test]
+fn reply_sender_untrusted() {
+    let msg = make_msg(&[
+        ("Return-Path", "<bounce@example.com>"),
+        ("Reply-To", "reply@example.com"),
+        ("From", "from@example.com"),
+        ("Subject", "Test"),
+    ]);
+    run_once(&["-r"], &msg).assert_eq_with(normalize_message_id);
+}
+
+#[test]
+fn reply_sender_untrusted_from_line() {
+    let msg = make_msg(&[
+        ("From ", "envelope@example.com"),
+        ("Reply-To", "reply@example.com"),
+        ("From", "from@example.com"),
+        ("Subject", "Test"),
+    ]);
+    run_once(&["-r"], &msg).assert_eq_with(norm_from_and_msgid);
+}
+
+// Angle bracket and RFC 822 address extraction
+#[test]
+fn sender_angle_brackets() {
+    let msg = make_msg(&[("From", "\"John Doe\" <john@example.com>")]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+#[test]
+fn sender_comment_in_from() {
+    let msg = make_msg(&[("From", "(John Doe) john@example.com")]);
+    run_once(&[], &msg).assert_eq_with(normalize_from_line);
+}
+
+// Parametric: try many header combos as From_ line generation
+#[test]
+fn sender_matrix() {
+    let combos: &[&[(&str, &str)]] = &[
+        &[("From", "a@b.com")],
+        &[("Sender", "a@b.com")],
+        &[("Return-Path", "<a@b.com>")],
+        &[("From", "a@b.com"), ("Sender", "b@c.com")],
+        &[("Return-Path", "<a@b.com>"), ("From", "b@c.com")],
+        &[
+            ("Reply-To", "r@b.com"),
+            ("From", "f@b.com"),
+            ("Sender", "s@b.com"),
+        ],
+        &[("Errors-To", "e@b.com"), ("From", "f@b.com")],
+        &[("Return-Receipt-To", "rr@b.com"), ("From", "f@b.com")],
+        &[("Return-Path", "<>"), ("From", "f@b.com")],
+        &[("Path", "a!b!c"), ("From", "f@b.com")],
+        &[("Reply-To", "bare"), ("From", "good@host.example.com")],
+    ];
+    for (i, headers) in combos.iter().enumerate() {
+        let msg = make_msg(headers);
+        let r = run_once(&[], &msg);
+        let rust = normalize_from_line(&r.rust_out);
+        let proc = normalize_from_line(&r.proc_out);
+        assert_eq!(
+            rust,
+            proc,
+            "combo {i} ({headers:?}):\n  rust: {}\n  proc: {}",
+            String::from_utf8_lossy(&rust),
+            String::from_utf8_lossy(&proc),
+        );
+    }
+}

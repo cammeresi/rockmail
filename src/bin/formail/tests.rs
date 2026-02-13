@@ -59,18 +59,16 @@ fn extract_address_bare() {
 }
 
 #[test]
-fn extract_address_malformed() {
-    // '>' before '<' should not panic, should find the last '<'
+fn extract_address_rfc822() {
+    // No closing bracket → falls back to first word
+    assert_eq!(extract_address("John <broken"), "John");
+    // Comments are skipped
+    assert_eq!(extract_address("(comment) user@host.com"), "user@host.com");
+    // Angle brackets preferred
     assert_eq!(
         extract_address("John > Smith <user@host.com>"),
         "user@host.com"
     );
-    // No closing bracket
-    assert_eq!(extract_address("John <broken"), "John");
-    // Empty angle brackets
-    assert_eq!(extract_address("John <>"), "");
-    // Nested brackets - takes content after last '<'
-    assert_eq!(extract_address("<outer<inner@host>>"), "inner@host");
 }
 
 #[test]
@@ -151,31 +149,212 @@ fn reply_subject_always_adds_re() {
 }
 
 #[test]
-fn find_reply_trusted() {
+fn sender_reply_mode() {
     let mut fields = FieldList::new();
     fields.push(Field::from_parts(b"Reply-To:", b"reply@example.com"));
     fields.push(Field::from_parts(b"From:", b"from@example.com"));
 
-    let args = Args {
-        trust: true,
-        ..Args::default()
-    };
-    let addr = find_reply_address(&args, &fields).unwrap();
+    let addr = get_sender(&fields, SenderMode::Reply).unwrap();
     assert_eq!(addr, "reply@example.com");
 }
 
 #[test]
-fn find_reply_untrusted() {
+fn sender_envelope_mode() {
     let mut fields = FieldList::new();
     fields.push(Field::from_parts(b"Return-Path:", b"<bounce@example.com>"));
     fields.push(Field::from_parts(b"Reply-To:", b"reply@example.com"));
 
-    let args = Args {
-        trust: false,
-        ..Args::default()
-    };
-    let addr = find_reply_address(&args, &fields).unwrap();
+    let addr = get_sender(&fields, SenderMode::Envelope).unwrap();
     assert_eq!(addr, "bounce@example.com");
+}
+
+#[test]
+fn extract_address_nested_comment() {
+    assert_eq!(
+        extract_address("(outer (inner)) user@host.com"),
+        "user@host.com"
+    );
+}
+
+#[test]
+fn extract_address_escaped_in_comment() {
+    // Backslash-escaped paren inside comment
+    assert_eq!(
+        extract_address("(comment \\) still comment) addr@x.com"),
+        "addr@x.com"
+    );
+}
+
+#[test]
+fn extract_address_quoted_string() {
+    assert_eq!(
+        extract_address("\"John Doe\"@example.com rest"),
+        "\"John Doe\"@example.com"
+    );
+}
+
+#[test]
+fn extract_address_only_comments() {
+    assert_eq!(extract_address("(nothing here)"), "");
+}
+
+#[test]
+fn extract_address_empty() {
+    assert_eq!(extract_address(""), "");
+    assert_eq!(extract_address("   "), "");
+}
+
+#[test]
+fn penalty_good_address() {
+    assert_eq!(addr_penalty("user@host.example.com"), 0);
+}
+
+#[test]
+fn penalty_bare_user() {
+    // No @, !, or /
+    assert_eq!(addr_penalty("justuser"), 12 * 4);
+}
+
+#[test]
+fn penalty_uucp() {
+    assert_eq!(addr_penalty("host.UUCP!user"), 12 * 3);
+}
+
+#[test]
+fn penalty_no_dot() {
+    // Has @ but no dot
+    assert_eq!(addr_penalty("user@host"), 12 * 2);
+}
+
+#[test]
+fn penalty_bangpath() {
+    assert_eq!(addr_penalty("host!user"), 12);
+}
+
+#[test]
+fn from_line_simple_at() {
+    let (addr, pen) = from_line_addr("user@host.com Mon Jan 1 00:00:00 2000");
+    assert_eq!(addr, "user@host.com");
+    assert_eq!(pen, 0);
+}
+
+#[test]
+fn from_line_uucp_bangpath() {
+    let raw = "user Mon Jan 1 00:00:00 2000 remote from gateway";
+    let (addr, pen) = from_line_addr(raw);
+    assert_eq!(addr, "gateway!user");
+    assert_eq!(pen, 0);
+}
+
+#[test]
+fn from_line_multi_hop() {
+    let raw = "localuser Mon Jan  1 00:00:00 2000 remote from hop1\n\
+               >From localuser Mon Jan  1 00:00:00 2000 remote from hop2";
+    let (addr, pen) = from_line_addr(raw);
+    // Multi-line → penalty 2; hops reconstructed
+    assert_eq!(pen, 2);
+    assert!(addr.contains("hop1!"));
+    assert!(addr.contains("hop2!"));
+    assert!(addr.ends_with("localuser"));
+}
+
+#[test]
+fn from_line_forwarded_by() {
+    let raw = "user Mon Jan  1 00:00:00 2000 forwarded by relay";
+    let (addr, _) = from_line_addr(raw);
+    assert_eq!(addr, "relay!user");
+}
+
+#[test]
+fn from_line_empty() {
+    let (addr, pen) = from_line_addr("");
+    assert_eq!(addr, "");
+    assert_eq!(pen, 0);
+}
+
+#[test]
+fn sender_prefers_higher_weight() {
+    // Return-Path (idx=9) beats Path (idx=6) in envelope mode
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(b"Path:", b"news!host"));
+    fields.push(Field::from_parts(b"Return-Path:", b"<bounce@example.com>"));
+
+    let addr = get_sender(&fields, SenderMode::Envelope).unwrap();
+    assert_eq!(addr, "bounce@example.com");
+}
+
+#[test]
+fn sender_quality_can_override_position() {
+    // From: (idx=1) with good address should beat Reply-To: (idx=0) with bare
+    // user, because the penalty for bare user (48) exceeds the index difference
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(b"Reply-To:", b"bareuser"));
+    fields.push(Field::from_parts(b"From:", b"good@host.example.com"));
+
+    let addr = get_sender(&fields, SenderMode::Envelope).unwrap();
+    assert_eq!(addr, "good@host.example.com");
+}
+
+#[test]
+fn sender_empty_return_path() {
+    // Empty Return-Path → "<>" with override weight
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(b"Return-Path:", b"<>"));
+    fields.push(Field::from_parts(b"From:", b"user@example.com"));
+
+    let addr = get_sender(&fields, SenderMode::Envelope).unwrap();
+    assert_eq!(addr, "<>");
+}
+
+#[test]
+fn sender_from_line_only_if_first() {
+    // From_ not first → ignored
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(b"From:", b"header@example.com"));
+    fields.push(
+        Field::new(
+            b"From envelope@example.com Mon Jan  1 00:00:00 2000\n".to_vec(),
+        )
+        .unwrap(),
+    );
+
+    let addr = get_sender(&fields, SenderMode::Envelope).unwrap();
+    assert_eq!(addr, "header@example.com");
+}
+
+#[test]
+fn sender_from_line_when_first() {
+    let mut fields = FieldList::new();
+    fields.push(
+        Field::new(
+            b"From envelope@example.com Mon Jan  1 00:00:00 2000\n".to_vec(),
+        )
+        .unwrap(),
+    );
+    fields.push(Field::from_parts(b"Sender:", b"other@example.com"));
+
+    // From_ (idx=10) beats Sender (idx=2) in envelope mode
+    let addr = get_sender(&fields, SenderMode::Envelope).unwrap();
+    assert_eq!(addr, "envelope@example.com");
+}
+
+#[test]
+fn sender_ignores_unrelated_headers() {
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(b"Subject:", b"hello"));
+    fields.push(Field::from_parts(b"Date:", b"Mon, 1 Jan 2000"));
+    assert!(get_sender(&fields, SenderMode::Envelope).is_none());
+}
+
+#[test]
+fn sender_reply_weights() {
+    // In reply mode, Reply-To (wrepl=8) beats Return-Path (wrepl=5)
+    let mut fields = FieldList::new();
+    fields.push(Field::from_parts(b"Return-Path:", b"<bounce@example.com>"));
+    fields.push(Field::from_parts(b"Reply-To:", b"reply@example.com"));
+
+    let addr = get_sender(&fields, SenderMode::Reply).unwrap();
+    assert_eq!(addr, "reply@example.com");
 }
 
 #[test]
@@ -227,10 +406,10 @@ fn duplicate_cache_circular_buffer() {
 fn non_utf8_header_log_summary() {
     // ISO-8859-1 subject with accented chars
     let mut fields = FieldList::new();
-    fields.push(Field::from_parts(
-        b"From ",
-        b"test@example.com Mon Jan 1 00:00:00 2000",
-    ));
+    fields.push(
+        Field::new(b"From test@example.com Mon Jan 1 00:00:00 2000\n".to_vec())
+            .unwrap(),
+    );
     fields.push(Field::from_parts(b"Subject:", b"Caf\xe9 \xe0 Paris"));
 
     let mut out = Vec::new();

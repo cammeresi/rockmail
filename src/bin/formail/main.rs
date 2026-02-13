@@ -317,13 +317,269 @@ fn is_header_field(line: &[u8]) -> bool {
     false
 }
 
+// Sender scoring table matching procmail's sest[] (formail.c:62-74).
+// Array index = envelope weight; wrepl/wrrepl = reply weights.
+struct SenderField {
+    name: &'static [u8],
+    wrepl: i32,
+    #[allow(dead_code)] // TODO: used when Resent- reply mode is added
+    wrrepl: i32,
+}
+
+const SEST: &[SenderField] = &[
+    SenderField {
+        name: b"Reply-To:",
+        wrepl: 8,
+        wrrepl: 7,
+    },
+    SenderField {
+        name: b"From:",
+        wrepl: 7,
+        wrrepl: 6,
+    },
+    SenderField {
+        name: b"Sender:",
+        wrepl: 6,
+        wrrepl: 5,
+    },
+    SenderField {
+        name: b"Resent-Reply-To:",
+        wrepl: 0,
+        wrrepl: 10,
+    },
+    SenderField {
+        name: b"Resent-From:",
+        wrepl: 0,
+        wrrepl: 9,
+    },
+    SenderField {
+        name: b"Resent-Sender:",
+        wrepl: 0,
+        wrrepl: 8,
+    },
+    SenderField {
+        name: b"Path:",
+        wrepl: 1,
+        wrrepl: 0,
+    },
+    SenderField {
+        name: b"Return-Receipt-To:",
+        wrepl: 2,
+        wrrepl: 1,
+    },
+    SenderField {
+        name: b"Errors-To:",
+        wrepl: 3,
+        wrrepl: 2,
+    },
+    SenderField {
+        name: b"Return-Path:",
+        wrepl: 5,
+        wrrepl: 4,
+    },
+    SenderField {
+        name: b"From ",
+        wrepl: 4,
+        wrrepl: 3,
+    },
+];
+
+#[derive(Clone, Copy)]
+enum SenderMode {
+    Envelope,
+    Reply,
+}
+
+/// Extract an RFC 822 address from a header value.
+/// Prefers `<addr>` angle-bracket form, skips comments `(...)` and
+/// quoted strings, falls back to first non-comment word.
 fn extract_address(s: &str) -> &str {
-    if let Some(start) = s.rfind('<')
-        && let Some(end) = s[start..].find('>')
+    let s = s.trim();
+    // Prefer angle-bracket address
+    if let Some(lt) = s.find('<')
+        && let Some(gt) = s[lt..].find('>')
     {
-        return &s[start + 1..start + end];
+        return &s[lt + 1..lt + gt];
     }
-    s.split_whitespace().next().unwrap_or("")
+    // Skip RFC 822 comments and quoted strings, return first word
+    let mut i = 0;
+    let b = s.as_bytes();
+    while i < b.len() {
+        match b[i] {
+            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+            b'(' => {
+                let mut depth = 1;
+                i += 1;
+                while i < b.len() && depth > 0 {
+                    match b[i] {
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        b'\\' => i += 1,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
+            _ => {
+                let start = i;
+                while i < b.len()
+                    && !matches!(b[i], b' ' | b'\t' | b'\n' | b'\r')
+                {
+                    if b[i] == b'"' {
+                        i += 1;
+                        while i < b.len() && b[i] != b'"' {
+                            if b[i] == b'\\' {
+                                i += 1;
+                            }
+                            i += 1;
+                        }
+                        if i < b.len() {
+                            i += 1;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+                return &s[start..i];
+            }
+        }
+    }
+    ""
+}
+
+/// Address quality penalty (procmail formail.c:282-289).
+/// Higher penalty = worse address. Multiplier = SEST.len() + 1 = 12.
+fn addr_penalty(addr: &str) -> i32 {
+    const MUL: i32 = (SEST.len() + 1) as i32;
+    if !addr.contains('@') && !addr.contains('!') && !addr.contains('/') {
+        MUL * 4
+    } else if addr.contains(".UUCP") {
+        MUL * 3
+    } else if addr.contains('@') && !addr.contains('.') {
+        MUL * 2
+    } else if addr.contains('!') {
+        MUL
+    } else {
+        0
+    }
+}
+
+/// Extract address from a From_ line with UUCP bang-path reconstruction.
+fn from_line_addr(raw: &str) -> (String, i32) {
+    let mut penalty = 0;
+    if raw.contains('\n') {
+        penalty = 2;
+    }
+    // Skip to last UUCP ">From" line
+    let mut addr_line = raw;
+    for part in raw.split('\n') {
+        if part.starts_with("From ") || part.starts_with(">From ") {
+            addr_line = part;
+        }
+    }
+    // Extract first word after "From " or ">From "
+    let rest = addr_line
+        .strip_prefix(">From ")
+        .or_else(|| addr_line.strip_prefix("From "))
+        .unwrap_or(addr_line);
+    let user = rest.split_whitespace().next().unwrap_or("");
+    if user.is_empty() {
+        return (String::new(), penalty);
+    }
+    if user.contains('@') {
+        return (user.to_string(), penalty);
+    }
+    // Reconstruct bang-path from "remote from"/"forwarded by" info
+    let mut path = String::new();
+    let mut search = raw;
+    loop {
+        let rf = search.find(" remote from ");
+        let fb = search.find(" forwarded by ");
+        let (pos, skip) = match (rf, fb) {
+            (Some(a), Some(b)) if b < a => (b, " forwarded by ".len()),
+            (Some(a), _) => (a, " remote from ".len()),
+            (None, Some(b)) => (b, " forwarded by ".len()),
+            (None, None) => break,
+        };
+        let hop = &search[pos + skip..];
+        for ch in hop.bytes() {
+            match ch {
+                0 | b'\n' => break,
+                _ => path.push(ch as char),
+            }
+        }
+        path.push('!');
+        search = &search[pos + skip..];
+        // advance past the word
+        if let Some(nl) = search.find('\n') {
+            search = &search[nl..];
+        } else {
+            break;
+        }
+    }
+    path.push_str(user);
+    (path, penalty)
+}
+
+/// Unified sender detection matching procmail's getsender().
+fn get_sender(fields: &FieldList, mode: SenderMode) -> Option<String> {
+    let first = fields.iter().next();
+    let mut best: Option<String> = None;
+    let mut best_w: i32 = i32::MIN;
+
+    for f in fields.iter() {
+        let (idx, is_from) = if f.is_from_line() {
+            (SEST.len() - 1, true)
+        } else {
+            let mut found = None;
+            for (i, sf) in SEST.iter().enumerate() {
+                if !sf.name.contains(&b' ') && f.name_matches(sf.name) {
+                    found = Some(i);
+                    break;
+                }
+            }
+            let Some(i) = found else { continue };
+            (i, false)
+        };
+        // From_ only counts if it's the first field
+        if is_from && !first.is_some_and(|ff| std::ptr::eq(ff, f)) {
+            continue;
+        }
+        let mut w = match mode {
+            SenderMode::Envelope => idx as i32,
+            SenderMode::Reply => SEST[idx].wrepl,
+        };
+        let addr = if is_from {
+            let Ok(s) = str::from_utf8(f.value()) else {
+                continue;
+            };
+            let (a, pen) = from_line_addr(s);
+            w -= pen;
+            a
+        } else {
+            let Ok(s) = str::from_utf8(f.value()) else {
+                continue;
+            };
+            extract_address(s).to_string()
+        };
+        if addr.is_empty() {
+            // Empty Return-Path → address is "<>", override weight
+            if SEST[idx].name == b"Return-Path:" {
+                let ow = SEST.len() as i32 + 1;
+                if ow > best_w {
+                    best_w = ow;
+                    best = Some("<>".to_string());
+                }
+            }
+            continue;
+        }
+        w -= addr_penalty(&addr);
+        if w > best_w {
+            best_w = w;
+            best = Some(addr);
+        }
+    }
+    best
 }
 
 fn generate_message_id() -> String {
@@ -339,89 +595,23 @@ fn generate_message_id() -> String {
     format!("<{}.{}@{}>", ts, pid, host)
 }
 
-fn find_sender(fields: &FieldList) -> Option<&str> {
-    // Priority order for sender detection
-    const SENDER_FIELDS: &[&str] = &[
-        "Return-Path",
-        "From",
-        "Sender",
-        "Reply-To",
-        "Resent-From",
-        "Resent-Sender",
-    ];
-
-    for name in SENDER_FIELDS {
-        if let Some(f) = fields.find(name.as_bytes()) {
-            let val = f.value();
-            if let Ok(s) = std::str::from_utf8(val) {
-                let addr = extract_address(s.trim());
-                if !addr.is_empty() {
-                    return Some(addr);
-                }
-            }
-        }
-    }
-    None
-}
-
 fn generate_from_line(fields: &FieldList) -> Vec<u8> {
-    let sender = find_sender(fields).unwrap_or("UNKNOWN");
+    let sender =
+        get_sender(fields, SenderMode::Envelope).unwrap_or("UNKNOWN".into());
     let timestamp = chrono::Local::now().format("%a %b %e %H:%M:%S %Y");
     format!("From {} {}\n", sender, timestamp).into_bytes()
-}
-
-fn find_reply_address(args: &Args, fields: &FieldList) -> Option<String> {
-    // -t uses header sender (Reply-To, From), else envelope (Return-Path,
-    // From_)
-    if args.trust {
-        const FIELDS: &[&str] = &["Reply-To", "From", "Sender"];
-        for name in FIELDS {
-            if let Some(f) = fields.find(name.as_bytes())
-                && let Ok(s) = std::str::from_utf8(f.value())
-            {
-                let addr = extract_address(s.trim());
-                if !addr.is_empty() {
-                    return Some(addr.to_string());
-                }
-            }
-        }
-    } else {
-        if let Some(f) = fields.find(b"Return-Path")
-            && let Ok(s) = std::str::from_utf8(f.value())
-        {
-            let addr = extract_address(s.trim());
-            if !addr.is_empty() && addr != "<>" {
-                return Some(addr.to_string());
-            }
-        }
-        if let Some(f) = fields.iter().next()
-            && f.is_from_line()
-            && let Ok(s) = std::str::from_utf8(f.value())
-        {
-            let addr = s.split_whitespace().next().unwrap_or("");
-            if !addr.is_empty() {
-                return Some(addr.to_string());
-            }
-        }
-        if let Some(f) = fields.find(b"From")
-            && let Ok(s) = std::str::from_utf8(f.value())
-        {
-            let addr = extract_address(s.trim());
-            if !addr.is_empty() {
-                return Some(addr.to_string());
-            }
-        }
-    }
-    None
 }
 
 /// Generate auto-reply headers from original message.
 fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
     let mut reply = FieldList::new();
 
-    // Determine reply address
-    let addr =
-        find_reply_address(args, orig).unwrap_or_else(|| "UNKNOWN".to_string());
+    let mode = if args.trust {
+        SenderMode::Reply
+    } else {
+        SenderMode::Envelope
+    };
+    let addr = get_sender(orig, mode).unwrap_or_else(|| "UNKNOWN".into());
     reply.push(Field::from_parts(b"To:", addr.as_bytes()));
 
     // Subject with Re: prefix (procmail always adds Re:, even if already
@@ -664,7 +854,12 @@ fn check_duplicate(
     args: &Args, fields: &FieldList, cache: &str, maxlen: usize,
 ) -> io::Result<bool> {
     let key = if args.reply {
-        find_reply_address(args, fields).unwrap_or_default()
+        let mode = if args.trust {
+            SenderMode::Reply
+        } else {
+            SenderMode::Envelope
+        };
+        get_sender(fields, mode).unwrap_or_default()
     } else {
         fields
             .find(b"Message-ID")

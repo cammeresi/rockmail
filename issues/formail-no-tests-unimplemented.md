@@ -1,22 +1,26 @@
-# No tests for unimplemented formail features
+# Formail: missing test coverage
 
 ## Component
-`src/bin/formail/`, `tests/formail.rs`
+`src/bin/formail/`, `tests/formail.rs`, `tests/formail_gold.rs`
 
 ## Severity
-Moderate
+Low
 
 ## Description
 
-Zero test coverage for:
+Missing test coverage for:
 
-- Content-Length header processing
-- Digest header detection
-- Article header detection (USENET)
-- Complex sender address parsing (bangpaths, "remote from")
-- Resent-* header priority weighting
-- Multiple From_ lines handling
-- Return-Path nil value handling
-- Malformed headers with control characters
-- Very long continuation lines (>1000 chars)
-- Binary data in header values
+- Malformed headers with control characters (implemented, zero tests)
+- Very long continuation lines (>1000 chars; existing test only covers 59 chars)
+- Binary data in header values (only non-ASCII Subject tested, not full binary range)
+
+### Resolved
+
+The following items previously listed here now have test coverage:
+
+- Content-Length header processing (gold: `split_content_length`)
+- Digest header detection (gold: `split_digest`)
+- Article header detection / Path: (gold: `sender_path_only`)
+- Complex sender address parsing (unit + gold tests)
+- Multiple From_ lines handling (unit + gold tests)
+- Return-Path nil value handling (unit + gold tests)
