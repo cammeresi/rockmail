@@ -92,12 +92,17 @@ fn assert_dirs(a: &Path, b: &Path) {
 }
 
 fn run_gold_inner(
-    g: &Gold, inputs: &[&[u8]], count: Option<usize>, cmp: fn(&Path, &Path),
+    g: &Gold, extra: &[&str], inputs: &[&[u8]], count: Option<usize>,
+    cmp: fn(&Path, &Path),
 ) {
     let rc_r = g.rust_dir.path().join("rcfile");
     let rc_p = g.proc_dir.path().join("rcfile");
-    let args_r: Vec<&str> = vec!["-f", "sender@test", rc_r.to_str().unwrap()];
-    let args_p: Vec<&str> = vec!["-f", "sender@test", rc_p.to_str().unwrap()];
+    let mut args_r: Vec<&str> = vec!["-f", "sender@test"];
+    let mut args_p: Vec<&str> = vec!["-f", "sender@test"];
+    args_r.extend_from_slice(extra);
+    args_p.extend_from_slice(extra);
+    args_r.push(rc_r.to_str().unwrap());
+    args_p.push(rc_p.to_str().unwrap());
     for input in inputs {
         let (_, rc) = run(g.rust_dir.path(), corpmail(), &args_r, input);
         let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
@@ -111,19 +116,16 @@ fn run_gold_inner(
     cmp(r, &g.proc_dir.path().join("maildir"));
 }
 
-fn run_gold_with<S>(
-    rc_template: S, inputs: &[&[u8]], count: Option<usize>,
+fn run_gold_full(
+    rc_template: &str, extra: &[&str], inputs: &[&[u8]], count: Option<usize>,
     cmp: fn(&Path, &Path),
-) where
-    S: Borrow<str>,
-{
-    let rc_template = rc_template.borrow();
+) {
     let g = Gold::new();
     setup(g.rust_dir.path(), rc_template);
     setup(g.proc_dir.path(), rc_template);
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        run_gold_inner(&g, inputs, count, cmp);
+        run_gold_inner(&g, extra, inputs, count, cmp);
     }));
     if let Err(e) = result {
         let dir = preserve_failure(&g, rc_template, inputs);
@@ -132,8 +134,23 @@ fn run_gold_with<S>(
     }
 }
 
+fn run_gold_with<S>(
+    rc_template: S, inputs: &[&[u8]], count: Option<usize>,
+    cmp: fn(&Path, &Path),
+) where
+    S: Borrow<str>,
+{
+    run_gold_full(rc_template.borrow(), &[], inputs, count, cmp);
+}
+
 fn run_gold(rc_template: &str, inputs: &[&[u8]], count: usize) {
     run_gold_with(rc_template, inputs, Some(count), assert_dirs);
+}
+
+fn run_gold_args(
+    rc_template: &str, extra: &[&str], inputs: &[&[u8]], count: usize,
+) {
+    run_gold_full(rc_template, extra, inputs, Some(count), assert_dirs);
 }
 
 fn build_complex_rc(kind: FolderType) -> String {
@@ -411,4 +428,90 @@ fn mh_trailing_blank() {
     let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];
     run_gold(&rc, msgs, 1);
+}
+
+#[test]
+fn subst_brace_syntax() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+PAT=one
+
+:0
+* $ ^Subject:.*${PAT}
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: one\n\nBody\n",
+        b"From: b@host\nSubject: two\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn subst_default_value() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* $ ^Subject:.*${UNSET:-fallback}
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: fallback here\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn subst_default_value_set() {
+    // When VAR is set, ${VAR:-default} should use VAR's value.
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+PAT=hello
+
+:0
+* $ ^Subject:.*${PAT:-fallback}
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: hello world\n\nBody\n",
+        b"From: b@host\nSubject: fallback\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn subst_positional_args() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* $ ^Subject:.*$1
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: target\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    run_gold_args(rc, &["-a", "target"], msgs, 2);
+}
+
+#[test]
+fn subst_in_shell_condition() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+WANT=one
+
+:0
+* $ ? /bin/echo $WANT | /bin/grep -q one
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
+    run_gold(rc, msgs, 1);
 }
