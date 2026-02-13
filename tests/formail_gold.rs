@@ -12,10 +12,12 @@
 
 #![cfg(feature = "gold")]
 
-#[allow(unused)]
-mod common;
+use std::iter;
 
 use common::{Gold, GoldResult, normalize_from_line, normalize_message_id};
+
+#[allow(unused)]
+mod common;
 
 fn procmail_formail() -> String {
     common::find_gold("PROCMAIL_FORMAIL", "formail")
@@ -444,7 +446,7 @@ fn control_char_in_field_name() {
 #[test]
 fn very_long_continuation() {
     let mut input = b"Subject: start\n ".to_vec();
-    input.extend(std::iter::repeat(b'x').take(2000));
+    input.extend(iter::repeat_n(b'x', 2000));
     input.extend_from_slice(b"\n\nBody\n");
     run_once(&["-f", "-X", "Subject"], &input).assert_eq();
 }
@@ -727,6 +729,42 @@ fn reply_sender_untrusted_from_line() {
         ("Subject", "Test"),
     ]);
     run_once(&["-r"], &msg).assert_eq_with(norm_from_and_msgid);
+}
+
+// Resent-reply mode: -r -t -a "Resent-" prefers Resent-* headers
+#[test]
+fn reply_resent_reply_to() {
+    let msg = make_msg(&[
+        ("Reply-To", "regular@example.com"),
+        ("From", "from@example.com"),
+        ("Resent-Reply-To", "resent-reply@example.com"),
+        ("Resent-From", "resent-from@example.com"),
+        ("Subject", "Test"),
+    ]);
+    run_once(&["-r", "-t", "-a", "Resent-"], &msg)
+        .assert_eq_with(normalize_message_id);
+}
+
+#[test]
+fn reply_resent_from_only() {
+    let msg = make_msg(&[
+        ("Reply-To", "regular@example.com"),
+        ("Resent-From", "resent-from@example.com"),
+        ("Subject", "Test"),
+    ]);
+    run_once(&["-r", "-t", "-a", "Resent-"], &msg)
+        .assert_eq_with(normalize_message_id);
+}
+
+#[test]
+fn reply_resent_no_resent_headers() {
+    let msg = make_msg(&[
+        ("Reply-To", "regular@example.com"),
+        ("From", "from@example.com"),
+        ("Subject", "Test"),
+    ]);
+    run_once(&["-r", "-t", "-a", "Resent-"], &msg)
+        .assert_eq_with(normalize_message_id);
 }
 
 // Angle bracket and RFC 822 address extraction

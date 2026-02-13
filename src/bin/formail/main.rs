@@ -321,66 +321,65 @@ fn is_header_field(line: &[u8]) -> bool {
 // Array index = envelope weight; wrepl/wrrepl = reply weights.
 struct SenderField {
     name: &'static [u8],
-    wrepl: i32,
-    #[allow(dead_code)] // TODO: used when Resent- reply mode is added
-    wrrepl: i32,
+    reply_weight: i32,
+    resent_reply_weight: i32,
 }
 
 const SEST: &[SenderField] = &[
     SenderField {
         name: b"Reply-To:",
-        wrepl: 8,
-        wrrepl: 7,
+        reply_weight: 8,
+        resent_reply_weight: 7,
     },
     SenderField {
         name: b"From:",
-        wrepl: 7,
-        wrrepl: 6,
+        reply_weight: 7,
+        resent_reply_weight: 6,
     },
     SenderField {
         name: b"Sender:",
-        wrepl: 6,
-        wrrepl: 5,
+        reply_weight: 6,
+        resent_reply_weight: 5,
     },
     SenderField {
         name: b"Resent-Reply-To:",
-        wrepl: 0,
-        wrrepl: 10,
+        reply_weight: 0,
+        resent_reply_weight: 10,
     },
     SenderField {
         name: b"Resent-From:",
-        wrepl: 0,
-        wrrepl: 9,
+        reply_weight: 0,
+        resent_reply_weight: 9,
     },
     SenderField {
         name: b"Resent-Sender:",
-        wrepl: 0,
-        wrrepl: 8,
+        reply_weight: 0,
+        resent_reply_weight: 8,
     },
     SenderField {
         name: b"Path:",
-        wrepl: 1,
-        wrrepl: 0,
+        reply_weight: 1,
+        resent_reply_weight: 0,
     },
     SenderField {
         name: b"Return-Receipt-To:",
-        wrepl: 2,
-        wrrepl: 1,
+        reply_weight: 2,
+        resent_reply_weight: 1,
     },
     SenderField {
         name: b"Errors-To:",
-        wrepl: 3,
-        wrrepl: 2,
+        reply_weight: 3,
+        resent_reply_weight: 2,
     },
     SenderField {
         name: b"Return-Path:",
-        wrepl: 5,
-        wrrepl: 4,
+        reply_weight: 5,
+        resent_reply_weight: 4,
     },
     SenderField {
         name: b"From ",
-        wrepl: 4,
-        wrrepl: 3,
+        reply_weight: 4,
+        resent_reply_weight: 3,
     },
 ];
 
@@ -388,6 +387,7 @@ const SEST: &[SenderField] = &[
 enum SenderMode {
     Envelope,
     Reply,
+    ResentReply,
 }
 
 /// Extract an RFC 822 address from a header value.
@@ -547,7 +547,8 @@ fn get_sender(fields: &FieldList, mode: SenderMode) -> Option<String> {
         }
         let mut w = match mode {
             SenderMode::Envelope => idx as i32,
-            SenderMode::Reply => SEST[idx].wrepl,
+            SenderMode::Reply => SEST[idx].reply_weight,
+            SenderMode::ResentReply => SEST[idx].resent_reply_weight,
         };
         let addr = if is_from {
             let Ok(s) = str::from_utf8(f.value()) else {
@@ -606,7 +607,13 @@ fn generate_from_line(fields: &FieldList) -> Vec<u8> {
 fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
     let mut reply = FieldList::new();
 
-    let mode = if args.trust {
+    let resent = args
+        .add_if_not
+        .iter()
+        .any(|h| h.eq_ignore_ascii_case("Resent-"));
+    let mode = if args.trust && resent {
+        SenderMode::ResentReply
+    } else if args.trust {
         SenderMode::Reply
     } else {
         SenderMode::Envelope
@@ -700,6 +707,10 @@ fn process_headers(args: &Args, fields: &mut FieldList) -> io::Result<()> {
     }
 
     for h in &args.add_if_not {
+        // "Resent-" is a flag, not a real header (sets resent-reply mode)
+        if h.eq_ignore_ascii_case("Resent-") {
+            continue;
+        }
         let (name, value) = parse_header_arg(h);
         if fields.find(name.as_bytes()).is_none() {
             // Message-ID with no value generates unique ID
