@@ -43,7 +43,6 @@ struct SplitState {
     fields: usize,
     last_blank: bool,
     in_msg: bool,
-    babyl_start: bool,
 }
 
 impl SplitState {
@@ -56,7 +55,6 @@ impl SplitState {
             fields: 0,
             last_blank: true,
             in_msg: false,
-            babyl_start: false,
         }
     }
 }
@@ -808,7 +806,6 @@ fn process_boundary(
     start_pending_header(state, line);
     state.fields = if is_header_field(line) { 1 } else { 0 };
     state.in_msg = false;
-    state.babyl_start = false;
 
     Ok(prev)
 }
