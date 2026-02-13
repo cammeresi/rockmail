@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::process;
 
-use corpmail::config::{Action, Condition, Flags, Item, Recipe, Weight, parse};
+use rockmail::config::{Action, Condition, Flags, Item, Recipe, Weight, parse};
 
 fn format_flags(f: &Flags) -> String {
     let mut parts = Vec::new();

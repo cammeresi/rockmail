@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
-use corpmail::config::{self, is_var_name};
-use corpmail::delivery::{DeliveryOpts, FolderType};
-use corpmail::engine::{Engine, Outcome};
-use corpmail::mail::Message;
-use corpmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
-use corpmail::variables::*;
 use nix::unistd::{ROOT, Uid, User};
+use rockmail::config::{self, is_var_name};
+use rockmail::delivery::{DeliveryOpts, FolderType};
+use rockmail::engine::{Engine, Outcome};
+use rockmail::mail::Message;
+use rockmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
+use rockmail::variables::*;
 
 #[cfg(test)]
 mod tests;
@@ -36,7 +36,7 @@ struct ValidatedRcfile {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "corpmail",
+    name = "rockmail",
     about = "Autonomous mail processor",
     version = VERSION,
     disable_help_flag = true,
@@ -77,15 +77,15 @@ struct Args {
 }
 
 fn print_version() {
-    println!("corpmail v{VERSION} (a Rust translation of procmail)");
+    println!("rockmail v{VERSION} (a Rust translation of procmail)");
 }
 
 fn print_help() {
     println!(
-        "Usage: corpmail [-pto] [-f sender] [parameter=value | rcfile] ...
-       corpmail [-to] [-f sender] [-a arg] ... -d recipient ...
-       corpmail [-pt] -m [parameter=value] ... rcfile [arg] ...
-       corpmail -v
+        "Usage: rockmail [-pto] [-f sender] [parameter=value | rcfile] ...
+       rockmail [-to] [-f sender] [-a arg] ... -d recipient ...
+       rockmail [-pt] -m [parameter=value] ... rcfile [arg] ...
+       rockmail -v
 
 Options:
   -v          Display version and exit
@@ -464,7 +464,7 @@ fn main() -> ExitCode {
     match run(env, args, &rcfiles) {
         Ok(code) => code.map_or(ExitCode::SUCCESS, ExitCode::from),
         Err(e) => {
-            eprintln!("corpmail: {e}");
+            eprintln!("rockmail: {e}");
             ExitCode::from(fail_code)
         }
     }

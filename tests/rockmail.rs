@@ -1,4 +1,4 @@
-//! Integration tests for the corpmail binary.
+//! Integration tests for the rockmail binary.
 
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -12,7 +12,7 @@ use tempfile::TempDir;
 mod common;
 
 fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
-    let mut child = Command::new(common::corpmail())
+    let mut child = Command::new(common::rockmail())
         .args(args)
         .current_dir(dir)
         .env("RUST_LOG", "info")
@@ -20,7 +20,7 @@ fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("failed to spawn corpmail");
+        .expect("failed to spawn rockmail");
     if let Err(e) = child.stdin.take().unwrap().write_all(input)
         && e.kind() != ErrorKind::BrokenPipe
     {

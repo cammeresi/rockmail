@@ -1,5 +1,5 @@
 #!/bin/bash
-# Replay a preserved gold test failure directory against corpmail and procmail.
+# Replay a preserved gold test failure directory against rockmail and procmail.
 # Usage: PROCMAIL_PROCMAIL=/usr/bin/procmail bash tests/replay-gold.sh <failure-dir>
 
 set -euo pipefail
@@ -9,10 +9,10 @@ dir="$(cd "$dir" && pwd)"
 
 : "${PROCMAIL_PROCMAIL:?set PROCMAIL_PROCMAIL to the procmail binary path}"
 
-# Build corpmail
+# Build rockmail
 cargo build --quiet
-corpmail="$(cargo metadata --format-version=1 --no-deps \
-    | jq -r '.target_directory')/debug/corpmail"
+rockmail="$(cargo metadata --format-version=1 --no-deps \
+    | jq -r '.target_directory')/debug/rockmail"
 
 rdir="$(mktemp -d)"
 pdir="$(mktemp -d)"
@@ -29,7 +29,7 @@ done
 
 # Feed each message to both binaries
 for msg in "$dir"/msg-*; do
-    "$corpmail" -f sender@test "$rdir/rcfile" < "$msg"
+    "$rockmail" -f sender@test "$rdir/rcfile" < "$msg"
     "$PROCMAIL_PROCMAIL" -f sender@test "$pdir/rcfile" < "$msg"
 done
 

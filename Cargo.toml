@@ -1,5 +1,5 @@
 [package]
-name = "corpmail"
+name = "rockmail"
 version = "0.1.0"
 edition = "2024"
 description = "Rust translation of procmail (mail filtering and delivery)"

@@ -1,3 +1,5 @@
+# ROCKMAIL — Rust Only Configurable Keeper of MAIL
+
 ## Licensing
 
 Most of this repository is a translation of procmail's C code into Rust.

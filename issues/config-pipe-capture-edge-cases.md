@@ -17,5 +17,5 @@ The pipe capture syntax `VAR=| cmd` has only one happy-path test
 - `VAR= | cmd` (space after `=`)
 - Names with invalid characters
 
-Procmail typically trims whitespace liberally; corpmail's behavior
+Procmail typically trims whitespace liberally; rockmail's behavior
 at these boundaries is unspecified.

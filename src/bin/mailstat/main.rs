@@ -12,8 +12,8 @@ use regex::Regex;
 use time::format_description::OwnedFormatItem;
 use time::{OffsetDateTime, UtcOffset};
 
-use corpmail::locking::FileLock;
-use corpmail::util::{EX_CANTCREAT, EX_NOINPUT, EX_OK, EX_TEMPFAIL, exit};
+use rockmail::locking::FileLock;
+use rockmail::util::{EX_CANTCREAT, EX_NOINPUT, EX_OK, EX_TEMPFAIL, exit};
 
 #[cfg(test)]
 mod tests;

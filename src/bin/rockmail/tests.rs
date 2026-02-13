@@ -1,8 +1,8 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
-use corpmail::engine::Engine;
-use corpmail::variables::{Environment, SubstCtx, VAR_DEFAULT, VAR_HOME};
+use rockmail::engine::Engine;
+use rockmail::variables::{Environment, SubstCtx, VAR_DEFAULT, VAR_HOME};
 
 #[test]
 fn parse_rest_assignments() {

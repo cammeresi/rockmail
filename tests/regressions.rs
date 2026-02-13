@@ -1,7 +1,7 @@
 //! Regression tests from preserved gold-test failures.
 //!
 //! Each `.tar.gz` in `tests/regressions/` becomes a separate test case.
-//! Without the `gold` feature, compares corpmail output against stored
+//! Without the `gold` feature, compares rockmail output against stored
 //! procmail output.  With `gold`, runs procmail live instead.
 
 use std::fs::{self, File};
@@ -13,7 +13,7 @@ use tar::Archive;
 
 #[cfg(feature = "gold")]
 use common::procmail;
-use common::{corpmail, diff_dirs, run, setup};
+use common::{diff_dirs, rockmail, run, setup};
 
 #[allow(unused)]
 mod common;
@@ -38,9 +38,9 @@ fn compare(
     root: &Path, _rc_tmpl: &str, rdir: &Path, msgs: &[(String, Vec<u8>)],
     ra: &[&str],
 ) -> Result<(), Failed> {
-    let corpmail = corpmail();
+    let rockmail = rockmail();
     for (_, data) in msgs {
-        run(rdir, corpmail, ra, data);
+        run(rdir, rockmail, ra, data);
     }
     diff_dirs(&rdir.join("maildir"), &root.join("proc")).map_err(|e| e.into())
 }
@@ -55,7 +55,7 @@ fn compare(
     let prc = pdir.path().join("rcfile");
     let pa = vec!["-f", "sender@test", prc.to_str().unwrap()];
     for (name, data) in msgs {
-        let (_, rerr) = run(rdir, corpmail(), ra, data);
+        let (_, rerr) = run(rdir, rockmail(), ra, data);
         let (_, perr) = run(pdir.path(), procmail(), &pa, data);
         if rerr != perr {
             return Err(format!(

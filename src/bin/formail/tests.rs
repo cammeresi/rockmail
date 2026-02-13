@@ -242,7 +242,7 @@ fn non_utf8_header_log_summary() {
 
 #[test]
 fn empty_input() {
-    let (fields, body) = corpmail::formail::read_header(&b""[..]).unwrap();
+    let (fields, body) = rockmail::formail::read_header(&b""[..]).unwrap();
     assert!(fields.is_empty());
     assert!(body.is_empty());
 }
@@ -254,7 +254,7 @@ fn binary_body() {
     let mut input = header.to_vec();
     input.extend(&binary);
 
-    let (fields, body) = corpmail::formail::read_header(&input[..]).unwrap();
+    let (fields, body) = rockmail::formail::read_header(&input[..]).unwrap();
     assert_eq!(fields.len(), 1);
     assert_eq!(body.len(), 256);
     assert_eq!(body, binary);

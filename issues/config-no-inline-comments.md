@@ -13,7 +13,7 @@ Procmail supports inline comments, so a line like:
 
     MAILDIR=/var/mail  # user mail directory
 
-is parsed by corpmail as setting MAILDIR to `/var/mail  # user mail directory`.
+is parsed by rockmail as setting MAILDIR to `/var/mail  # user mail directory`.
 
 The test at `src/config/parser/tests.rs:116` explicitly documents this
 as unsupported.

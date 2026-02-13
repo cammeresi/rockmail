@@ -16,7 +16,7 @@ deliberately not implemented; these features are documented in
 
 ## Binaries (`src/bin/`)
 
-- `corpmail` — main MDA (drop-in for Procmail)
+- `rockmail` — main MDA (drop-in for Procmail)
 - `formail` — header manipulation and mailbox splitting
 - `lockfile` — NFS-safe file locking utility
 - `mailstat` — log statistics
@@ -37,9 +37,9 @@ deliberately not implemented; these features are documented in
 ## Tests
 
 - Unit tests: colocated `tests.rs` files in each module
-- Integration tests: `tests/corpmail.rs`, `tests/formail.rs`
-- Gold tests: `tests/corpmail_gold.rs`, `tests/formail_gold.rs` —
-  run both Corpmail and Procmail, compare output
+- Integration tests: `tests/rockmail.rs`, `tests/formail.rs`
+- Gold tests: `tests/rockmail_gold.rs`, `tests/formail_gold.rs` —
+  run both Rockmail and Procmail, compare output
 - Regressions: `tests/regressions.rs`
 - Common helpers: `tests/common/mod.rs`
 

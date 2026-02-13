@@ -1,7 +1,7 @@
 # Insufficient test coverage for weighted scoring
 
 ## Component
-`src/engine/tests.rs`, `tests/corpmail_gold.rs`
+`src/engine/tests.rs`, `tests/rockmail_gold.rs`
 
 ## Severity
 High

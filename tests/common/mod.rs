@@ -11,10 +11,10 @@ use std::sync::OnceLock;
 
 use tempfile::TempDir;
 
-use corpmail::delivery::FolderType;
+use rockmail::delivery::FolderType;
 
-pub fn corpmail() -> &'static str {
-    env!("CARGO_BIN_EXE_corpmail")
+pub fn rockmail() -> &'static str {
+    env!("CARGO_BIN_EXE_rockmail")
 }
 
 pub fn procmail() -> &'static str {

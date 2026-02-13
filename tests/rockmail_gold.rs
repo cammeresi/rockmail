@@ -1,8 +1,8 @@
-//! Gold standard tests comparing Rust corpmail against procmail.
+//! Gold standard tests comparing Rust rockmail against procmail.
 //!
 //! Run with:
 //!     PROCMAIL_PROCMAIL=/bin/procmail \
-//!         cargo test --features gold --test corpmail_gold
+//!         cargo test --features gold --test rockmail_gold
 
 #![cfg(feature = "gold")]
 
@@ -14,13 +14,13 @@ use std::{env, fs, panic, process};
 use rand::Rng;
 use rand::seq::SliceRandom;
 
-use corpmail::delivery::FolderType;
+use rockmail::delivery::FolderType;
 
 #[allow(unused)]
 mod common;
 
 use common::{
-    Gold, RcBuilder, corpmail, diff_dirs, procmail, run, setup, snapshot,
+    Gold, RcBuilder, diff_dirs, procmail, rockmail, run, setup, snapshot,
 };
 
 const MSGS: &[&[u8]] = &[
@@ -72,7 +72,7 @@ fn copy_dir(src: &Path, dst: &Path) {
 
 fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
     let dir =
-        env::temp_dir().join(format!("corpmail-gold-fail-{}", process::id(),));
+        env::temp_dir().join(format!("rockmail-gold-fail-{}", process::id(),));
     let _ = fs::create_dir_all(&dir);
     fs::write(dir.join("rcfile"), rc_template).ok();
     for (i, msg) in inputs.iter().enumerate() {
@@ -104,7 +104,7 @@ fn run_gold_inner(
     args_r.push(rc_r.to_str().unwrap());
     args_p.push(rc_p.to_str().unwrap());
     for input in inputs {
-        let (_, rc) = run(g.rust_dir.path(), corpmail(), &args_r, input);
+        let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
         let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
         assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
     }

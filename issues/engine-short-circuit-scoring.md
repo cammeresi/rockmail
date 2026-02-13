@@ -19,7 +19,7 @@ if !r.matched {
 Procmail processes all conditions even after a non-weighted failure,
 continuing to track scores.  This affects what value `$=` (last
 score) contains after a failed recipe — procmail may report a
-partial score while corpmail reports whatever was accumulated before
+partial score while rockmail reports whatever was accumulated before
 the failing condition.
 
 ## Impact

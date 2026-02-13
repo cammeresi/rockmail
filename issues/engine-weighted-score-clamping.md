@@ -24,9 +24,9 @@ if score.is_nan() || score.is_infinite() {
 }
 ```
 
-The difference: procmail's underflow causes match failure; corpmail's
+The difference: procmail's underflow causes match failure; rockmail's
 infinity becomes 0 (neutral).  Also, procmail uses integer clamping
-(i32 range) while corpmail uses f64 throughout.
+(i32 range) while rockmail uses f64 throughout.
 
 ## Impact
 

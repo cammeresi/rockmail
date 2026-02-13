@@ -25,4 +25,4 @@ transient errors instead of retrying.
 ## Impact
 
 Under resource pressure (many processes, low file descriptors),
-corpmail will fail where procmail would retry and succeed.
+rockmail will fail where procmail would retry and succeed.

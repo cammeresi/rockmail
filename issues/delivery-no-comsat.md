@@ -10,7 +10,7 @@ Low
 
 Procmail sends UDP notifications to the biff/comsat service on
 delivery (`comsat.c`).  The `COMSAT` variable is declared in
-corpmail's builtins but never used.
+rockmail's builtins but never used.
 
 ## Notes
 

@@ -7,8 +7,8 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use clap::Parser;
-use corpmail::locking::{create_lock, lock_mtime, remove_lock};
-use corpmail::util::{LockError, exit, now_secs, signals, *};
+use rockmail::locking::{create_lock, lock_mtime, remove_lock};
+use rockmail::util::{LockError, exit, now_secs, signals, *};
 
 const DEF_LOCKSLEEP: u64 = 8;
 const DEF_SUSPEND: u64 = 16;

@@ -1,8 +1,8 @@
-# Corpmail Compatibility Notes
+# Rockmail Compatibility Notes
 
 This file documents intentional differences from procmail behavior.
 
-## Corpmail command line arguments
+## Rockmail command line arguments
 
 ### Unsupported arguments
 
@@ -21,14 +21,14 @@ Procmail's `\<` and `\>` consume a non-word character:
 - `\<` matches a non-word char (or start of text) before a word
 - `\>` matches a non-word char (or end of text) after a word
 
-Corpmail uses `\b` (zero-width word boundary) for both. This means:
+Rockmail uses `\b` (zero-width word boundary) for both. This means:
 - The boundary character is not consumed/included in the match
 - No distinction between word-start vs word-end
 
 Example where behavior differs:
 - Pattern `\<word\>` against "a word here"
   - Procmail: matches " word " (spaces consumed)
-  - Corpmail: matches "word" (zero-width boundaries)
+  - Rockmail: matches "word" (zero-width boundaries)
 
 This difference affects what gets captured with `\/` but the match
 success/failure is the same in typical usage.
@@ -46,14 +46,14 @@ backslash, matching `foo\`. This matches procmail behavior.
 
 ## mailstat: Maildir only
 
-Corpmail's `mailstat` currently assumes Maildir layout. Folder paths in the
+Rockmail's `mailstat` currently assumes Maildir layout. Folder paths in the
 log are normalized by stripping the last two path components (e.g.
 `/home/user/Maildir/new/1234567890.host` becomes `/home/user/Maildir`).
 mbox-style paths (a single file) are not specially handled.
 
 ## mailstat: ~/.mailstatrc
 
-Procmail's `mailstat` has no configuration file. Corpmail adds support for
+Procmail's `mailstat` has no configuration file. Rockmail adds support for
 `~/.mailstatrc` with the following commands:
 
 - `ignore <folder>` — Exclude a folder from the summary output. Suppressed
@@ -68,7 +68,7 @@ The default date format is `[day] [month repr:short], [hour]:[minute]`.
 ## formail: -Y flag
 
 The original formail's `-Y` flag (ignore Content-Length headers) is not
-implemented. Content-Length headers are always ignored since corpmail uses
+implemented. Content-Length headers are always ignored since rockmail uses
 From_ line detection for message boundaries.
 
 ## formail: -q- syntax
@@ -82,7 +82,7 @@ Procmail can notify the biff service when mail is delivered, allowing
 terminals to display "You have new mail" messages. The `COMSAT` variable
 controls this.
 
-Corpmail does not support comsat notifications. The `COMSAT` variable
+Rockmail does not support comsat notifications. The `COMSAT` variable
 is ignored. This feature is rarely used on modern systems.
 
 ## formail: -s with command
@@ -97,4 +97,4 @@ Splitting BABYL format mailboxes is unsupported.
 ## /etc/procmail.conf configuration file
 
 Although this file is undocumented, procmail will read sitewide configuration,
-but not rules, from this file.  Corpmail ignores this file.
+but not rules, from this file.  Rockmail ignores this file.

@@ -12,9 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use nix::fcntl::{Flock, FlockArg};
 
-use corpmail::formail::{Field, FieldList, read_header};
-use corpmail::util;
-use corpmail::variables::Environment;
+use rockmail::formail::{Field, FieldList, read_header};
+use rockmail::util;
+use rockmail::variables::Environment;
 
 #[cfg(test)]
 mod tests;
