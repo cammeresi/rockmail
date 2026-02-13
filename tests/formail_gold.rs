@@ -1,8 +1,10 @@
 //! Gold standard tests comparing Rust formail against procmail's formail.
 //!
 //! Run with:
-//!     PROCMAIL_FORMAIL=/bin/formail \
-//!         cargo test --features gold --test formail_gold
+//!     cargo test --features gold --test formail_gold
+//!
+//! The original formail binary is found automatically.  To override,
+//! set PROCMAIL_FORMAIL to the path of the original formail.
 //!
 //! Many of these tests require running procmail with -f lest the two
 //! procmails generate new "From " lines with differing timestamps.
@@ -16,8 +18,7 @@ mod common;
 use common::{Gold, GoldResult, normalize_from_line, normalize_message_id};
 
 fn procmail_formail() -> String {
-    std::env::var("PROCMAIL_FORMAIL")
-        .expect("PROCMAIL_FORMAIL env var required")
+    common::find_gold("PROCMAIL_FORMAIL", "formail")
 }
 
 fn rust_formail() -> &'static str {

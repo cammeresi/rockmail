@@ -13,16 +13,52 @@ use tempfile::TempDir;
 
 use rockmail::delivery::FolderType;
 
+const SEARCH_DIRS: &[&str] = &["/usr/local/bin", "/usr/bin", "/bin"];
+
 pub fn rockmail() -> &'static str {
     env!("CARGO_BIN_EXE_rockmail")
 }
 
+/// Check that a binary is the original procmail, not our replacement.
+fn is_original(path: &str) -> bool {
+    let Ok(out) = Command::new(path)
+        .arg("-v")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+    else {
+        return false;
+    };
+    let s = String::from_utf8_lossy(&out.stderr);
+    s.contains("Stephen R. van den Berg") && !s.contains("rockmail")
+}
+
+/// Find a gold binary by env var, then PATH, then well-known locations.
+pub fn find_gold(env_var: &str, name: &str) -> String {
+    if let Ok(p) = env::var(env_var) {
+        return p;
+    }
+    if let Ok(dirs) = env::var("PATH") {
+        for dir in dirs.split(':') {
+            let p = format!("{dir}/{name}");
+            if Path::new(&p).exists() && is_original(&p) {
+                return p;
+            }
+        }
+    }
+    for dir in SEARCH_DIRS {
+        let p = format!("{dir}/{name}");
+        if Path::new(&p).exists() && is_original(&p) {
+            return p;
+        }
+    }
+    panic!("could not find original {name}; set {env_var} or install procmail");
+}
+
 pub fn procmail() -> &'static str {
     static P: OnceLock<String> = OnceLock::new();
-    P.get_or_init(|| {
-        env::var("PROCMAIL_PROCMAIL")
-            .expect("PROCMAIL_PROCMAIL env var required")
-    })
+    P.get_or_init(|| find_gold("PROCMAIL_PROCMAIL", "procmail"))
 }
 
 /// Run a binary with args and stdin, returning (stdout, exit_code).
