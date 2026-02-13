@@ -227,7 +227,8 @@ fn zap_adds_space() {
 
 #[test]
 fn zap_removes_empty() {
-    // Note: procmail only removes truly empty fields (no value), not whitespace-only
+    // Note: procmail only removes truly empty fields (no value), not
+    // whitespace-only
     let input = "From: user@host\nX-Empty:\nSubject: Test\n\nBody\n";
     let (out, code) = run(&["-f", "-z"], input);
     assert_eq!(code, 0);

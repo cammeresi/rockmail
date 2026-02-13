@@ -7,6 +7,7 @@ use std::fs::OpenOptions;
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::mem;
 use std::process::{Child, Command, ExitCode, Stdio};
+use std::str;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
@@ -35,6 +36,7 @@ impl Quote {
     }
 }
 
+#[derive(Default)]
 struct SplitState {
     msg_num: usize,
     count: usize,
@@ -43,18 +45,14 @@ struct SplitState {
     fields: usize,
     last_blank: bool,
     in_msg: bool,
+    content_remaining: usize,
 }
 
 impl SplitState {
     fn new() -> Self {
         Self {
-            msg_num: 0,
-            count: 0,
-            msg: Vec::new(),
-            pending: Vec::new(),
-            fields: 0,
             last_blank: true,
-            in_msg: false,
+            ..Default::default()
         }
     }
 }
@@ -286,6 +284,22 @@ fn parse_header_arg(s: &str) -> (&str, &str) {
     } else {
         (s, "")
     }
+}
+
+fn parse_content_length(header: &[u8]) -> usize {
+    const PREFIX: &[u8] = b"Content-Length:";
+    for line in header.split(|&b| b == b'\n') {
+        if line.len() > PREFIX.len()
+            && line[..PREFIX.len()].eq_ignore_ascii_case(PREFIX)
+        {
+            let val = &line[PREFIX.len()..];
+            let s = str::from_utf8(val).unwrap_or("");
+            if let Ok(n) = s.trim().parse::<usize>() {
+                return n;
+            }
+        }
+    }
+    0
 }
 
 fn is_header_field(line: &[u8]) -> bool {
@@ -764,6 +778,9 @@ fn accumulate_header(cfg: &SplitConfig, state: &mut SplitState, line: &[u8]) {
     if line == b"\n" || line == b"\r\n" {
         if state.fields >= cfg.minfields {
             state.in_msg = true;
+            if !cfg.digest {
+                state.content_remaining = parse_content_length(&state.pending);
+            }
             state.msg.extend_from_slice(&state.pending);
             state.msg.extend_from_slice(line);
         }
@@ -889,6 +906,22 @@ fn run_split_with_env(args: Args, env: &Environment) -> io::Result<i32> {
             && !emit_message(&cfg, &mut pool, &mut state, &msg)?
         {
             break;
+        }
+
+        if state.content_remaining > 0 {
+            let want = state.content_remaining;
+            let got = (&mut reader)
+                .take(want as u64)
+                .read_to_end(&mut state.msg)?;
+            if got < want {
+                eprintln!(
+                    "formail: Content-Length: field exceeds actual length by {} bytes",
+                    want - got,
+                );
+            }
+            state.content_remaining = 0;
+            state.last_blank = state.msg.ends_with(b"\n\n");
+            continue;
         }
 
         state.last_blank = line == b"\n" || line == b"\r\n";

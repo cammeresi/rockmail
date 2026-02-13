@@ -385,6 +385,16 @@ gold!(
 );
 
 gold!(
+    split_content_length,
+    &["-s"],
+    b"From a@a Mon Jan  1 00:00:00 2024\n\
+      From: a@a\nSubject: First\nContent-Length: 30\n\n\
+      From the desk of nobody...\nok\n\n\
+      From b@b Mon Jan  1 00:00:00 2024\n\
+      From: b@b\nSubject: Second\n\nBody2\n"
+);
+
+gold!(
     split_digest,
     &["-f", "-d", "-s"],
     b"From: digest@host\nSubject: Digest\n\n---\n\
