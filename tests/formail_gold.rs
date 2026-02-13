@@ -436,6 +436,32 @@ fn binary_body() {
 }
 
 #[test]
+fn control_char_in_field_name() {
+    let input = b"From: a@a\nSub\x01ject: Test\n\nBody\n";
+    run_once(&["-f"], input).assert_eq();
+}
+
+#[test]
+fn very_long_continuation() {
+    let mut input = b"Subject: start\n ".to_vec();
+    input.extend(std::iter::repeat(b'x').take(2000));
+    input.extend_from_slice(b"\n\nBody\n");
+    run_once(&["-f", "-X", "Subject"], &input).assert_eq();
+}
+
+#[test]
+fn binary_header_value() {
+    let mut input = b"X-Bin: ".to_vec();
+    for b in 1u8..=255 {
+        if b != b'\n' {
+            input.push(b);
+        }
+    }
+    input.extend_from_slice(b"\n\nBody\n");
+    run_once(&["-f"], &input).assert_eq();
+}
+
+#[test]
 fn duplicate_new() {
     let input = b"From: a@a\nMessage-ID: <gold-new@host>\n\nBody\n";
     run_once(&["-D", "1000", "cache"], input).assert_eq();
