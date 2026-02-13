@@ -308,6 +308,44 @@ fn subst_negation_inverts_match() {
 }
 
 #[test]
+fn subst_expands_variables() {
+    let mut t = Test::new();
+    t.engine.set_var("SENDER", "test");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Subst {
+            inner: Box::new(Condition::Regex {
+                pattern: "^Subject:.*$SENDER".to_string(),
+                negate: false,
+                weight: None,
+            }),
+            negate: false,
+        }],
+        action: Action::Folder(PathBuf::from(t.maildir("subst"))),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn regex_without_subst_no_expansion() {
+    let mut t = Test::new();
+    t.engine.set_var("SENDER", "test");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        // Without $, the literal string "$SENDER" should NOT be expanded
+        conds: vec![Condition::Regex {
+            pattern: "^Subject:.*$SENDER".to_string(),
+            negate: false,
+            weight: None,
+        }],
+        action: Action::Folder(PathBuf::from(t.maildir("nosubst"))),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Default));
+}
+
+#[test]
 fn weighted_condition_positive_score_matches() {
     let mut t = Test::with_msg("Subject: test test test\n\nBody");
     let items = vec![Item::Recipe(Recipe {

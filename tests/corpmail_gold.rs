@@ -369,6 +369,44 @@ fn size_and_negation_mh() {
 }
 
 #[test]
+fn subst_expands_variable_in_condition() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SENDER=one
+
+:0
+* $ ^Subject:.*$SENDER
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: one\n\nBody\n",
+        b"From: b@host\nSubject: two\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn regex_without_subst_no_expansion() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SENDER=one
+
+:0
+* ^Subject:.*$SENDER
+matched
+";
+    // Without $, the literal "$SENDER" won't match "one", so both
+    // messages go to default.
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: one\n\nBody\n",
+        b"From: b@host\nSubject: two\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
 fn mh_trailing_blank() {
     let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];

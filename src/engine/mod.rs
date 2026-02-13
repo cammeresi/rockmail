@@ -240,6 +240,39 @@ impl Engine {
         crate::variables::subst(s, &self.ctx, &self.env)
     }
 
+    /// Return a copy of `cond` with all string fields expanded.
+    fn expand_condition(&self, cond: &Condition) -> Condition {
+        match cond {
+            Condition::Regex {
+                pattern,
+                negate,
+                weight,
+            } => Condition::Regex {
+                pattern: self.expand(pattern),
+                negate: *negate,
+                weight: *weight,
+            },
+            Condition::Shell { cmd, weight } => Condition::Shell {
+                cmd: self.expand(cmd),
+                weight: *weight,
+            },
+            Condition::Variable {
+                name,
+                pattern,
+                weight,
+            } => Condition::Variable {
+                name: self.expand(name),
+                pattern: self.expand(pattern),
+                weight: *weight,
+            },
+            Condition::Size { .. } => cond.clone(),
+            Condition::Subst { inner, negate } => Condition::Subst {
+                inner: Box::new(self.expand_condition(inner)),
+                negate: *negate,
+            },
+        }
+    }
+
     /// Build a Command with a clean env from our Environment.
     fn spawn(&self, prog: &str) -> Command {
         let mut cmd = Command::new(prog);
@@ -348,9 +381,8 @@ impl Engine {
         &mut self, cmd: &str, weight: Option<Weight>, recipe: &Recipe,
         msg: &Message,
     ) -> EngineResult<ConditionResult> {
-        let expanded = self.expand(cmd);
         let text = self.grep_text(msg, &recipe.flags);
-        let ok = self.run_shell(&expanded, text.as_bytes())?;
+        let ok = self.run_shell(cmd, text.as_bytes())?;
 
         if self.verbose {
             eprintln!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
@@ -370,8 +402,7 @@ impl Engine {
         &mut self, text: &str, pattern: &str, negate: bool,
         weight: Option<Weight>, case_insens: bool, label: &str,
     ) -> EngineResult<ConditionResult> {
-        let expanded = self.expand(pattern);
-        let matcher = Matcher::new(&expanded, case_insens)?;
+        let matcher = Matcher::new(pattern, case_insens)?;
 
         let result = matcher.exec(text);
         if result.matched
@@ -457,7 +488,8 @@ impl Engine {
                 weight,
             } => self.eval_variable(name, pattern, *weight, recipe, msg),
             Condition::Subst { inner, negate } => {
-                let mut r = self.eval_condition(inner, recipe, msg)?;
+                let expanded = self.expand_condition(inner);
+                let mut r = self.eval_condition(&expanded, recipe, msg)?;
                 r.matched ^= negate;
                 Ok(r)
             }
