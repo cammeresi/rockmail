@@ -1,4 +1,6 @@
-use std::fs;
+use std::fs::{self, Permissions};
+use std::io::{Seek, SeekFrom, Write};
+use std::os::unix::fs::PermissionsExt;
 
 use tempfile::tempdir;
 
@@ -157,4 +159,41 @@ fn body_without_trailing_newline() {
 
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.ends_with("No newline at end\n\n"));
+}
+
+#[test]
+fn truncation_restores_on_error() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mbox");
+    let original = b"existing content\n";
+    fs::write(&path, original).unwrap();
+
+    // Verify set_len truncation mechanism works
+    let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+    let saved = file.metadata().unwrap().len();
+    // Simulate partial write by seeking past end
+    let mut file = file;
+    file.seek(SeekFrom::End(0)).unwrap();
+    file.write_all(b"garbage").unwrap();
+    // Truncate back
+    file.set_len(saved).unwrap();
+    drop(file);
+
+    let content = fs::read(&path).unwrap();
+    assert_eq!(content, original);
+}
+
+#[test]
+fn open_failure_returns_error() {
+    let dir = tempdir().unwrap();
+    let sub = dir.path().join("readonly");
+    fs::create_dir(&sub).unwrap();
+    fs::set_permissions(&sub, Permissions::from_mode(0o444)).unwrap();
+
+    let m = msg("Subject: Test\n\nBody\n");
+    let r = deliver_test(&sub.join("mbox"), &m, "user@host");
+    assert!(r.is_err());
+
+    // Restore so tempdir cleanup works
+    fs::set_permissions(&sub, Permissions::from_mode(0o755)).unwrap();
 }

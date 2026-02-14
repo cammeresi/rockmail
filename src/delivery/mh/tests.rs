@@ -62,3 +62,18 @@ fn preserves_from_line() {
     let content = fs::read_to_string(&r.path).unwrap();
     assert!(content.starts_with("From sender"));
 }
+
+#[test]
+fn skips_existing_contiguous() {
+    let dir = tempdir().unwrap();
+    let mh = dir.path().join("inbox");
+    fs::create_dir_all(&mh).unwrap();
+
+    for i in 1..=5 {
+        fs::write(mh.join(i.to_string()), format!("msg{i}")).unwrap();
+    }
+
+    let m = msg("Subject: Test\n\nBody\n");
+    let r = deliver_test(&mh, &m).unwrap();
+    assert!(r.path.ends_with("/6"));
+}

@@ -80,3 +80,12 @@ fn timeout_kills_hung_command() {
     assert!(elapsed < 4);
     assert!(matches!(r, Err(DeliveryError::PipeSignal(_))));
 }
+
+#[test]
+fn broken_pipe_tolerance() {
+    // `true` closes stdin immediately; large message triggers EPIPE
+    let body = "x".repeat(1024 * 1024);
+    let m = msg(&format!("Subject: Test\n\n{body}\n"));
+    let r = deliver_test("true", &m, false);
+    assert!(r.is_ok());
+}

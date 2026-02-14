@@ -1,9 +1,10 @@
-use std::fs;
+use std::fs::{self, Permissions};
+use std::os::unix::fs::PermissionsExt;
 
 use tempfile::tempdir;
 
 use super::*;
-use crate::delivery::tests::msg;
+use crate::delivery::{DeliveryError, tests::msg};
 
 #[test]
 fn deliver_creates_dirs() {
@@ -68,4 +69,23 @@ fn serial_increments_same_second() {
     // Both in same second, serial should differ
     assert!(n1.contains("_0."));
     assert!(n2.contains("_1."));
+}
+
+#[test]
+fn retry_exhaustion() {
+    let dir = tempdir().unwrap();
+    let maildir = dir.path().join("Maildir");
+    ensure_dirs(&maildir).unwrap();
+
+    // Make new/ read-only so hard_link and rename both fail
+    fs::set_permissions(maildir.join("new"), Permissions::from_mode(0o444))
+        .unwrap();
+
+    let m = msg("Subject: Test\n\nBody\n");
+    let r = deliver(&mut Namer::new(), &maildir, &m, DeliveryOpts::default());
+    assert!(matches!(r, Err(DeliveryError::UniqueFile)));
+
+    // Restore so tempdir cleanup works
+    fs::set_permissions(maildir.join("new"), Permissions::from_mode(0o755))
+        .unwrap();
 }
