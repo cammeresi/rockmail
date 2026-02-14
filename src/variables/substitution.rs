@@ -38,6 +38,25 @@ impl SubstCtx {
     }
 }
 
+/// Escape a value for literal use in a procmail regex (goodies.c:286-290).
+fn regex_escape_into(s: &str, out: &mut String) {
+    const RE_META: &str = "(|)*?+.^$[\\";
+    let mut cs = s.chars();
+    let Some(first) = cs.next() else { return };
+    out.push('(');
+    if RE_META.contains(first) {
+        out.push('\\');
+    }
+    out.push(first);
+    out.push(')');
+    for c in cs {
+        if RE_META.contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+}
+
 fn is_name_start(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '_'
 }
@@ -119,7 +138,7 @@ fn expand_braced(
                     let alt = collect_to_brace(chars);
                     match val {
                         Some(v) if !v.is_empty() => out.push_str(v),
-                        _ => out.push_str(&subst(&alt, ctx, env)),
+                        _ => out.push_str(&subst(env, ctx, &alt)),
                     }
                 }
                 Some('+') => {
@@ -127,7 +146,7 @@ fn expand_braced(
                     if let Some(v) = val
                         && !v.is_empty()
                     {
-                        out.push_str(&subst(&alt, ctx, env));
+                        out.push_str(&subst(env, ctx, &alt));
                     }
                 }
                 _ => skip_to_brace(chars),
@@ -138,14 +157,14 @@ fn expand_braced(
             let alt = collect_to_brace(chars);
             match val {
                 Some(v) => out.push_str(v),
-                None => out.push_str(&subst(&alt, ctx, env)),
+                None => out.push_str(&subst(env, ctx, &alt)),
             }
         }
         Some(&'+') => {
             chars.next();
             let alt = collect_to_brace(chars);
             if val.is_some() {
-                out.push_str(&subst(&alt, ctx, env));
+                out.push_str(&subst(env, ctx, &alt));
             }
         }
         _ => skip_to_brace(chars),
@@ -195,6 +214,18 @@ fn expand_var(
                 out.push_str(arg);
             }
         }
+        Some(&'\\') => {
+            chars.next();
+            if chars.peek().is_some_and(|&c| is_name_start(c)) {
+                let name = collect_name(chars);
+                if let Some(val) = env.get(&name) {
+                    regex_escape_into(val, out);
+                }
+            } else {
+                out.push('$');
+                out.push('\\');
+            }
+        }
         Some(&c) if is_name_start(c) => {
             let name = collect_name(chars);
             if let Some(val) = env.get(&name) {
@@ -205,8 +236,16 @@ fn expand_var(
     }
 }
 
-pub fn subst(s: &str, ctx: &SubstCtx, env: &Environment) -> String {
-    let mut out = String::with_capacity(s.len());
+pub fn subst(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
+    subst_limited(env, ctx, s, usize::MAX).0
+}
+
+/// Like `subst`, but truncates output at `limit` bytes.
+/// Returns `(result, overflowed)`.
+pub fn subst_limited(
+    env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
+) -> (String, bool) {
+    let mut out = String::with_capacity(s.len().min(limit));
     let mut chars = s.chars().peekable();
 
     while let Some(c) = chars.next() {
@@ -219,14 +258,18 @@ pub fn subst(s: &str, ctx: &SubstCtx, env: &Environment) -> String {
                     || next == '`')
             {
                 out.push(chars.next().unwrap());
-                continue;
+            } else {
+                out.push(c);
             }
-            out.push(c);
         } else if c == '$' {
             expand_var(&mut chars, ctx, env, &mut out);
         } else {
             out.push(c);
         }
+        if out.len() >= limit {
+            out.truncate(limit);
+            return (out, true);
+        }
     }
-    out
+    (out, false)
 }
