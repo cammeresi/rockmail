@@ -807,3 +807,63 @@ DEFAULT=$DEFAULT/
     )
     .unwrap();
 }
+
+/// Extract and normalize LOGABSTRACT lines from a logfile.
+///
+/// Keeps only the From_, Subject, and Folder lines.  Normalizes the
+/// From_ timestamp and replaces absolute folder paths with basenames
+/// so that the two temp-dir trees can be compared.
+fn normalize_abstract(log: &str) -> Vec<String> {
+    let from_re = regex::Regex::new(r"^(From \S+).*").unwrap();
+    let folder_re =
+        regex::Regex::new(r"^(  Folder: )\S*/([^\t]+)(\t.*)").unwrap();
+    log.lines()
+        .filter(|l| {
+            l.starts_with("From ")
+                || l.starts_with(" Subject:")
+                || l.starts_with("  Folder:")
+        })
+        .map(|l| {
+            if let Some(c) = from_re.captures(l) {
+                c[1].to_string()
+            } else if let Some(c) = folder_re.captures(l) {
+                format!("{}{}{}", &c[1], &c[2], &c[3])
+            } else {
+                l.to_string()
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn logabstract_matches_procmail() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=$MAILDIR/log
+LOGABSTRACT=yes
+";
+    let g = Gold::new();
+    setup(g.rust_dir.path(), rc);
+    setup(g.proc_dir.path(), rc);
+    // Pre-create the mbox so delivery succeeds
+    fs::write(g.rust_dir.path().join("maildir/default"), b"").unwrap();
+    fs::write(g.proc_dir.path().join("maildir/default"), b"").unwrap();
+
+    let input = b"Subject: Hello World\n\nBody\n";
+    let rc_r = g.rust_dir.path().join("rcfile");
+    let rc_p = g.proc_dir.path().join("rcfile");
+    let args_r = ["-f", "sender@test", rc_r.to_str().unwrap()];
+    let args_p = ["-f", "sender@test", rc_p.to_str().unwrap()];
+    let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
+    let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
+    assert_eq!(rc, pc, "exit codes differ");
+
+    let rlog =
+        fs::read_to_string(g.rust_dir.path().join("maildir/log")).unwrap();
+    let plog =
+        fs::read_to_string(g.proc_dir.path().join("maildir/log")).unwrap();
+    let ra = normalize_abstract(&rlog);
+    let pa = normalize_abstract(&plog);
+    assert_eq!(ra, pa, "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}");
+}

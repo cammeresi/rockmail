@@ -19,13 +19,13 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    DEF_LINEBUF, DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_SENDMAIL,
-    DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL, Environment,
-    SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_LINEBUF, VAR_LOCKEXT, VAR_LOCKFILE,
-    VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR,
-    VAR_PROCMAIL_OVERFLOW, VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL,
-    VAR_SHELLFLAGS, VAR_SHIFT, VAR_TRAP, VAR_UMASK, VAR_VERBOSE, subst_limited,
-    value_as_int,
+    DEF_LINEBUF, DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_LOGABSTRACT,
+    DEF_SENDMAIL, DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL,
+    Environment, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_LINEBUF, VAR_LOCKEXT,
+    VAR_LOCKFILE, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG, VAR_LOGABSTRACT,
+    VAR_LOGFILE, VAR_MAILDIR, VAR_PROCMAIL_OVERFLOW, VAR_SENDMAIL,
+    VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_TRAP,
+    VAR_UMASK, VAR_VERBOSE, subst_limited, value_as_int,
 };
 
 #[cfg(test)]
@@ -34,6 +34,11 @@ mod tests;
 const MAX_INCLUDE_DEPTH: usize = 32;
 const MAX32: f64 = i32::MAX as f64;
 const MIN32: f64 = i32::MIN as f64;
+const MAX_SUBJECT: usize = 78;
+const MAX_FOLDER: usize = 61;
+const TAB_STOP: usize = 72;
+const TAB: usize = 8;
+const LOGABSTRACT_ALL: i64 = 2;
 
 /// Result of processing all recipes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -953,7 +958,15 @@ impl Engine {
             matches!(result, Outcome::Delivered(_) | Outcome::Continue);
 
         // Copy flag means continue processing even after delivery
-        if recipe.flags.copy && matches!(result, Outcome::Delivered(_)) {
+        if let Outcome::Delivered(ref f) = result
+            && recipe.flags.copy
+        {
+            if self.get_var_as_num(VAR_LOGABSTRACT, DEF_LOGABSTRACT)
+                == LOGABSTRACT_ALL
+            {
+                let f = f.clone();
+                self.log_abstract(&f, msg);
+            }
             return Ok(Outcome::Continue);
         }
 
@@ -1062,6 +1075,44 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         let mut state = State::default();
         self.process_items(items, msg, &mut state)
+    }
+
+    pub fn log_abstract(&self, folder: &str, msg: &Message) {
+        let la = self.get_var_as_num(VAR_LOGABSTRACT, DEF_LOGABSTRACT);
+        if !(la > 0 || (self.logfile.is_some() || self.verbose) && la != 0) {
+            return;
+        }
+
+        if let Some(from) = msg.from_line() {
+            eprintln!("{}", String::from_utf8_lossy(from));
+        }
+
+        if let Some(subj) = msg.get_header("Subject") {
+            let subj: String = subj
+                .chars()
+                .map(|c| if c == '\t' { ' ' } else { c })
+                .collect();
+            let subj = if subj.len() > MAX_SUBJECT {
+                &subj[..MAX_SUBJECT]
+            } else {
+                &subj
+            };
+            eprintln!(" Subject: {subj}");
+        }
+
+        let detabbed: String = folder
+            .chars()
+            .map(|c| if c.is_ascii_control() { ' ' } else { c })
+            .take(MAX_FOLDER)
+            .collect();
+        let col = 10 + detabbed.len();
+        let col = col - col % TAB;
+        let tabs = TAB_STOP.saturating_sub(col).div_ceil(TAB);
+        let pad: String = "\t".repeat(tabs.max(1));
+        // mailfold.c:87,116-118: lastdump = message length, +1 for forced
+        // trailing blank line if the message doesn't already end with \n\n
+        let size = msg.len() + usize::from(!msg.as_bytes().ends_with(b"\n\n"));
+        eprintln!("  Folder: {detabbed}{pad}{:>7}", size);
     }
 
     /// Execute TRAP command before exit (pipes.c:288-312).

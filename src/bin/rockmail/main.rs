@@ -304,21 +304,21 @@ fn find_rcfile(
 
 fn deliver_default(
     engine: &mut Engine, msg: &Message,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<String, Box<dyn Error>> {
     let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
 
     for name in [VAR_DEFAULT, VAR_ORGMAIL] {
         let path = engine.get_var(name).unwrap_or("").to_owned();
         if !path.is_empty() {
             let (ft, stripped) = FolderType::parse(&path);
-            ft.deliver(
+            let r = ft.deliver(
                 Path::new(stripped),
                 msg,
                 sender,
                 DeliveryOpts::default(),
                 engine.namer(),
             )?;
-            return Ok(());
+            return Ok(r.path);
         }
     }
 
@@ -442,11 +442,15 @@ fn run(
     }
 
     if !delivered && engine.get_var(VAR_DELIVERED).is_some_and(value_is_true) {
-        delivered = true; // pretend message was delivered
+        delivered = true;
     }
 
     if !delivered {
-        deliver_default(&mut engine, &msg)?;
+        let folder = deliver_default(&mut engine, &msg)?;
+        engine.log_abstract(&folder, &msg);
+    } else {
+        let folder = engine.get_var("LASTFOLDER").unwrap_or("").to_owned();
+        engine.log_abstract(&folder, &msg);
     }
 
     engine.run_trap(&msg);

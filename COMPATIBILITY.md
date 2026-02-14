@@ -108,6 +108,12 @@ an mbox, checks if `atime == mtime`, and sleeps one second if needed.
 This tricks NFS into cache invalidation so other processes see new mail.
 Rockmail does not implement this.  NFS mbox delivery is increasingly rare.
 
+## Signal handling (SIGUSR1/SIGUSR2)
+
+Procmail uses SIGUSR1 to toggle verbose mode at runtime and SIGUSR2 to
+terminate the current child process. Rockmail does not act on these
+signals.
+
 ## /etc/procmail.conf configuration file
 
 Although this file is undocumented, procmail will read sitewide configuration,
