@@ -2,7 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use super::{DeliveryError, DeliveryOpts, DeliveryResult};
+use super::{DeliveryError, DeliveryOpts, DeliveryResult, io_err};
 use crate::locking::FileLock;
 use crate::mail::{Message, generate as from_line};
 use crate::variables::DEV_NULL;
@@ -47,7 +47,7 @@ where
 
 fn write_body(
     w: &mut BufWriter<&File>, msg: &Message, sender: &str, opts: DeliveryOpts,
-) -> Result<usize, DeliveryError> {
+) -> io::Result<usize> {
     let mut bytes = 0;
 
     let header = msg.header();
@@ -85,20 +85,22 @@ fn write_body(
 fn deliver_inner(
     path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
+    let me = |e, op| io_err(e, path, op);
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
-        .open(path)?;
-    file.seek(SeekFrom::End(0))?;
-    let saved = file.metadata()?.len();
+        .open(path)
+        .map_err(|e| me(e, "open"))?;
+    file.seek(SeekFrom::End(0)).map_err(|e| me(e, "seek"))?;
+    let saved = file.metadata().map_err(|e| me(e, "stat"))?.len();
 
     let mut w = BufWriter::new(&file);
     match write_body(&mut w, msg, sender, opts) {
         Ok(bytes) => {
             drop(w);
             if path != Path::new(DEV_NULL) {
-                file.sync_all()?;
+                file.sync_all().map_err(|e| me(e, "sync"))?;
             }
             Ok(DeliveryResult {
                 bytes,
@@ -110,7 +112,7 @@ fn deliver_inner(
             if let Err(te) = file.set_len(saved) {
                 eprintln!("truncate {}: {te}", path.display());
             }
-            Err(e)
+            Err(me(e, "write"))
         }
     }
 }

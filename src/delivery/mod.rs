@@ -3,7 +3,7 @@
 use std::fs::{self, Permissions};
 use std::io;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::mail::Message;
 
@@ -39,8 +39,12 @@ pub struct DeliveryResult {
 #[derive(Debug, thiserror::Error)]
 pub enum DeliveryError {
     /// I/O error during delivery.
-    #[error("I/O error: {0}")]
-    Io(#[from] io::Error),
+    #[error("failed to {op} \"{}\": {source}", path.display())]
+    Io {
+        source: io::Error,
+        path: PathBuf,
+        op: &'static str,
+    },
 
     /// Failed to create a unique filename (maildir/MH).
     #[error("failed to create unique filename")]
@@ -61,6 +65,16 @@ pub enum DeliveryError {
     /// Pipe command killed by signal.
     #[error("pipe command killed by signal {0}")]
     PipeSignal(i32),
+}
+
+pub(crate) fn io_err(
+    e: io::Error, path: &Path, op: &'static str,
+) -> DeliveryError {
+    DeliveryError::Io {
+        source: e,
+        path: path.to_path_buf(),
+        op,
+    }
 }
 
 /// Folder type as determined by path suffix or filesystem state.
@@ -153,14 +167,14 @@ pub fn link_secondary(
     match ft {
         FolderType::Maildir => maildir::link_unique(namer, dir, src),
         FolderType::Mh => {
-            fs::create_dir_all(dir)?;
+            fs::create_dir_all(dir).map_err(|e| io_err(e, dir, "create"))?;
             mh::link_unique(dir, src)
         }
         FolderType::Dir => {
-            fs::create_dir_all(dir)?;
+            fs::create_dir_all(dir).map_err(|e| io_err(e, dir, "create"))?;
             let name = format!("msg.{}", Namer::new().filename()?);
             let dest = dir.join(&name);
-            fs::hard_link(src, &dest)?;
+            fs::hard_link(src, &dest).map_err(|e| io_err(e, &dest, "link"))?;
             Ok(dest.display().to_string())
         }
         FolderType::File => unreachable!("caller filters mbox"),

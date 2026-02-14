@@ -2,7 +2,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::{DeliveryError, DeliveryOpts, DeliveryResult};
+use super::{DeliveryError, DeliveryOpts, DeliveryResult, io_err};
 use crate::mail::Message;
 
 #[cfg(test)]
@@ -22,9 +22,9 @@ impl Namer {
 
 fn scan_max(path: &Path) -> Result<u64, DeliveryError> {
     let mut max = 0u64;
-    let entries = fs::read_dir(path)?;
+    let entries = fs::read_dir(path).map_err(|e| io_err(e, path, "readdir"))?;
     for entry in entries {
-        let entry = entry?;
+        let entry = entry.map_err(|e| io_err(e, path, "readdir"))?;
         let name = entry.file_name();
         let Some(s) = name.to_str() else { continue };
         let Ok(n) = s.parse::<u64>() else { continue };
@@ -45,14 +45,14 @@ fn create_unique(
         match OpenOptions::new().write(true).create_new(true).open(&dest) {
             Ok(f) => return Ok((f, dest)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(io_err(e, &dest, "create")),
         }
     }
 }
 
 fn write_msg(
     file: File, msg: &Message, opts: DeliveryOpts,
-) -> Result<usize, DeliveryError> {
+) -> io::Result<usize> {
     let data = msg.as_bytes();
 
     let mut w = BufWriter::new(file);
@@ -88,10 +88,11 @@ pub fn deliver(
 pub fn deliver_with(
     namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
-    fs::create_dir_all(path)?;
+    fs::create_dir_all(path).map_err(|e| io_err(e, path, "create"))?;
 
     let (file, dest) = create_unique(namer, path)?;
-    let bytes = write_msg(file, msg, opts)?;
+    let bytes =
+        write_msg(file, msg, opts).map_err(|e| io_err(e, &dest, "write"))?;
 
     Ok(DeliveryResult {
         bytes,
@@ -112,7 +113,7 @@ pub(super) fn link_unique(
                 n += 1;
                 continue;
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(io_err(e, &dest, "link")),
         }
     }
 }

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{DeliveryError, DeliveryOpts, DeliveryResult};
+use super::{DeliveryError, DeliveryOpts, DeliveryResult, io_err};
 use crate::mail::{Message, skip_from_lines};
 
 /// Matches procmail's MAILDIRretries (config.h:243).
@@ -69,7 +69,8 @@ fn hostname() -> String {
 
 pub(super) fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
     for sub in ["tmp", "new", "cur"] {
-        fs::create_dir_all(path.join(sub))?;
+        let p = path.join(sub);
+        fs::create_dir_all(&p).map_err(|e| io_err(e, &p, "create"))?;
     }
     Ok(())
 }
@@ -82,9 +83,7 @@ struct WriteOpts {
     force_blank: bool,
 }
 
-fn write_msg(
-    path: &Path, msg: &Message, opts: WriteOpts,
-) -> Result<usize, DeliveryError> {
+fn write_msg(path: &Path, msg: &Message, opts: WriteOpts) -> io::Result<usize> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
@@ -124,7 +123,7 @@ fn write_msg(
 pub fn deliver_dir(
     path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
-    fs::create_dir_all(path)?;
+    fs::create_dir_all(path).map_err(|e| io_err(e, path, "create"))?;
 
     let name = Namer::new().filename()?;
     let dest = path.join(format!("msg.{}", name));
@@ -134,7 +133,8 @@ pub fn deliver_dir(
         strip_from: false,
         force_blank: true,
     };
-    let bytes = write_msg(&dest, msg, wo)?;
+    let bytes =
+        write_msg(&dest, msg, wo).map_err(|e| io_err(e, &dest, "write"))?;
 
     Ok(DeliveryResult {
         bytes,
@@ -163,7 +163,8 @@ pub fn deliver(
         let tmp = path.join("tmp").join(&name);
         let new = path.join("new").join(&name);
 
-        let bytes = write_msg(&tmp, msg, wo)?;
+        let bytes =
+            write_msg(&tmp, msg, wo).map_err(|e| io_err(e, &tmp, "write"))?;
 
         match fs::hard_link(&tmp, &new) {
             Ok(()) => {
@@ -176,7 +177,7 @@ pub fn deliver(
                 });
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                fs::remove_file(&tmp)?;
+                fs::remove_file(&tmp).map_err(|e| io_err(e, &tmp, "unlink"))?;
                 continue;
             }
             Err(_) => {
@@ -190,7 +191,7 @@ pub fn deliver(
                         path: new.display().to_string(),
                     });
                 }
-                fs::remove_file(&tmp)?;
+                fs::remove_file(&tmp).map_err(|e| io_err(e, &tmp, "unlink"))?;
                 continue;
             }
         }
@@ -206,7 +207,7 @@ pub(super) fn link_unique(
     ensure_dirs(path)?;
     let name = namer.filename()?;
     let dest = path.join("new").join(&name);
-    fs::hard_link(src, &dest)?;
+    fs::hard_link(src, &dest).map_err(|e| io_err(e, &dest, "link"))?;
     Ok(dest.display().to_string())
 }
 

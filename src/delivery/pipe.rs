@@ -1,7 +1,8 @@
 use std::io::{ErrorKind, Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
-use super::{DeliveryError, DeliveryResult};
+use super::{DeliveryError, DeliveryResult, io_err};
 use crate::mail::Message;
 use crate::variables::{DEF_SHELL, DEF_SHELLFLAGS, Environment};
 
@@ -41,6 +42,8 @@ pub fn deliver(
     env: &Environment,
 ) -> Result<PipeResult, DeliveryError> {
     let grab = filter || capture;
+    let p = Path::new(cmd);
+    let me = |e, op| io_err(e, p, op);
     let mut child = Command::new(DEF_SHELL)
         .arg(DEF_SHELLFLAGS)
         .arg(cmd)
@@ -49,7 +52,8 @@ pub fn deliver(
         .stdin(Stdio::piped())
         .stdout(if grab { Stdio::piped() } else { Stdio::null() })
         .stderr(Stdio::inherit())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| me(e, "spawn"))?;
 
     let data = msg.as_bytes();
     let stdout = child.stdout.take();
@@ -58,18 +62,19 @@ pub fn deliver(
         && let Err(e) = stdin.write_all(data)
         && e.kind() != ErrorKind::BrokenPipe
     {
-        return Err(e.into());
+        return Err(me(e, "write"));
     }
 
     let captured = if let Some(mut r) = stdout {
         let mut buf = Vec::new();
-        r.read_to_end(&mut buf)?;
+        r.read_to_end(&mut buf).map_err(|e| me(e, "read"))?;
         Some(buf)
     } else {
         None
     };
 
-    let status = crate::util::wait_timeout(&mut child, env.timeout(), cmd)?;
+    let status = crate::util::wait_timeout(&mut child, env.timeout(), cmd)
+        .map_err(|e| me(e, "wait"))?;
 
     if wait && !status.success() {
         if let Some(code) = status.code() {
