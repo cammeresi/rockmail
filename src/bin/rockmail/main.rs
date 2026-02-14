@@ -20,7 +20,6 @@ use rockmail::variables::*;
 #[cfg(test)]
 mod tests;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 const ETC_PROCMAILRC: &str = "/etc/procmailrc";
 const MAIL_SPOOL: &str = "/var/mail";
 const ROOT_UID: u32 = 0;
@@ -38,7 +37,7 @@ struct ValidatedRcfile {
 #[command(
     name = "rockmail",
     about = "Autonomous mail processor",
-    version = VERSION,
+    version = rockmail::VERSION,
     disable_help_flag = true,
     disable_version_flag = true,
 )]
@@ -77,7 +76,7 @@ struct Args {
 }
 
 fn print_version() {
-    println!("rockmail v{VERSION} (a Rust translation of procmail)");
+    println!("rockmail {} (a Rust translation of procmail)", rockmail::VERSION);
 }
 
 fn print_help() {
@@ -373,7 +372,7 @@ unsafe fn init_env(
 
     env.set(VAR_PATH, DEF_PATH);
     env.set(VAR_SENDMAILFLAGS, DEF_SENDMAILFLAGS);
-    env.set(VAR_PROCMAIL_VERSION, VERSION);
+    env.set(VAR_PROCMAIL_VERSION, rockmail::VERSION);
     env.set(VAR_NORESRETRY, DEF_NORESRETRY.to_string());
     env.set(VAR_SUSPEND, DEF_SUSPEND.to_string());
     env.set(VAR_LOGABSTRACT, DEF_LOGABSTRACT.to_string());

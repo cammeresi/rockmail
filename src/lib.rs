@@ -1,3 +1,5 @@
+pub const VERSION: &str = env!("VERSION");
+
 pub mod config;
 pub mod delivery;
 pub mod engine;

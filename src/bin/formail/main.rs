@@ -116,7 +116,7 @@ impl ProcessPool {
 
 /// formail - mail (re)formatter
 #[derive(Parser, Debug, Default)]
-#[command(name = "formail", version, about, disable_version_flag = true)]
+#[command(name = "formail", version = rockmail::VERSION, about, disable_version_flag = true)]
 #[command(
     override_usage = "formail [+skip] [-total] [options] [-s [command [arg ...]]]"
 )]

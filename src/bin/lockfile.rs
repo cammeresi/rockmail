@@ -17,8 +17,12 @@ const NFS_RETRIES: u32 = 7;
 #[derive(Parser)]
 #[command(name = "lockfile")]
 #[command(about = "Conditional semaphore-file creator")]
-#[command(version)]
+#[command(version = rockmail::VERSION, disable_version_flag = true)]
 struct Args {
+    /// Print version
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: (),
+
     /// Wait this many seconds between locking attempts
     #[arg(short = 'S', long = "sleeptime", default_value_t = DEF_LOCKSLEEP)]
     sleeptime: u64,

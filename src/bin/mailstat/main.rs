@@ -179,8 +179,12 @@ impl Format {
 #[derive(Parser)]
 #[command(name = "mailstat")]
 #[command(about = "Show statistics about procmail logfile")]
-#[command(version)]
+#[command(version = rockmail::VERSION, disable_version_flag = true)]
 struct Args {
+    /// Print version
+    #[arg(short = 'v', long = "version", action = clap::ArgAction::Version)]
+    version: (),
+
     /// Ignore errors in logfile
     #[arg(short = 'i')]
     quiet: bool,
