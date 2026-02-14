@@ -2,6 +2,8 @@ use std::io::Read;
 
 use tempfile::NamedTempFile;
 
+use rockmail::formail::read_headers;
+
 use super::*;
 
 #[test]
@@ -421,7 +423,7 @@ fn non_utf8_header_log_summary() {
 
 #[test]
 fn empty_input() {
-    let (fields, body) = rockmail::formail::read_header(&b""[..]).unwrap();
+    let (fields, body) = read_headers(&b""[..]).unwrap();
     assert!(fields.is_empty());
     assert!(body.is_empty());
 }
@@ -433,7 +435,7 @@ fn binary_body() {
     let mut input = header.to_vec();
     input.extend(&binary);
 
-    let (fields, body) = rockmail::formail::read_header(&input[..]).unwrap();
+    let (fields, body) = read_headers(&input[..]).unwrap();
     assert_eq!(fields.len(), 1);
     assert_eq!(body.len(), 256);
     assert_eq!(body, binary);

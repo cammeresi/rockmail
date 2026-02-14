@@ -1,6 +1,7 @@
 //! Header field handling for formail.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::ops::{Deref, DerefMut};
 use std::mem;
 
 /// Find the end of the field name (position after the colon).
@@ -104,7 +105,8 @@ impl Field {
         self.text.is_empty()
     }
 
-    /// Check if name matches (case-insensitive, prefix match allowed).
+    /// Check if name matches (case-insensitive, prefix match allowed if
+    /// pattern contains no colon).
     pub fn name_matches(&self, pattern: &[u8]) -> bool {
         let name = self.name();
         let pat = pattern.strip_suffix(b":").unwrap_or(pattern);
@@ -156,7 +158,8 @@ impl Field {
         self.value().is_empty()
     }
 
-    /// Ensure there's a space after the colon. Returns true if field was modified.
+    /// Ensure there's a space after the colon. Returns true if field was
+    /// modified.
     pub fn zap_whitespace(&mut self) -> bool {
         if self.is_from_line() {
             return false;
@@ -182,29 +185,23 @@ pub struct FieldList {
     fields: Vec<Field>,
 }
 
+impl Deref for FieldList {
+    type Target = Vec<Field>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl DerefMut for FieldList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
+    }
+}
+
 impl FieldList {
     pub fn new() -> Self {
-        Self { fields: Vec::new() }
-    }
-
-    pub fn push(&mut self, field: Field) {
-        self.fields.push(field);
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.fields.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.fields.len()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Field> {
-        self.fields.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Field> {
-        self.fields.iter_mut()
+        Self::default()
     }
 
     /// Find first field matching the pattern (case-insensitive prefix).
@@ -282,11 +279,6 @@ impl FieldList {
         Ok(())
     }
 
-    /// Consume and return the fields vector.
-    pub fn into_vec(self) -> Vec<Field> {
-        self.fields
-    }
-
     /// Zap whitespace: ensure space after colon and remove empty fields.
     pub fn zap_whitespace(&mut self) {
         // First ensure space after colon in all fields
@@ -300,7 +292,7 @@ impl FieldList {
 
 /// Read header fields from a reader.
 /// Stops at the first blank line (end of headers).
-pub fn read_header<R>(reader: R) -> io::Result<(FieldList, Vec<u8>)>
+pub fn read_headers<R>(reader: R) -> io::Result<(FieldList, Vec<u8>)>
 where
     R: Read,
 {

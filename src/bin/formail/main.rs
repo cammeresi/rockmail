@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use nix::fcntl::{Flock, FlockArg};
 
-use rockmail::formail::{Field, FieldList, read_header};
+use rockmail::formail::{Field, FieldList, read_headers};
 use rockmail::util;
 use rockmail::variables::Environment;
 
@@ -1152,7 +1152,7 @@ fn run(args: Args) -> io::Result<i32> {
 
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
-    let (mut fields, body) = read_header(&mut stdin)?;
+    let (mut fields, body) = read_headers(&mut stdin)?;
 
     // 0 = duplicate, 1 = unique per procmail convention
     if let Some(ref dup_args) = args.duplicate

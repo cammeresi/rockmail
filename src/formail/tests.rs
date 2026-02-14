@@ -41,7 +41,7 @@ fn field_rename() {
 #[test]
 fn read_header_basic() {
     let input = b"From: user@host\nSubject: Test\n\nBody here\n";
-    let (fields, body) = read_header(&input[..]).unwrap();
+    let (fields, body) = read_headers(&input[..]).unwrap();
     assert_eq!(fields.len(), 2);
     assert_eq!(body, b"Body here\n");
 }

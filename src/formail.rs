@@ -9,4 +9,4 @@ mod tests;
 
 mod field;
 
-pub use field::{Field, FieldList, read_header};
+pub use field::{Field, FieldList, read_headers};
