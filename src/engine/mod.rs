@@ -18,10 +18,11 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    DEF_LOCKEXT, DEF_SENDMAIL, DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS,
-    DEV_NULL, Environment, SubstCtx, VAR_LOCKEXT, VAR_LOG, VAR_LOGFILE,
-    VAR_MAILDIR, VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL, VAR_UMASK,
-    VAR_VERBOSE,
+    DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_SENDMAIL,
+    DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL, Environment,
+    SubstCtx, VAR_LOCKEXT, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG,
+    VAR_LOGFILE, VAR_MAILDIR, VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL,
+    VAR_UMASK, VAR_VERBOSE,
 };
 
 #[cfg(test)]
@@ -760,10 +761,15 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         // Acquire lockfile if specified
         let _lock = if let Some(p) = self.resolve_lockfile(recipe) {
-            Some(FileLock::acquire_temp(Path::new(&p)).map_err(|e| {
-                eprintln!("failed to acquire lock {}: {}", p, e);
-                EngineError::Lock(p)
-            })?)
+            let timeout = self.get_var_as_num(VAR_LOCKTIMEOUT, DEF_LOCKTIMEOUT) as u64;
+            let sleep = self.get_var_as_num(VAR_LOCKSLEEP, DEF_LOCKSLEEP) as u64;
+            Some(
+                FileLock::acquire_temp_retry(Path::new(&p), timeout, sleep)
+                    .map_err(|e| {
+                        eprintln!("failed to acquire lock {}: {}", p, e);
+                        EngineError::Lock(p)
+                    })?,
+            )
         } else {
             None
         };
