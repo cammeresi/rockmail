@@ -114,3 +114,80 @@ fn zap_removes_empty() {
     assert_eq!(list.len(), 2);
     assert!(list.find(b"X-Empty").is_none());
 }
+
+#[test]
+fn concatenate_folds() {
+    let mut f = Field::new(b"Subject: line1\n\tline2\n".to_vec()).unwrap();
+    f.concatenate();
+    assert_eq!(&f.text, b"Subject: line1 \tline2\n");
+}
+
+#[test]
+fn concatenate_skips_from_line() {
+    let mut f =
+        Field::new(b"From user@host Mon Jan 1 00:00:00 2024\n".to_vec())
+            .unwrap();
+    let orig = f.text.clone();
+    f.concatenate();
+    assert_eq!(f.text, orig);
+}
+
+#[test]
+fn field_len() {
+    let f = Field::new(b"Subject: Hi\n".to_vec()).unwrap();
+    assert_eq!(f.len(), 12);
+    assert!(!f.is_empty());
+}
+
+#[test]
+fn find_mut_modifies() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"Subject: old\n".to_vec()).unwrap());
+    list.push(Field::new(b"From: user\n".to_vec()).unwrap());
+    let f = list.find_mut(b"Subject").unwrap();
+    f.rename(b"X-Subject:");
+    assert_eq!(list[0].name(), b"X-Subject");
+}
+
+#[test]
+fn remove_all_removes() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"Received: a\n".to_vec()).unwrap());
+    list.push(Field::new(b"Subject: x\n".to_vec()).unwrap());
+    list.push(Field::new(b"Received: b\n".to_vec()).unwrap());
+    list.remove_all(b"Received");
+    assert_eq!(list.len(), 1);
+    assert!(list.find(b"Received").is_none());
+}
+
+#[test]
+fn rename_all_renames() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"Received: a\n".to_vec()).unwrap());
+    list.push(Field::new(b"Subject: x\n".to_vec()).unwrap());
+    list.push(Field::new(b"Received: b\n".to_vec()).unwrap());
+    list.rename_all(b"Received", b"X-Received:");
+    assert!(list.find(b"Received").is_none());
+    assert_eq!(list[0].name(), b"X-Received");
+    assert_eq!(list[2].name(), b"X-Received");
+}
+
+#[test]
+fn prepend_old_prefixes() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"Subject: x\n".to_vec()).unwrap());
+    list.push(Field::new(b"From: user\n".to_vec()).unwrap());
+    list.prepend_old(b"Subject");
+    assert_eq!(list[0].name(), b"Old-Subject");
+    assert_eq!(list[1].name(), b"From");
+}
+
+#[test]
+fn write_to_output() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"From: a\n".to_vec()).unwrap());
+    list.push(Field::new(b"To: b\n".to_vec()).unwrap());
+    let mut buf = Vec::new();
+    list.write_to(&mut buf).unwrap();
+    assert_eq!(buf, b"From: a\nTo: b\n");
+}

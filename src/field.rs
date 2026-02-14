@@ -1,8 +1,15 @@
-//! Header field handling for formail.
+//! Formail: mail header manipulation and mailbox splitting.
+//!
+//! This module provides the core functionality for the formail binary,
+//! including header field operations, auto-reply generation, and mailbox
+//! splitting.
+
+#[cfg(test)]
+mod tests;
 
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::ops::{Deref, DerefMut};
 use std::mem;
+use std::ops::{Deref, DerefMut};
 
 /// Find the end of the field name (position after the colon).
 /// Returns None if this doesn't look like a valid header field.
@@ -281,11 +288,9 @@ impl FieldList {
 
     /// Zap whitespace: ensure space after colon and remove empty fields.
     pub fn zap_whitespace(&mut self) {
-        // First ensure space after colon in all fields
         for field in &mut self.fields {
             field.zap_whitespace();
         }
-        // Then remove empty fields
         self.fields.retain(|f| !f.is_empty_value());
     }
 }

@@ -76,7 +76,10 @@ struct Args {
 }
 
 fn print_version() {
-    println!("rockmail {} (a Rust translation of procmail)", rockmail::VERSION);
+    println!(
+        "rockmail {} (a Rust translation of procmail)",
+        rockmail::VERSION
+    );
 }
 
 fn print_help() {

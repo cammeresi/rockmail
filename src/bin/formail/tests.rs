@@ -2,7 +2,7 @@ use std::io::Read;
 
 use tempfile::NamedTempFile;
 
-use rockmail::formail::read_headers;
+use rockmail::field::read_headers;
 
 use super::*;
 
