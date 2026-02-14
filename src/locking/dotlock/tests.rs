@@ -85,3 +85,12 @@ fn special_chars_in_path() {
     assert!(lock.exists());
     assert!(remove_lock(&lock).is_ok());
 }
+
+#[test]
+fn directory_as_target() {
+    let dir = tempdir().unwrap();
+    let lock = dir.path().join("dir.lock");
+    fs::create_dir(&lock).unwrap();
+    // hard_link to a directory fails
+    assert!(create_lock(&lock).is_err());
+}

@@ -8,6 +8,9 @@ use nix::fcntl::{Flock, FlockArg};
 use super::{MAX_LOCK_SIZE, map_io_err, truncate_lock_path};
 use crate::util::{LockError, signals};
 
+#[cfg(test)]
+mod tests;
+
 pub struct FileLock {
     #[allow(dead_code)]
     lock: Flock<File>,

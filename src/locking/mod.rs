@@ -7,6 +7,8 @@ use crate::util::LockError;
 #[cfg(feature = "nfs")]
 mod dotlock;
 mod flock;
+#[cfg(test)]
+mod tests;
 
 /// Lockfiles should not be larger than this (procmail's MAX_locksize).
 pub const MAX_LOCK_SIZE: u64 = 16;
