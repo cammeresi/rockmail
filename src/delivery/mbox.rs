@@ -1,5 +1,5 @@
-use std::fs::OpenOptions;
-use std::io::{self, BufWriter, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::{DeliveryError, DeliveryOpts, DeliveryResult};
@@ -45,15 +45,11 @@ where
     Ok(bytes)
 }
 
-fn deliver_inner(
-    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
-) -> Result<DeliveryResult, DeliveryError> {
-    let file = OpenOptions::new().create(true).append(true).open(path)?;
-
-    let mut w = BufWriter::new(file);
+fn write_body(
+    w: &mut BufWriter<&File>, msg: &Message, sender: &str, opts: DeliveryOpts,
+) -> Result<usize, DeliveryError> {
     let mut bytes = 0;
 
-    // From_ line (either existing or generated)
     let header = msg.header();
     let hdr = if let Some(fl) = msg.from_line() {
         w.write_all(fl)?;
@@ -61,44 +57,59 @@ fn deliver_inner(
         bytes += fl.len() + 1;
         header.get(fl.len() + 1..).unwrap_or(&[])
     } else {
-        // Generate a From_ line
         let line = from_line(sender);
         w.write_all(&line)?;
         bytes += line.len();
         header
     };
 
-    // Headers with From escaping
-    bytes += write_escaped(&mut w, hdr)?;
+    bytes += write_escaped(w, hdr)?;
 
-    // Blank line separator
     w.write_all(b"\n")?;
     bytes += 1;
 
-    // Body with From escaping
-    bytes += write_escaped(&mut w, msg.body())?;
+    bytes += write_escaped(w, msg.body())?;
 
-    // Ensure trailing newline (unless raw mode)
     if !opts.raw && !msg.body().ends_with(b"\n") {
         w.write_all(b"\n")?;
         bytes += 1;
     }
 
-    // Extra blank line after message (mbox separator)
     w.write_all(b"\n")?;
     bytes += 1;
 
     w.flush()?;
-    let file = w.into_inner().map_err(|e| e.into_error())?;
-    // fsync on /dev/null returns EINVAL.
-    if path != Path::new(DEV_NULL) {
-        file.sync_all()?;
-    }
+    Ok(bytes)
+}
 
-    Ok(DeliveryResult {
-        bytes,
-        path: path.display().to_string(),
-    })
+fn deliver_inner(
+    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
+) -> Result<DeliveryResult, DeliveryError> {
+    let mut file =
+        OpenOptions::new().create(true).write(true).open(path)?;
+    file.seek(SeekFrom::End(0))?;
+    let saved = file.metadata()?.len();
+
+    let mut w = BufWriter::new(&file);
+    match write_body(&mut w, msg, sender, opts) {
+        Ok(bytes) => {
+            drop(w);
+            if path != Path::new(DEV_NULL) {
+                file.sync_all()?;
+            }
+            Ok(DeliveryResult {
+                bytes,
+                path: path.display().to_string(),
+            })
+        }
+        Err(e) => {
+            drop(w);
+            if let Err(te) = file.set_len(saved) {
+                eprintln!("truncate {}: {te}", path.display());
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Deliver a message to an mbox file.

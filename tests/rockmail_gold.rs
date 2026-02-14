@@ -433,6 +433,44 @@ fn mh_trailing_blank() {
 }
 
 #[test]
+fn mh_trailing_no_newline() {
+    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody"];
+    run_gold(&rc, msgs, 1);
+}
+
+#[test]
+fn mh_trailing_single_newline() {
+    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n"];
+    run_gold(&rc, msgs, 1);
+}
+
+#[test]
+#[ignore] // blocked on delivery-dir-is-maildir.md
+fn dir_trailing_no_newline() {
+    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody"];
+    run_gold(&rc, msgs, 1);
+}
+
+#[test]
+#[ignore] // blocked on delivery-dir-is-maildir.md
+fn dir_trailing_single_newline() {
+    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n"];
+    run_gold(&rc, msgs, 1);
+}
+
+#[test]
+#[ignore] // blocked on delivery-dir-is-maildir.md
+fn dir_trailing_blank() {
+    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];
+    run_gold(&rc, msgs, 1);
+}
+
+#[test]
 fn subst_brace_syntax() {
     let rc = "\
 MAILDIR=$MAILDIR
