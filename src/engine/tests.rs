@@ -510,3 +510,55 @@ fn last_score_set_after_weighted_recipe() {
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
     assert_eq!(t.engine.ctx.last_score, 30);
 }
+
+#[test]
+fn no_short_circuit_accumulates_score() {
+    // A failing non-weighted condition followed by a weighted condition:
+    // score should still be accumulated even though the recipe fails.
+    let mut t = Test::with_msg("Subject: test test\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![
+            Condition::Regex {
+                pattern: "NOMATCH".to_string(),
+                negate: false,
+                weight: None,
+            },
+            Condition::Regex {
+                pattern: "test".to_string(),
+                negate: false,
+                weight: Some(Weight { w: 10.0, x: 1.0 }),
+            },
+        ],
+        action: Action::Folder(vec![PathBuf::from(t.maildir("fail"))]),
+    })];
+    assert_eq!(t.process(&items), Outcome::Default);
+    // Score was accumulated despite the non-weighted failure
+    assert_eq!(t.engine.ctx.last_score, 20);
+}
+
+#[test]
+fn no_short_circuit_weighted_after_fail() {
+    // Weighted condition alone would match, but non-weighted failure
+    // prevents delivery.
+    let mut t = Test::with_msg("Subject: hello\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![
+            Condition::Regex {
+                pattern: "hello".to_string(),
+                negate: false,
+                weight: Some(Weight { w: 5.0, x: 1.0 }),
+            },
+            Condition::Regex {
+                pattern: "NOPE".to_string(),
+                negate: false,
+                weight: None,
+            },
+        ],
+        action: Action::Folder(vec![PathBuf::from(t.maildir("nope"))]),
+    })];
+    assert_eq!(t.process(&items), Outcome::Default);
+}

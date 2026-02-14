@@ -616,12 +616,14 @@ impl Engine {
 
         let mut score = 0.0f64;
         let mut has_score = false;
+        let mut failed = false;
 
         for cond in &recipe.conds {
             let r = self.eval_condition(cond, recipe, msg)?;
             if !r.matched {
-                return Ok((false, score));
-            } else if r.scored {
+                failed = true;
+            }
+            if r.scored {
                 score += r.score;
                 has_score = true;
             }
@@ -635,8 +637,7 @@ impl Engine {
             score = MAX32;
         }
 
-        // If we used scoring, match requires score > 0
-        Ok((!has_score || score > 0.0, score))
+        Ok((!failed && (!has_score || score > 0.0), score))
     }
 
     /// Check if chain flags allow this recipe to run.
@@ -928,6 +929,12 @@ impl Engine {
 
         let (matched, score) = self.eval_conditions(recipe, msg)?;
 
+        self.ctx.last_score = if score as i64 == 0 && score > 0.0 {
+            1
+        } else {
+            score as i64
+        };
+
         // Update state for next recipe
         if !recipe.flags.chain && !recipe.flags.succ {
             state.last_cond = matched;
@@ -944,12 +951,6 @@ impl Engine {
 
         state.last_succ =
             matches!(result, Outcome::Delivered(_) | Outcome::Continue);
-        // misc.c:647-648: if score truncates to 0 but was positive, use 1
-        self.ctx.last_score = if score as i64 == 0 && score > 0.0 {
-            1
-        } else {
-            score as i64
-        };
 
         // Copy flag means continue processing even after delivery
         if recipe.flags.copy && matches!(result, Outcome::Delivered(_)) {
