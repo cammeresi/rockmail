@@ -4,7 +4,8 @@ use super::*;
 fn folder() {
     match Action::parse_line("/var/mail/spam") {
         Action::Folder(p) => {
-            assert_eq!(p.to_str().unwrap(), "/var/mail/spam")
+            assert_eq!(p.len(), 1);
+            assert_eq!(p[0].to_str().unwrap(), "/var/mail/spam");
         }
         _ => panic!("expected folder"),
     }
@@ -46,7 +47,7 @@ fn forward() {
 #[test]
 fn maildir() {
     match Action::parse_line("Maildir/") {
-        Action::Folder(p) => assert_eq!(p.to_str().unwrap(), "Maildir/"),
+        Action::Folder(p) => assert_eq!(p[0].to_str().unwrap(), "Maildir/"),
         _ => panic!("expected folder"),
     }
 }
@@ -54,7 +55,7 @@ fn maildir() {
 #[test]
 fn empty_forward_becomes_folder() {
     match Action::parse_line("!") {
-        Action::Folder(p) => assert_eq!(p.to_str().unwrap(), "!"),
+        Action::Folder(p) => assert_eq!(p[0].to_str().unwrap(), "!"),
         _ => panic!("expected folder"),
     }
 }
@@ -102,5 +103,18 @@ fn pipe_capture_invalid_name() {
     match Action::parse_line("123=| /bin/cmd") {
         Action::Folder(_) => {}
         _ => panic!("expected folder for invalid var name"),
+    }
+}
+
+#[test]
+fn multi_folder() {
+    match Action::parse_line("dir1/ dir2/ dir3/") {
+        Action::Folder(p) => {
+            assert_eq!(p.len(), 3);
+            assert_eq!(p[0].to_str().unwrap(), "dir1/");
+            assert_eq!(p[1].to_str().unwrap(), "dir2/");
+            assert_eq!(p[2].to_str().unwrap(), "dir3/");
+        }
+        _ => panic!("expected folder"),
     }
 }

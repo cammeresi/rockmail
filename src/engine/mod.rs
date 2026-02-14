@@ -547,8 +547,8 @@ impl Engine {
         let lock = recipe.lockfile.as_ref()?;
         if lock.is_empty() {
             match &recipe.action {
-                Action::Folder(path) => {
-                    let path_str = path.to_string_lossy();
+                Action::Folder(paths) => {
+                    let path_str = paths[0].to_string_lossy();
                     let expanded = self.expand(&path_str);
                     let (ft, _) = FolderType::parse(&expanded);
                     if !ft.needs_lock() {
@@ -564,44 +564,83 @@ impl Engine {
         }
     }
 
+    /// Hard-link the primary delivery file into secondary folders.
+    fn deliver_secondaries(
+        &mut self, paths: &[String], src: &str, primary_ft: FolderType,
+        folder: &mut String,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        if primary_ft == FolderType::File {
+            for sec in paths {
+                eprintln!("Skipped \"{}\": can't link from mbox", sec);
+            }
+            return;
+        }
+        let src = Path::new(src);
+        for sec in paths {
+            let (ft, dir) = FolderType::parse(sec);
+            if ft == FolderType::File {
+                eprintln!("Skipped \"{}\"", sec);
+                continue;
+            }
+            match delivery::link_secondary(
+                src,
+                Path::new(dir),
+                ft,
+                &mut self.namer,
+            ) {
+                Ok(p) => {
+                    delivery::update_perms(Path::new(dir));
+                    folder.push(' ');
+                    folder.push_str(&p);
+                }
+                Err(e) => {
+                    eprintln!("Couldn't make link to \"{}\": {}", sec, e);
+                }
+            }
+        }
+    }
+
     /// Deliver to a folder (mbox, maildir, or MH).
+    /// Multiple paths are not supported for mbox; secondary paths are
+    /// hard-linked from the file created by primary directory delivery.
     fn deliver_to_folder(
-        &mut self, path: &str, recipe: &Recipe, msg: &Message,
+        &mut self, paths: &[String], recipe: &Recipe, msg: &Message,
     ) -> EngineResult<Outcome> {
-        let (folder_type, path) = FolderType::parse(path);
+        let (ft, path) = FolderType::parse(&paths[0]);
         let msg = self.message_for_delivery(recipe, msg);
-        let ignore = recipe.flags.ignore;
         let opts = DeliveryOpts {
             raw: recipe.flags.raw,
         };
 
         let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
-        let result = folder_type.deliver(
-            Path::new(path),
-            &msg,
-            sender,
-            opts,
-            &mut self.namer,
-        );
+        let result =
+            ft.deliver(Path::new(path), &msg, sender, opts, &mut self.namer);
 
-        // Handle errors based on i flag
         let result = match result {
             Ok(r) => r,
-            Err(e) if ignore => {
+            Err(e) if recipe.flags.ignore => {
                 eprintln!("Ignoring delivery error: {}", e);
                 return Ok(Outcome::Continue);
             }
             Err(e) => return Err(e.into()),
         };
 
-        self.set_var("LASTFOLDER", &result.path);
-        self.ctx.lastfolder = result.path.clone();
+        delivery::update_perms(Path::new(path));
+
+        let mut folder = result.path.clone();
+        self.deliver_secondaries(&paths[1..], &result.path, ft, &mut folder);
+
+        self.set_var("LASTFOLDER", &folder);
+        self.ctx.lastfolder = folder.clone();
 
         if self.verbose {
-            eprintln!("Delivered to {}", result.path);
+            eprintln!("Delivered to {}", folder);
         }
 
-        Ok(Outcome::Delivered(result.path))
+        Ok(Outcome::Delivered(folder))
     }
 
     /// Deliver to a pipe command.
@@ -733,9 +772,11 @@ impl Engine {
         };
 
         match &recipe.action {
-            Action::Folder(path) => {
-                let path_str = path.to_string_lossy();
-                let expanded = self.expand(&path_str);
+            Action::Folder(paths) => {
+                let expanded: Vec<_> = paths
+                    .iter()
+                    .map(|p| self.expand(&p.to_string_lossy()))
+                    .collect();
                 self.deliver_to_folder(&expanded, recipe, msg)
             }
             Action::Pipe { cmd, capture } => {

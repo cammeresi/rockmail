@@ -165,7 +165,7 @@ fn is_delivering() {
         Flags::new(),
         None,
         vec![],
-        Action::Folder(PathBuf::from("spam/")),
+        Action::Folder(vec![PathBuf::from("spam/")]),
     );
     assert!(folder.is_delivering());
 

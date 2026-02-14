@@ -28,7 +28,7 @@ fn simple_recipe() {
             assert_eq!(r.conds.len(), 1);
             match &r.action {
                 Action::Folder(p) => {
-                    assert_eq!(p.to_str().unwrap(), "/dev/null")
+                    assert_eq!(p[0].to_str().unwrap(), "/dev/null")
                 }
                 _ => panic!("expected folder"),
             }

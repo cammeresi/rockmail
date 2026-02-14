@@ -116,12 +116,14 @@ fn format_condition(c: &Condition) -> String {
 
 fn format_action(a: &Action, depth: usize) -> String {
     match a {
-        Action::Folder(p) => {
-            let p = p.display();
-            if p.to_string().ends_with('/') {
-                format!("deliver to Maildir {}", p)
+        Action::Folder(paths) => {
+            let s: Vec<_> =
+                paths.iter().map(|p| p.display().to_string()).collect();
+            let label = s.join(" ");
+            if s[0].ends_with('/') {
+                format!("deliver to Maildir {}", label)
             } else {
-                format!("deliver to {}", p)
+                format!("deliver to {}", label)
             }
         }
         Action::Pipe { cmd, capture } => {

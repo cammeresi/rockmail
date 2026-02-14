@@ -8,8 +8,8 @@ mod tests;
 /// The action line of a recipe
 #[derive(Debug, Clone)]
 pub enum Action {
-    /// Deliver to a file/directory
-    Folder(PathBuf),
+    /// Deliver to one or more folders.
+    Folder(Vec<PathBuf>),
     /// Pipe to program (optionally capture to variable)
     Pipe {
         cmd: String,
@@ -57,7 +57,8 @@ impl Action {
             };
         }
 
-        // Otherwise it's a folder path (nested blocks handled at parser level)
-        Action::Folder(PathBuf::from(s))
+        // Otherwise it's folder path(s) (nested blocks handled at parser level)
+        let paths = s.split_whitespace().map(PathBuf::from).collect();
+        Action::Folder(paths)
     }
 }

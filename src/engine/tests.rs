@@ -53,7 +53,7 @@ fn regex_recipe(pattern: &str, folder: &str) -> Item {
             negate: false,
             weight: None,
         }],
-        action: Action::Folder(PathBuf::from(folder)),
+        action: Action::Folder(vec![PathBuf::from(folder)]),
     })
 }
 
@@ -90,7 +90,7 @@ fn negated_regex() {
             negate: true,
             weight: None,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("inbox"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
@@ -106,7 +106,7 @@ fn size_condition_less() {
             bytes: 1000,
             weight: None,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("small"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("small"))]),
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
@@ -122,7 +122,7 @@ fn size_condition_greater_fails() {
             bytes: 1000,
             weight: None,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("large"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("large"))]),
     })];
     assert_eq!(t.process(&items), Outcome::Default);
 }
@@ -143,7 +143,7 @@ fn variable_assignment() {
                 pattern: "bar".to_string(),
                 weight: None,
             }],
-            action: Action::Folder(PathBuf::from(t.maildir("matched"))),
+            action: Action::Folder(vec![PathBuf::from(t.maildir("matched"))]),
         }),
     ];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
@@ -161,7 +161,7 @@ fn chain_a_flag_skips_when_prev_false() {
             flags,
             lockfile: None,
             conds: vec![],
-            action: Action::Folder(PathBuf::from(t.maildir("second"))),
+            action: Action::Folder(vec![PathBuf::from(t.maildir("second"))]),
         }),
     ];
     assert_eq!(t.process(&items), Outcome::Default);
@@ -179,7 +179,7 @@ fn else_flag_runs_when_prev_false() {
             flags,
             lockfile: None,
             conds: vec![],
-            action: Action::Folder(PathBuf::from(t.maildir("else"))),
+            action: Action::Folder(vec![PathBuf::from(t.maildir("else"))]),
         }),
     ];
     assert!(
@@ -202,7 +202,7 @@ fn body_flag_greps_body() {
             negate: false,
             weight: None,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("body"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("body"))]),
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
@@ -218,13 +218,13 @@ fn copy_flag_continues() {
             flags,
             lockfile: None,
             conds: vec![],
-            action: Action::Folder(PathBuf::from(t.maildir("first"))),
+            action: Action::Folder(vec![PathBuf::from(t.maildir("first"))]),
         }),
         Item::Recipe(Recipe {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![],
-            action: Action::Folder(PathBuf::from(t.maildir("second"))),
+            action: Action::Folder(vec![PathBuf::from(t.maildir("second"))]),
         }),
     ];
     assert!(
@@ -247,7 +247,7 @@ fn nested_block() {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![],
-            action: Action::Folder(PathBuf::from(t.maildir("inner"))),
+            action: Action::Folder(vec![PathBuf::from(t.maildir("inner"))]),
         })]),
     })];
     assert!(
@@ -266,7 +266,7 @@ fn invalid_regex_returns_error() {
             negate: false,
             weight: None,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("inbox"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
     })];
     assert!(matches!(t.try_process(&items), Err(EngineError::Regex(_))));
 }
@@ -278,9 +278,9 @@ fn delivery_to_unwritable_path_returns_error() {
         flags: Flags::new(),
         lockfile: None,
         conds: vec![],
-        action: Action::Folder(PathBuf::from(
+        action: Action::Folder(vec![PathBuf::from(
             "/nonexistent/deeply/nested/path/",
-        )),
+        )]),
     })];
     assert!(matches!(
         t.try_process(&items),
@@ -302,7 +302,7 @@ fn subst_negation_inverts_match() {
             }),
             negate: true,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("negated"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
@@ -322,7 +322,7 @@ fn subst_expands_variables() {
             }),
             negate: false,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("subst"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("subst"))]),
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
@@ -340,7 +340,7 @@ fn regex_without_subst_no_expansion() {
             negate: false,
             weight: None,
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("nosubst"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("nosubst"))]),
     })];
     assert!(matches!(t.process(&items), Outcome::Default));
 }
@@ -356,7 +356,7 @@ fn weighted_condition_positive_score_matches() {
             negate: false,
             weight: Some(Weight { w: 100.0, x: 1.0 }),
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("weighted"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("weighted"))]),
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
@@ -372,7 +372,7 @@ fn weighted_condition_zero_matches_fails() {
             negate: false,
             weight: Some(Weight { w: 100.0, x: 1.0 }),
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("weighted"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("weighted"))]),
     })];
     assert_eq!(t.process(&items), Outcome::Default);
 }
@@ -388,7 +388,7 @@ fn weighted_negated_inverts_score() {
             negate: true,
             weight: Some(Weight { w: 100.0, x: 1.0 }),
         }],
-        action: Action::Folder(PathBuf::from(t.maildir("negated"))),
+        action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
     })];
     // Negated weighted: score becomes negative, so no match
     assert_eq!(t.process(&items), Outcome::Default);
@@ -403,7 +403,7 @@ fn action_folder_expands_variable() {
         flags: Flags::new(),
         lockfile: None,
         conds: vec![],
-        action: Action::Folder(PathBuf::from("$DEST")),
+        action: Action::Folder(vec![PathBuf::from("$DEST")]),
     })];
     assert!(matches!(
         t.process(&items),

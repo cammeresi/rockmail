@@ -1,6 +1,8 @@
 //! Mail delivery to folders and pipes.
 
+use std::fs::{self, Permissions};
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use crate::mail::Message;
@@ -14,6 +16,8 @@ mod tests;
 
 pub use maildir::Namer;
 pub use pipe::deliver as pipe;
+
+const UPDATE_MASK: u32 = 0o001; // S_IXOTH
 
 /// Options for delivery operations.
 #[derive(Debug, Clone, Copy, Default)]
@@ -125,5 +129,40 @@ impl FolderType {
             FolderType::Maildir => maildir::deliver(namer, path, msg, opts),
             FolderType::Dir => maildir::deliver_dir(path, msg, opts),
         }
+    }
+}
+
+/// Set the "new mail" permission bit on a folder after delivery.
+pub fn update_perms(path: &Path) {
+    let Ok(meta) = fs::metadata(path) else { return };
+    let mode = meta.permissions().mode();
+    if mode & UPDATE_MASK == 0
+        && let Err(e) = fs::set_permissions(
+            path,
+            Permissions::from_mode(mode | UPDATE_MASK),
+        )
+    {
+        eprintln!("chmod {}: {}", path.display(), e);
+    }
+}
+
+/// Hard-link a delivered file into a secondary directory folder.
+pub fn link_secondary(
+    src: &Path, dir: &Path, ft: FolderType, namer: &mut Namer,
+) -> Result<String, DeliveryError> {
+    match ft {
+        FolderType::Maildir => maildir::link_unique(namer, dir, src),
+        FolderType::Mh => {
+            fs::create_dir_all(dir)?;
+            mh::link_unique(dir, src)
+        }
+        FolderType::Dir => {
+            fs::create_dir_all(dir)?;
+            let name = format!("msg.{}", Namer::new().filename()?);
+            let dest = dir.join(&name);
+            fs::hard_link(src, &dest)?;
+            Ok(dest.display().to_string())
+        }
+        FolderType::File => unreachable!("caller filters mbox"),
     }
 }

@@ -99,6 +99,24 @@ pub fn deliver_with(
     })
 }
 
+/// Hard-link `src` into the next available MH slot.
+pub(super) fn link_unique(
+    path: &Path, src: &Path,
+) -> Result<String, DeliveryError> {
+    let mut n = scan_max(path)? + 1;
+    loop {
+        let dest = path.join(n.to_string());
+        match fs::hard_link(src, &dest) {
+            Ok(()) => return Ok(dest.display().to_string()),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                n += 1;
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
 #[cfg(test)]
 pub fn deliver_test(
     path: &Path, msg: &Message,

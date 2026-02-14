@@ -592,6 +592,31 @@ matched
 }
 
 #[test]
+fn secondary_mh() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT/.
+
+:0
+inbox/. copy/.
+";
+    run_gold_with(rc, MSGS, Some(10), assert_dirs);
+}
+
+#[test]
+fn secondary_mbox_skipped() {
+    // Mbox primary can't link secondaries; both should deliver to mbox only.
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+inbox copy/
+";
+    run_gold_with(rc, MSGS, Some(1), assert_dirs);
+}
+
+#[test]
 fn subst_in_shell_condition() {
     let rc = "\
 MAILDIR=$MAILDIR

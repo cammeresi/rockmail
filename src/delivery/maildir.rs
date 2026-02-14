@@ -67,7 +67,7 @@ fn hostname() -> String {
         .unwrap_or_else(|| "localhost".to_string())
 }
 
-fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
+pub(super) fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
     for sub in ["tmp", "new", "cur"] {
         fs::create_dir_all(path.join(sub))?;
     }
@@ -197,6 +197,17 @@ pub fn deliver(
     }
 
     Err(DeliveryError::UniqueFile)
+}
+
+/// Hard-link `src` into the `new/` subdirectory of a Maildir.
+pub(super) fn link_unique(
+    namer: &mut Namer, path: &Path, src: &Path,
+) -> Result<String, DeliveryError> {
+    ensure_dirs(path)?;
+    let name = namer.filename()?;
+    let dest = path.join("new").join(&name);
+    fs::hard_link(src, &dest)?;
+    Ok(dest.display().to_string())
 }
 
 #[cfg(test)]
