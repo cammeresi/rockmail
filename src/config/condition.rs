@@ -130,7 +130,11 @@ pub enum Condition {
         weight: Option<Weight>,
     },
     /// Shell command exit code (? prefix)
-    Shell { cmd: String, negate: bool, weight: Option<Weight> },
+    Shell {
+        cmd: String,
+        negate: bool,
+        weight: Option<Weight>,
+    },
     /// Variable match: VAR ?? pattern
     Variable {
         name: String,

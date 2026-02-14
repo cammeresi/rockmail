@@ -327,6 +327,9 @@ fn deliver_default(
 
 /// Check for EXITCODE variable override.
 fn exit_code(engine: &Engine) -> Option<u8> {
+    if !engine.exit_was_set() {
+        return None;
+    }
     let v = engine.get_var(VAR_EXITCODE)?;
     v.parse::<u8>().ok()
 }
@@ -376,7 +379,17 @@ unsafe fn init_env(
     env.set(VAR_USER_SHELL, &shell);
 
     env.set(VAR_PATH, DEF_PATH);
+    env.set(VAR_SHELLMETAS, DEF_SHELLMETAS);
+    env.set(VAR_LOCKEXT, DEF_LOCKEXT);
+    env.set(VAR_MSGPREFIX, DEF_MSGPREFIX);
+    env.set(VAR_SHELLFLAGS, DEF_SHELLFLAGS);
+    env.set(VAR_SENDMAIL, DEF_SENDMAIL);
     env.set(VAR_SENDMAILFLAGS, DEF_SENDMAILFLAGS);
+    env.set(VAR_TIMEOUT, DEF_TIMEOUT.to_string());
+    env.set(VAR_LOCKSLEEP, DEF_LOCKSLEEP.to_string());
+    env.set(VAR_LOCKTIMEOUT, DEF_LOCKTIMEOUT.to_string());
+    env.set(VAR_VERBOSE, "no");
+    env.set(VAR_LINEBUF, DEF_LINEBUF.to_string());
     env.set(VAR_PROCMAIL_VERSION, rockmail::VERSION);
     env.set(VAR_NORESRETRY, DEF_NORESRETRY.to_string());
     env.set(VAR_SUSPEND, DEF_SUSPEND.to_string());

@@ -4,7 +4,9 @@ use std::process::{Command, Stdio};
 
 use super::{DeliveryError, DeliveryResult, io_err};
 use crate::mail::Message;
-use crate::variables::{DEF_SHELL, DEF_SHELLFLAGS, Environment};
+use crate::variables::{
+    DEF_SHELL, DEF_SHELLFLAGS, Environment, VAR_SHELL, VAR_SHELLFLAGS,
+};
 
 #[cfg(test)]
 mod tests;
@@ -44,8 +46,10 @@ pub fn deliver(
     let grab = filter || capture;
     let p = Path::new(cmd);
     let me = |e, op| io_err(e, p, op);
-    let mut child = Command::new(DEF_SHELL)
-        .arg(DEF_SHELLFLAGS)
+    let shell = env.get(VAR_SHELL).unwrap_or(DEF_SHELL);
+    let flags = env.get(VAR_SHELLFLAGS).unwrap_or(DEF_SHELLFLAGS);
+    let mut child = Command::new(shell)
+        .arg(flags)
         .arg(cmd)
         .env_clear()
         .envs(env.iter())

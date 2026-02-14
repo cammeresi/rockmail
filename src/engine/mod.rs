@@ -21,9 +21,10 @@ use crate::re::Matcher;
 use crate::variables::{
     DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_SENDMAIL,
     DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL, Environment,
-    SubstCtx, VAR_LOCKEXT, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG,
-    VAR_LOGFILE, VAR_MAILDIR, VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL,
-    VAR_UMASK, VAR_VERBOSE,
+    SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_LOCKEXT, VAR_LOCKFILE, VAR_LOCKSLEEP,
+    VAR_LOCKTIMEOUT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_SENDMAIL,
+    VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_UMASK,
+    VAR_VERBOSE, value_as_int,
 };
 
 #[cfg(test)]
@@ -161,18 +162,36 @@ pub struct Engine {
     /// Kept alive so the fd backing stderr remains valid.
     logfile: Option<File>,
     namer: Namer,
+    /// Whether EXITCODE was explicitly assigned.
+    exit_was_set: bool,
+    /// Real hostname for HOST mismatch detection.
+    real_host: String,
+    /// Global lockfile held while LOCKFILE is set.
+    globlock: Option<FileLock>,
+    /// Signal to stop processing current rcfile (HOST mismatch).
+    abort: bool,
 }
 
 impl Engine {
     /// Create an engine with the given environment and substitution context.
     pub fn new(env: Environment, ctx: SubstCtx) -> Self {
+        let real_host = env.get(VAR_HOST).unwrap_or("").to_owned();
         Self {
             env,
             ctx,
             verbose: false,
             logfile: None,
             namer: Namer::new(),
+            exit_was_set: false,
+            real_host,
+            globlock: None,
+            abort: false,
         }
+    }
+
+    /// Whether EXITCODE was explicitly assigned in an rcfile.
+    pub fn exit_was_set(&self) -> bool {
+        self.exit_was_set
     }
 
     /// Borrow the maildir unique-name generator.
@@ -223,6 +242,25 @@ impl Engine {
                     self.env.set(name, &cur);
                 }
             }
+            VAR_EXITCODE => {
+                self.exit_was_set = true;
+            }
+            VAR_SHIFT => {
+                let n = value_as_int(value, 0).max(0) as usize;
+                let drain = n.min(self.ctx.argv.len());
+                self.ctx.argv.drain(..drain);
+            }
+            VAR_HOST => {
+                if value != self.real_host {
+                    eprintln!(
+                        "HOST mismatch: \"{}\" strstrstr \"{}\"",
+                        self.real_host, value,
+                    );
+                    self.abort = true;
+                }
+                self.env.set(VAR_HOST, self.real_host.clone());
+            }
+            VAR_LOCKFILE => self.set_globlock(value),
             VAR_LOG => {
                 eprint!("{value}");
             }
@@ -251,6 +289,24 @@ impl Engine {
         self.logfile = Some(f);
     }
 
+    /// Acquire or release the global lockfile.
+    fn set_globlock(&mut self, path: &str) {
+        self.globlock = None;
+        if path.is_empty() {
+            return;
+        }
+        let timeout =
+            self.get_var_as_num(VAR_LOCKTIMEOUT, DEF_LOCKTIMEOUT) as u64;
+        let sleep = self.get_var_as_num(VAR_LOCKSLEEP, DEF_LOCKSLEEP) as u64;
+        match FileLock::acquire_temp_retry(Path::new(path), timeout, sleep) {
+            Ok(lock) => self.globlock = Some(lock),
+            Err(e) => {
+                eprintln!("failed to lock \"{}\": {}", path, e);
+                self.env.remove(VAR_LOCKFILE);
+            }
+        }
+    }
+
     /// Expand variables in a string.
     fn expand(&self, s: &str) -> String {
         crate::variables::subst(s, &self.ctx, &self.env)
@@ -268,7 +324,11 @@ impl Engine {
                 negate: *negate,
                 weight: *weight,
             },
-            Condition::Shell { cmd, negate, weight } => Condition::Shell {
+            Condition::Shell {
+                cmd,
+                negate,
+                weight,
+            } => Condition::Shell {
                 cmd: self.expand(cmd),
                 negate: *negate,
                 weight: *weight,
@@ -335,9 +395,13 @@ impl Engine {
     /// Run a shell command with message as stdin. Returns exit code.
     fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<i32> {
         let shell = self.get_var(VAR_SHELL).unwrap_or(DEF_SHELL).to_owned();
+        let flags = self
+            .get_var(VAR_SHELLFLAGS)
+            .unwrap_or(DEF_SHELLFLAGS)
+            .to_owned();
         let mut child = self
             .spawn(&shell)
-            .arg(DEF_SHELLFLAGS)
+            .arg(&flags)
             .arg(cmd)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -516,9 +580,11 @@ impl Engine {
             Condition::Size { op, bytes, weight } => {
                 self.eval_size(*op, *bytes, *weight, msg)
             }
-            Condition::Shell { cmd, negate, weight } => {
-                self.eval_shell(cmd, *negate, *weight, recipe, msg)
-            }
+            Condition::Shell {
+                cmd,
+                negate,
+                weight,
+            } => self.eval_shell(cmd, *negate, *weight, recipe, msg),
             Condition::Variable {
                 name,
                 pattern,
@@ -944,6 +1010,10 @@ impl Engine {
                 Item::Assign { name, value } => {
                     let expanded = self.expand(value);
                     self.set_var(name, &expanded);
+                    if self.abort {
+                        self.abort = false;
+                        return Ok(Outcome::Default);
+                    }
                 }
                 Item::Recipe(recipe) => {
                     let outcome = self.eval_recipe(recipe, msg, state)?;

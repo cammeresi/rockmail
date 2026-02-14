@@ -31,6 +31,7 @@ pub const VAR_TRAP: &str = "TRAP";
 pub const VAR_NORESRETRY: &str = "NORESRETRY";
 pub const VAR_SUSPEND: &str = "SUSPEND";
 pub const VAR_PROCMAIL_VERSION: &str = "PROCMAIL_VERSION";
+pub const VAR_SHIFT: &str = "SHIFT";
 pub const VAR_PROCMAIL_OVERFLOW: &str = "PROCMAIL_OVERFLOW";
 pub const VAR_SENDMAILFLAGS: &str = "SENDMAILFLAGS";
 pub const VAR_USER_SHELL: &str = "USER_SHELL";

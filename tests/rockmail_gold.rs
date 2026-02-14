@@ -641,8 +641,7 @@ DEFAULT=$DEFAULT
 * 1^1 test
 matched/
 ";
-    let msgs: &[&[u8]] =
-        &[b"From: a@host\nSubject: test test test\n\nBody\n"];
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test test test\n\nBody\n"];
     run_gold(rc, msgs, 1);
 }
 
@@ -730,8 +729,7 @@ DEFAULT=$DEFAULT
 * -50^1 hello
 matched/
 ";
-    let msgs: &[&[u8]] =
-        &[b"From: a@host\nSubject: test hello\n\nBody\n"];
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test hello\n\nBody\n"];
     run_gold(rc, msgs, 1);
 }
 

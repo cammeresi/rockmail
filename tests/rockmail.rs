@@ -137,3 +137,154 @@ inbox/ copy/
     let ib = fs::metadata(copy_files[0].path()).unwrap().ino();
     assert_eq!(ia, ib, "expected hard link (same inode)");
 }
+
+#[test]
+fn builtin_defaults_expand() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let out = d.join("out");
+    let rc = write_rc(
+        d,
+        &format!(
+            "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+:0 hw
+| /bin/echo $SENDMAIL $SHELLFLAGS $LOCKEXT > {}
+",
+            out.display()
+        ),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let text = fs::read_to_string(&out).unwrap();
+    assert!(
+        text.contains("/usr/sbin/sendmail"),
+        "SENDMAIL not expanded: {text:?}"
+    );
+    assert!(text.contains("-c"), "SHELLFLAGS not expanded: {text:?}");
+    assert!(text.contains(".lock"), "LOCKEXT not expanded: {text:?}");
+}
+
+#[test]
+fn exitcode_override() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+EXITCODE=42
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 42);
+}
+
+#[test]
+fn exitcode_not_set_returns_zero() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn shift_positional_args() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let out = d.join("out");
+    let rc = write_rc(
+        d,
+        &format!(
+            "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+SHIFT=1
+
+:0 hw
+| /bin/echo $1 > {}
+",
+            out.display()
+        ),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(
+        d,
+        &["-f", "sender@test", "-a", "first", "-a", "second", &rc],
+        input,
+    );
+    assert_eq!(code, 0);
+    let text = fs::read_to_string(&out).unwrap();
+    assert!(
+        text.contains("second"),
+        "SHIFT didn't move $1 to second arg: {text:?}"
+    );
+}
+
+#[test]
+fn host_mismatch_stops_processing() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+HOST=no.such.host.invalid
+
+:0
+$DIR/matched
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (stderr, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        err.contains("HOST mismatch"),
+        "expected HOST mismatch warning: {err:?}"
+    );
+    assert!(
+        !d.join("matched").exists(),
+        "recipe after HOST mismatch should not run"
+    );
+}
+
+#[test]
+fn lockfile_global_acquired() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let lock = d.join("global.lock");
+    let rc = write_rc(
+        d,
+        &format!(
+            "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+LOCKFILE={}
+",
+            lock.display()
+        ),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    // Lock should be cleaned up after process exits
+    assert!(
+        !lock.exists(),
+        "global lockfile should be removed after exit"
+    );
+}
