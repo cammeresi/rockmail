@@ -25,6 +25,21 @@ pub enum ParseError {
     TooDeep(usize),
 }
 
+/// Strip an inline comment: `value  # comment` → `value`.
+/// Matches procmail (`goodies.c:184`): `#` starts a comment only at a word
+/// boundary, i.e. when preceded by whitespace.  Mid-word `#` is literal.
+fn strip_comment(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    for i in 1..bytes.len() {
+        if bytes[i] == b'#'
+            && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t')
+        {
+            return s[..i].trim_end();
+        }
+    }
+    s
+}
+
 /// Parser state
 pub struct Parser<'a> {
     lines: Peekable<Lines<'a>>,
@@ -89,7 +104,7 @@ impl<'a> Parser<'a> {
     fn parse_assignment(&self, line: &str) -> Option<Item> {
         if let Some(eq) = line.find('=') {
             let name = line[..eq].trim();
-            let value = line[eq + 1..].trim();
+            let value = strip_comment(line[eq + 1..].trim());
             if is_var_name(name) {
                 if name == "INCLUDERC" {
                     Some(Item::Include(value.to_string()))
@@ -127,7 +142,7 @@ impl<'a> Parser<'a> {
         &self, line: &str, line_num: usize,
     ) -> Result<(Flags, Option<String>), ParseError> {
         // Format: :0 [flags] [ : [lockfile] ]
-        let line = line.trim();
+        let line = strip_comment(line.trim());
         let line = line
             .strip_prefix(':')
             .ok_or_else(|| ParseError::Invalid(line_num, line.to_string()))?;
