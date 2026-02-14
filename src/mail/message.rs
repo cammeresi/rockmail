@@ -288,6 +288,11 @@ impl Message {
         }
     }
 
+    /// Extract timestamp from From_ line if present.
+    pub fn envelope_timestamp(&self) -> Option<&str> {
+        super::extract_timestamp(self.from_line()?)
+    }
+
     /// Extract sender from From_ line if present.
     pub fn envelope_sender(&self) -> Option<&str> {
         let line = self.from_line()?;
@@ -306,6 +311,27 @@ impl Message {
         } else {
             0
         };
+
+        let mut buf = Vec::with_capacity(from.len() + self.data.len());
+        buf.extend_from_slice(&from);
+        buf.extend_from_slice(&self.data[old..self.header_end]);
+        buf.extend_from_slice(&self.data[self.header_end..]);
+
+        let delta = from.len() as isize - old as isize;
+        self.header_end = (self.header_end as isize + delta) as usize;
+        self.body_start = (self.body_start as isize + delta) as usize;
+        self.data = buf;
+    }
+
+    /// Replace the sender in the From_ line, preserving the existing timestamp.
+    /// If there is no existing From_ line or no timestamp, falls back to
+    /// `set_envelope_sender` (generating a fresh timestamp).
+    pub fn refresh_envelope_sender(&mut self, sender: &str) {
+        let Some(ts) = self.envelope_timestamp().map(str::to_owned) else {
+            return self.set_envelope_sender(sender);
+        };
+        let from = super::generate_raw(sender, &ts);
+        let old = self.data.iter().position(|&b| b == b'\n').unwrap_or(0) + 1;
 
         let mut buf = Vec::with_capacity(from.len() + self.data.len());
         buf.extend_from_slice(&from);

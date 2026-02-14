@@ -782,3 +782,28 @@ matched/
     ];
     run_gold(rc, msgs, 2);
 }
+
+#[test]
+fn refresh_from_line_preserves_timestamp() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT/
+";
+    let input =
+        b"From old@host  Wed Jan  1 12:34:56 2025\nSubject: Test\n\nBody\n";
+    let g = Gold::new();
+    setup(g.rust_dir.path(), rc);
+    setup(g.proc_dir.path(), rc);
+    let rc_r = g.rust_dir.path().join("rcfile");
+    let rc_p = g.proc_dir.path().join("rcfile");
+    let args_r = ["-f", "-", rc_r.to_str().unwrap()];
+    let args_p = ["-f", "-", rc_p.to_str().unwrap()];
+    let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
+    let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
+    assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
+    diff_dirs(
+        &g.rust_dir.path().join("maildir"),
+        &g.proc_dir.path().join("maildir"),
+    )
+    .unwrap();
+}

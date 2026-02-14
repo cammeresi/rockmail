@@ -254,3 +254,37 @@ fn set_then_strip_roundtrip() {
     msg.strip_from_line();
     assert_eq!(orig.as_bytes(), msg.as_bytes());
 }
+
+#[test]
+fn envelope_timestamp_extraction() {
+    let msg = Message::parse(
+        b"From user@host  Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody",
+    );
+    assert_eq!(msg.envelope_timestamp(), Some("Mon Jan  1 00:00:00 2024"));
+}
+
+#[test]
+fn envelope_timestamp_missing() {
+    let msg = Message::parse(b"Subject: Test\n\nBody");
+    assert_eq!(msg.envelope_timestamp(), None);
+}
+
+#[test]
+fn refresh_envelope_sender_preserves_timestamp() {
+    let mut msg = Message::parse(
+        b"From old@host  Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody",
+    );
+    msg.refresh_envelope_sender("new@host");
+    assert_eq!(msg.envelope_sender(), Some("new@host"));
+    assert_eq!(msg.envelope_timestamp(), Some("Mon Jan  1 00:00:00 2024"));
+    assert_eq!(msg.body(), b"Body");
+}
+
+#[test]
+fn refresh_envelope_sender_no_existing() {
+    let mut msg = Message::parse(b"Subject: Test\n\nBody");
+    msg.refresh_envelope_sender("user@host");
+    assert_eq!(msg.envelope_sender(), Some("user@host"));
+    assert!(msg.envelope_timestamp().is_some());
+    assert_eq!(msg.body(), b"Body");
+}

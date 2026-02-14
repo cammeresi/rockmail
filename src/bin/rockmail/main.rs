@@ -413,7 +413,12 @@ fn run(
     if let Some(ref sender) = args.from
         && (args.override_from || msg.from_line().is_none())
     {
-        msg.set_envelope_sender(sender);
+        if sender == "-" {
+            let invoker = env.get(VAR_LOGNAME).unwrap_or_default().to_owned();
+            msg.refresh_envelope_sender(&invoker);
+        } else {
+            msg.set_envelope_sender(sender);
+        }
     }
 
     let ctx = SubstCtx::new(args.args.clone());

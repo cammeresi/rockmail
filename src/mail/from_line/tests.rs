@@ -48,3 +48,34 @@ fn generate_sender_with_space_panics() {
 fn generate_sender_with_newline_panics() {
     generate("user\n@host");
 }
+
+#[test]
+fn extract_timestamp_standard() {
+    let line = b"From user@host  Mon Jan  1 00:00:00 2024";
+    assert_eq!(extract_timestamp(line), Some("Mon Jan  1 00:00:00 2024"));
+}
+
+#[test]
+fn extract_timestamp_single_space() {
+    let line = b"From user@host Mon Jan  1 00:00:00 2024";
+    assert_eq!(extract_timestamp(line), Some("Mon Jan  1 00:00:00 2024"));
+}
+
+#[test]
+fn extract_timestamp_no_prefix() {
+    assert_eq!(extract_timestamp(b"Subject: Test"), None);
+}
+
+#[test]
+fn extract_timestamp_sender_only() {
+    assert_eq!(extract_timestamp(b"From user@host"), None);
+}
+
+#[test]
+fn extract_timestamp_roundtrip() {
+    let epoch = Utc.timestamp_opt(0, 0).unwrap();
+    let line = generate_with_time("test", epoch);
+    // strip trailing newline to match from_line() output
+    let ts = extract_timestamp(&line[..line.len() - 1]).unwrap();
+    assert_eq!(ts, "Thu Jan  1 00:00:00 1970");
+}
