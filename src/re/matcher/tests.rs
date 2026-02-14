@@ -262,3 +262,42 @@ fn macro_expand() {
         format!("{FROMD_SUBSTITUTE}|{FROMD_SUBSTITUTE}"),
     );
 }
+
+#[test]
+fn double_caret_in_alternation() {
+    let m = Matcher::new("^^foo|bar", false).unwrap();
+    assert!(m.exec("foo").matched);
+    assert!(m.exec("bar").matched);
+    assert!(!m.exec(" foo").matched);
+}
+
+#[test]
+fn capture_with_double_caret() {
+    let m = Matcher::new(r"^^\/.*^^", false).unwrap();
+    let r = m.exec("hello");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("hello"));
+    assert!(!m.exec("hello\n").matched);
+}
+
+#[test]
+fn capture_empty() {
+    let m = Matcher::new(r"foo\/", false).unwrap();
+    let r = m.exec("foo");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some(""));
+}
+
+#[test]
+fn caret_after_newline() {
+    let m = Matcher::new("^second", false).unwrap();
+    assert!(m.exec("first\nsecond").matched);
+    assert!(!m.exec("first second").matched);
+}
+
+#[test]
+fn double_caret_ignores_after_newline() {
+    let m = Matcher::new("^^second", false).unwrap();
+    assert!(!m.exec("first\nsecond").matched);
+    assert!(m.exec("second line").matched);
+}

@@ -867,3 +867,56 @@ LOGABSTRACT=yes
     let pa = normalize_abstract(&plog);
     assert_eq!(ra, pa, "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}");
 }
+
+#[test]
+fn macro_to_underscore() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^TO_alice@example\\.com
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: x@host\nTo: alice@example.com\n\nBody\n",
+        b"From: x@host\nCc: alice@example.com\n\nBody\n",
+        b"From: x@host\nTo: bob@host\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn macro_to_word_boundary() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^TOalice
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: x@host\nTo: alice@host\n\nBody\n",
+        b"From: x@host\nTo: malice@host\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn macro_from_daemon() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^FROM_DAEMON
+daemon
+";
+    let msgs: &[&[u8]] = &[
+        b"From: MAILER-DAEMON@host\nSubject: bounce\n\nBody\n",
+        b"From: x@host\nPrecedence: bulk\nSubject: list\n\nBody\n",
+        b"From: user@host\nSubject: hello\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
