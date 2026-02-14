@@ -69,6 +69,48 @@ fn umask_override() {
     assert_eq!(mode, 0o644, "expected 0644, got {mode:03o}");
 }
 
+/// UMASK=022 gives maildir message files mode 0644.
+#[test]
+fn maildir_file_perms() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let inbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/fallback\nUMASK=022\n\n:0\ninbox/\n",
+    );
+    let code = run(d, &["-f", "sender@test", &rc], MSG);
+    assert_eq!(code, 0);
+    let entry = fs::read_dir(inbox.join("new"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    let mode = entry.metadata().unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o644, "message file: expected 0644, got {mode:03o}");
+}
+
+/// MH folder directory and message file respect UMASK=022.
+#[test]
+fn mh_perms() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let inbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/fallback\nUMASK=022\n\n:0\ninbox/.\n",
+    );
+    let code = run(d, &["-f", "sender@test", &rc], MSG);
+    assert_eq!(code, 0);
+
+    let mode = fs::metadata(&inbox).unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o755, "MH dir: expected 0755, got {mode:03o}");
+
+    let msg = inbox.join("1");
+    let mode = fs::metadata(&msg).unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o644, "MH message: expected 0644, got {mode:03o}");
+}
+
 /// UMASK=022 gives maildir subdirectories mode 0755 (execute bit set).
 /// After clearing UPDATE_MASK on the maildir, a second delivery restores it.
 #[test]
