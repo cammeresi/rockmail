@@ -58,3 +58,49 @@ fn empty_forward_becomes_folder() {
         _ => panic!("expected folder"),
     }
 }
+
+#[test]
+fn pipe_capture_empty_name() {
+    // =| cmd — empty var name, not a valid capture
+    match Action::parse_line("=| /bin/cmd") {
+        Action::Folder(_) => {}
+        _ => panic!("expected folder for empty var name"),
+    }
+}
+
+#[test]
+fn pipe_capture_underscore() {
+    match Action::parse_line("_=| /bin/cmd") {
+        Action::Pipe { capture, .. } => assert_eq!(capture.unwrap(), "_"),
+        _ => panic!("expected pipe capture"),
+    }
+}
+
+#[test]
+fn pipe_capture_space_before_eq() {
+    // VAR =| cmd — space before = makes it not a var name
+    match Action::parse_line("VAR =| /bin/cmd") {
+        Action::Folder(_) => {}
+        _ => panic!("expected folder when space before ="),
+    }
+}
+
+#[test]
+fn pipe_capture_space_after_eq() {
+    // VAR= | cmd — space between = and | is OK
+    match Action::parse_line("VAR= | /bin/cmd") {
+        Action::Pipe { cmd, capture } => {
+            assert_eq!(capture.unwrap(), "VAR");
+            assert_eq!(cmd, "/bin/cmd");
+        }
+        _ => panic!("expected pipe capture"),
+    }
+}
+
+#[test]
+fn pipe_capture_invalid_name() {
+    match Action::parse_line("123=| /bin/cmd") {
+        Action::Folder(_) => {}
+        _ => panic!("expected folder for invalid var name"),
+    }
+}
