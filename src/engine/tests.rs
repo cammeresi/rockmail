@@ -393,3 +393,36 @@ fn weighted_negated_inverts_score() {
     // Negated weighted: score becomes negative, so no match
     assert_eq!(t.process(&items), Outcome::Default);
 }
+
+#[test]
+fn action_folder_expands_variable() {
+    let mut t = Test::new();
+    let dir = t.maildir("expanded");
+    t.engine.set_var("DEST", &dir);
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![],
+        action: Action::Folder(PathBuf::from("$DEST")),
+    })];
+    assert!(matches!(
+        t.process(&items),
+        Outcome::Delivered(p) if p.contains("expanded")
+    ));
+}
+
+#[test]
+fn action_pipe_expands_variable() {
+    let mut t = Test::new();
+    t.engine.set_var("CMD", "cat");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![],
+        action: Action::Pipe {
+            cmd: "$CMD".to_string(),
+            capture: None,
+        },
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}

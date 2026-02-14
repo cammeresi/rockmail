@@ -121,26 +121,36 @@ MAILDIR=/var/mail  # inline comment
 "#;
     let items = parse(rc).unwrap();
     assert_eq!(items.len(), 2);
-    assert!(matches!(&items[0], Item::Assign { value, .. } if value == "/var/mail"));
+    assert!(
+        matches!(&items[0], Item::Assign { value, .. } if value == "/var/mail")
+    );
 }
 
 #[test]
 fn inline_comment_edge_cases() {
     // Mid-word # is literal
     let items = parse("PATH=/tmp/#nasty").unwrap();
-    assert!(matches!(&items[0], Item::Assign { value, .. } if value == "/tmp/#nasty"));
+    assert!(
+        matches!(&items[0], Item::Assign { value, .. } if value == "/tmp/#nasty")
+    );
 
     // No space before # is literal
     let items = parse("VAR=hello#world").unwrap();
-    assert!(matches!(&items[0], Item::Assign { value, .. } if value == "hello#world"));
+    assert!(
+        matches!(&items[0], Item::Assign { value, .. } if value == "hello#world")
+    );
 
     // First whitespace-# wins
     let items = parse("VAR=hello # world # more").unwrap();
-    assert!(matches!(&items[0], Item::Assign { value, .. } if value == "hello"));
+    assert!(
+        matches!(&items[0], Item::Assign { value, .. } if value == "hello")
+    );
 
     // Tab before # also starts a comment
     let items = parse("VAR=value\t# tab comment").unwrap();
-    assert!(matches!(&items[0], Item::Assign { value, .. } if value == "value"));
+    assert!(
+        matches!(&items[0], Item::Assign { value, .. } if value == "value")
+    );
 }
 
 #[test]

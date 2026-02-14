@@ -31,9 +31,7 @@ pub enum ParseError {
 fn strip_comment(s: &str) -> &str {
     let bytes = s.as_bytes();
     for i in 1..bytes.len() {
-        if bytes[i] == b'#'
-            && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t')
-        {
+        if bytes[i] == b'#' && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t') {
             return s[..i].trim_end();
         }
     }
