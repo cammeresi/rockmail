@@ -30,7 +30,8 @@ use crate::variables::{
 mod tests;
 
 const MAX_INCLUDE_DEPTH: usize = 32;
-const WEIGHT_EPSILON: f64 = 1e-10;
+const MAX32: f64 = i32::MAX as f64;
+const MIN32: f64 = i32::MIN as f64;
 
 /// Result of processing all recipes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,23 +108,39 @@ impl ConditionResult {
     }
 }
 
-/// Compute weighted score from count of matches.
-/// Formula: w * (x^n - 1) / (x - 1) when x != 1, or w * n when x == 1.
-fn compute_weighted_score(wt: Weight, n: usize) -> f64 {
-    if n == 0 {
-        return 0.0;
+/// Iterative weighted scoring matching procmail's misc.c:537-560.
+fn score_regex(m: &Matcher, text: &str, wt: Weight) -> f64 {
+    let mut score = 0.0;
+    let mut w = wt.w;
+    let mut ow = w * w;
+    let mut pos = 0;
+
+    while w != 0.0 && score > MIN32 && score < MAX32 {
+        let Some((start, end)) = m.find_from(text, pos) else {
+            break;
+        };
+        score += w;
+        w *= wt.x;
+        if end == start {
+            // Zero-width match
+            if wt.x > 0.0 && wt.x < 1.0 {
+                score += w / (1.0 - wt.x);
+            } else if wt.x >= 1.0 && w != 0.0 {
+                score += if w < 0.0 { MIN32 } else { MAX32 };
+            }
+            break;
+        }
+        let nw = w * w;
+        if nw < ow && ow < 1.0 {
+            break;
+        }
+        ow = nw;
+        pos = end;
+        if pos > text.len() {
+            break;
+        }
     }
-    let n = n as f64;
-    let score = if (wt.x - 1.0).abs() < WEIGHT_EPSILON {
-        wt.w * n
-    } else {
-        wt.w * (wt.x.powf(n) - 1.0) / (wt.x - 1.0)
-    };
-    if score.is_nan() || score.is_infinite() {
-        0.0
-    } else {
-        score
-    }
+    score.clamp(MIN32, MAX32)
 }
 
 /// Skip mbox From_ line if present.
@@ -251,8 +268,9 @@ impl Engine {
                 negate: *negate,
                 weight: *weight,
             },
-            Condition::Shell { cmd, weight } => Condition::Shell {
+            Condition::Shell { cmd, negate, weight } => Condition::Shell {
                 cmd: self.expand(cmd),
+                negate: *negate,
                 weight: *weight,
             },
             Condition::Variable {
@@ -314,8 +332,8 @@ impl Engine {
         }
     }
 
-    /// Run a shell command with message as stdin.
-    fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<bool> {
+    /// Run a shell command with message as stdin. Returns exit code.
+    fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<i32> {
         let shell = self.get_var(VAR_SHELL).unwrap_or(DEF_SHELL).to_owned();
         let mut child = self
             .spawn(&shell)
@@ -335,8 +353,7 @@ impl Engine {
 
         let status =
             crate::util::wait_timeout(&mut child, self.timeout(), cmd)?;
-        self.ctx.last_exit = status.code().unwrap_or(-1);
-        Ok(status.success())
+        Ok(status.code().unwrap_or(-1))
     }
 
     fn timeout(&self) -> Duration {
@@ -382,11 +399,13 @@ impl Engine {
     }
 
     fn eval_shell(
-        &mut self, cmd: &str, weight: Option<Weight>, recipe: &Recipe,
-        msg: &Message,
+        &mut self, cmd: &str, negate: bool, weight: Option<Weight>,
+        recipe: &Recipe, msg: &Message,
     ) -> EngineResult<ConditionResult> {
         let text = self.grep_text(msg, &recipe.flags);
-        let ok = self.run_shell(cmd, text.as_bytes())?;
+        let exit = self.run_shell(cmd, text.as_bytes())?;
+        self.ctx.last_exit = exit;
+        let ok = (exit == 0) ^ negate;
 
         if self.verbose {
             eprintln!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
@@ -396,8 +415,20 @@ impl Engine {
             return Ok(ConditionResult::simple(ok));
         };
 
-        // Weighted shell: success = w, failure = x
-        let score = if ok { wt.w } else { wt.x };
+        // Procmail misc.c:577-591
+        let mut score = 0.0;
+        let mut w = wt.w;
+        if negate {
+            for _ in 0..exit {
+                score += w;
+                w *= wt.x;
+                if score <= MIN32 || score >= MAX32 {
+                    break;
+                }
+            }
+        } else {
+            score += if exit != 0 { wt.x } else { wt.w };
+        }
         Ok(ConditionResult::scored(score))
     }
 
@@ -427,12 +458,14 @@ impl Engine {
             return Ok(ConditionResult::simple(matched));
         };
 
-        let count = matcher.count_matches(text);
-        let score = compute_weighted_score(wt, count);
-        let score = if negate { -score } else { score };
+        let score = if negate {
+            if result.matched { 0.0 } else { wt.w }
+        } else {
+            score_regex(&matcher, text, wt)
+        };
 
         if self.verbose {
-            eprintln!("Score {} ({} matches) on {}", score, count, label);
+            eprintln!("Score {} on {}", score, label);
         }
 
         Ok(ConditionResult::scored(score))
@@ -483,8 +516,8 @@ impl Engine {
             Condition::Size { op, bytes, weight } => {
                 self.eval_size(*op, *bytes, *weight, msg)
             }
-            Condition::Shell { cmd, weight } => {
-                self.eval_shell(cmd, *weight, recipe, msg)
+            Condition::Shell { cmd, negate, weight } => {
+                self.eval_shell(cmd, *negate, *weight, recipe, msg)
             }
             Condition::Variable {
                 name,
@@ -519,6 +552,14 @@ impl Engine {
                 score += r.score;
                 has_score = true;
             }
+        }
+
+        // misc.c:622-625: underflow forces match failure, overflow clamps
+        if score <= MIN32 {
+            return Ok((false, score));
+        }
+        if score > MAX32 {
+            score = MAX32;
         }
 
         // If we used scoring, match requires score > 0
@@ -830,7 +871,12 @@ impl Engine {
 
         state.last_succ =
             matches!(result, Outcome::Delivered(_) | Outcome::Continue);
-        self.ctx.last_score = score as i64;
+        // misc.c:647-648: if score truncates to 0 but was positive, use 1
+        self.ctx.last_score = if score as i64 == 0 && score > 0.0 {
+            1
+        } else {
+            score as i64
+        };
 
         // Copy flag means continue processing even after delivery
         if recipe.flags.copy && matches!(result, Outcome::Delivered(_)) {

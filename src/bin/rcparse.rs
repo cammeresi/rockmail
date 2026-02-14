@@ -93,8 +93,9 @@ fn format_condition(c: &Condition) -> String {
             };
             format!("{}size {} {} bytes", prefix, cmp, bytes)
         }
-        Condition::Shell { cmd, weight } => {
-            format!("{}shell {:?}", format_weight(*weight), cmd)
+        Condition::Shell { cmd, negate, weight } => {
+            let neg = if *negate { "!" } else { "" };
+            format!("{}{}shell {:?}", format_weight(*weight), neg, cmd)
         }
         Condition::Variable {
             name,

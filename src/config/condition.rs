@@ -33,10 +33,13 @@ fn parse_weight(s: &str) -> (Option<Weight>, &str) {
     (Some(Weight { w, x }), rest[end..].trim_start())
 }
 
-fn parse_shell(s: &str, weight: Option<Weight>) -> Option<Condition> {
+fn parse_shell(
+    s: &str, negate: bool, weight: Option<Weight>,
+) -> Option<Condition> {
     let cmd = s.strip_prefix('?')?;
     Some(Condition::Shell {
         cmd: cmd.trim_start().to_string(),
+        negate,
         weight,
     })
 }
@@ -97,7 +100,7 @@ fn parse_inner(
         return parse_subst(s, negate, weight);
     }
     if s.starts_with('?') {
-        return parse_shell(s, weight);
+        return parse_shell(s, negate, weight);
     }
     if s.starts_with('<') {
         return parse_size_less(s, weight);
@@ -127,7 +130,7 @@ pub enum Condition {
         weight: Option<Weight>,
     },
     /// Shell command exit code (? prefix)
-    Shell { cmd: String, weight: Option<Weight> },
+    Shell { cmd: String, negate: bool, weight: Option<Weight> },
     /// Variable match: VAR ?? pattern
     Variable {
         name: String,

@@ -43,10 +43,11 @@ fn size() {
 #[test]
 fn shell() {
     let c = Condition::parse("? test -f /tmp/flag").unwrap();
-    let Condition::Shell { cmd, weight } = c else {
+    let Condition::Shell { cmd, negate, weight } = c else {
         panic!("expected shell");
     };
     assert_eq!(cmd, "test -f /tmp/flag");
+    assert!(!negate);
     assert!(weight.is_none());
 }
 
@@ -194,10 +195,11 @@ fn weighted_size() {
 #[test]
 fn weighted_shell() {
     let c = Condition::parse("100^0 ? test -f /flag").unwrap();
-    let Condition::Shell { cmd, weight } = c else {
+    let Condition::Shell { cmd, negate, weight } = c else {
         panic!("expected shell");
     };
     assert_eq!(cmd, "test -f /flag");
+    assert!(!negate);
     let w = weight.unwrap();
     assert!((w.w - 100.0).abs() < 0.001);
 }

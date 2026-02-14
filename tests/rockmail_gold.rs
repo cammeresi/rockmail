@@ -630,3 +630,157 @@ matched
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
     run_gold(rc, msgs, 1);
 }
+
+#[test]
+fn weighted_positive_score_delivers() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 1^1 test
+matched/
+";
+    let msgs: &[&[u8]] =
+        &[b"From: a@host\nSubject: test test test\n\nBody\n"];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
+fn weighted_no_match_skips() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 100^1 nope
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: hello\n\nBody\n"];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
+fn weighted_negated_match_zero() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 100^1 ! test
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
+fn weighted_negated_nonmatch_delivers() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 100^1 ! nope
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: hello\n\nBody\n"];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
+fn weighted_convergent_exponent() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 10^0.5 test
+matched/
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: test test test test\n\nBody\n",
+        b"From: b@host\nSubject: nope\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn weighted_negative_weight_blocks() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* -10^1 test
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
+fn weighted_multiple_conditions() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 100^1 test
+* -50^1 hello
+matched/
+";
+    let msgs: &[&[u8]] =
+        &[b"From: a@host\nSubject: test hello\n\nBody\n"];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
+fn weighted_mixed_conditions() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^From:.*alice
+* 10^1 urgent
+matched/
+";
+    let msgs: &[&[u8]] = &[
+        b"From: alice@host\nSubject: urgent\n\nBody\n",
+        b"From: bob@host\nSubject: urgent\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
+fn weighted_empty_match_tail_sum() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* -10^0.5 ^^
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: hi\n\nBody\n"];
+    run_gold(rc, msgs, 1);
+}
+
+#[test]
+fn weighted_score_determines_delivery() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 50^1 test
+* -30^1 hello
+matched/
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: test hello\n\nBody\n",
+        b"From: b@host\nSubject: hello hello hello\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}

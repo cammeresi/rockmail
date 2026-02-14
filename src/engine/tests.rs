@@ -378,7 +378,7 @@ fn weighted_condition_zero_matches_fails() {
 }
 
 #[test]
-fn weighted_negated_inverts_score() {
+fn weighted_negated_match_scores_zero() {
     let mut t = Test::with_msg("Subject: spam spam spam\n\nBody");
     let items = vec![Item::Recipe(Recipe {
         flags: Flags::new(),
@@ -390,8 +390,39 @@ fn weighted_negated_inverts_score() {
         }],
         action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
     })];
-    // Negated weighted: score becomes negative, so no match
     assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn weighted_negated_nonmatch_adds_weight() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "spam".to_string(),
+            negate: true,
+            weight: Some(Weight { w: 100.0, x: 1.0 }),
+        }],
+        action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn weighted_empty_match_tail_sum() {
+    let mut t = Test::with_msg("Subject: test\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "^".to_string(),
+            negate: false,
+            weight: Some(Weight { w: 2.0, x: 0.5 }),
+        }],
+        action: Action::Folder(vec![PathBuf::from(t.maildir("tailsum"))]),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
 #[test]

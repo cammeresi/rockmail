@@ -303,8 +303,9 @@ impl Matcher {
         }
     }
 
-    /// Count all non-overlapping matches in text. Used for weighted scoring.
-    pub fn count_matches(&self, text: &str) -> usize {
-        self.regex.find_iter(text).count()
+    /// Find next match starting at byte offset `pos`. Returns (start, end).
+    pub fn find_from(&self, text: &str, pos: usize) -> Option<(usize, usize)> {
+        let m = self.regex.find(&text[pos..])?;
+        Some((pos + m.start(), pos + m.end()))
     }
 }
