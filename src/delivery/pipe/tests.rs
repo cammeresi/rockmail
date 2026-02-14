@@ -77,6 +77,6 @@ fn timeout_kills_hung_command() {
     let r = deliver("exec sleep 60", &m, false, true, false, &env);
     let elapsed = start.elapsed().as_secs();
 
-    assert!(elapsed < 5);
+    assert!(elapsed < 4);
     assert!(matches!(r, Err(DeliveryError::PipeSignal(_))));
 }

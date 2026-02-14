@@ -94,6 +94,13 @@ without arguments is supported, which outputs split messages to stdout.
 
 Splitting BABYL format mailboxes is unsupported.
 
+## TIMEOUT: SIGKILL escalation
+
+Procmail sends only SIGTERM when a child process exceeds the TIMEOUT.
+Rockmail sends SIGTERM, waits 1 second, then sends SIGKILL if the
+process is still running. This ensures hung processes are cleaned up
+but gives less time for graceful shutdown.
+
 ## /etc/procmail.conf configuration file
 
 Although this file is undocumented, procmail will read sitewide configuration,

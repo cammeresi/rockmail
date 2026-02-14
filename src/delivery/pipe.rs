@@ -1,4 +1,4 @@
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::process::{Command, Stdio};
 
 use super::{DeliveryError, DeliveryResult};
@@ -51,9 +51,8 @@ pub fn deliver(
         .stderr(Stdio::inherit())
         .spawn()?;
 
-    crate::util::spawn_watchdog(child.id(), env.timeout());
-
     let data = msg.as_bytes();
+    let stdout = child.stdout.take();
 
     if let Some(mut stdin) = child.stdin.take()
         && let Err(e) = stdin.write_all(data)
@@ -62,16 +61,24 @@ pub fn deliver(
         return Err(e.into());
     }
 
-    let output = child.wait_with_output()?;
+    let captured = if let Some(mut r) = stdout {
+        let mut buf = Vec::new();
+        r.read_to_end(&mut buf)?;
+        Some(buf)
+    } else {
+        None
+    };
 
-    if wait && !output.status.success() {
-        if let Some(code) = output.status.code() {
+    let status = crate::util::wait_timeout(&mut child, env.timeout(), cmd)?;
+
+    if wait && !status.success() {
+        if let Some(code) = status.code() {
             return Err(DeliveryError::PipeExit(code));
         }
         #[cfg(unix)]
         {
             use std::os::unix::process::ExitStatusExt;
-            if let Some(sig) = output.status.signal() {
+            if let Some(sig) = status.signal() {
                 return Err(DeliveryError::PipeSignal(sig));
             }
         }
@@ -80,7 +87,7 @@ pub fn deliver(
 
     Ok(PipeResult {
         bytes: data.len(),
-        output: if grab { Some(output.stdout) } else { None },
+        output: captured,
     })
 }
 

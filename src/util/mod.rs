@@ -34,47 +34,48 @@ pub fn exit(code: u8) -> ExitCode {
     ExitCode::from(code)
 }
 
-/// Wait for a child process with a timeout.
-///
-/// Polls `try_wait` every 100ms. On timeout, sends SIGTERM, waits 1s,
+/// SIGTERM, then SIGKILL after 1s. Bounded wait after SIGKILL avoids
+/// hanging forever on processes in uninterruptible sleep (D state).
+fn terminate(child: &mut Child, cmd: &str) -> io::Result<ExitStatus> {
+    let pid = Pid::from_raw(child.id() as i32);
+    if kill(pid, Signal::SIGTERM).is_ok() {
+        eprintln!("Timeout, terminating \"{}\"", cmd);
+    } else {
+        eprintln!("Timeout, was waiting for \"{}\"", cmd);
+    }
+    thread::sleep(Duration::from_secs(1));
+    if let Some(s) = child.try_wait()? {
+        return Ok(s);
+    }
+    let _ = kill(pid, Signal::SIGKILL);
+    for _ in 0..50 {
+        thread::sleep(Duration::from_millis(100));
+        if let Some(s) = child.try_wait()? {
+            return Ok(s);
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::TimedOut, "child unkillable"))
+}
+
+/// Polls `try_wait` with exponential backoff. On timeout, sends SIGTERM
 /// then SIGKILL. Returns the exit status (which may reflect the signal).
 pub fn wait_timeout(
-    child: &mut Child, timeout: Duration,
+    child: &mut Child, timeout: Duration, cmd: &str,
 ) -> io::Result<ExitStatus> {
     let start = Instant::now();
-    let poll = Duration::from_millis(100);
+    let cap = Duration::from_millis(100);
+    let mut poll = Duration::from_millis(1);
 
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(status);
         }
         if start.elapsed() >= timeout {
-            let pid = Pid::from_raw(child.id() as i32);
-            let _ = kill(pid, Signal::SIGTERM);
-            thread::sleep(Duration::from_secs(1));
-            if child.try_wait()?.is_none() {
-                let _ = kill(pid, Signal::SIGKILL);
-            }
-            return child.wait();
+            return terminate(child, cmd);
         }
         thread::sleep(poll);
+        poll = (poll * 2).min(cap);
     }
-}
-
-/// Spawn a watchdog thread that kills `pid` after `timeout`.
-///
-/// If the child exits before the timeout, the kill returns ESRCH
-/// (harmlessly ignored). For use with `wait_with_output()` which
-/// consumes the Child.
-pub fn spawn_watchdog(pid: u32, timeout: Duration) {
-    thread::spawn(move || {
-        thread::sleep(timeout);
-        let pid = Pid::from_raw(pid as i32);
-        if kill(pid, Signal::SIGTERM).is_ok() {
-            thread::sleep(Duration::from_secs(1));
-            let _ = kill(pid, Signal::SIGKILL);
-        }
-    });
 }
 
 pub fn now_secs() -> u64 {

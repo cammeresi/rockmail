@@ -20,10 +20,10 @@ use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
     DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_SENDMAIL,
-    DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEF_TIMEOUT, DEV_NULL,
-    Environment, SubstCtx, VAR_LOCKEXT, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT,
-    VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_SENDMAIL, VAR_SENDMAILFLAGS,
-    VAR_SHELL, VAR_TIMEOUT, VAR_UMASK, VAR_VERBOSE,
+    DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL, Environment,
+    SubstCtx, VAR_LOCKEXT, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG,
+    VAR_LOGFILE, VAR_MAILDIR, VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL,
+    VAR_UMASK, VAR_VERBOSE,
 };
 
 #[cfg(test)]
@@ -333,14 +333,14 @@ impl Engine {
             return Err(e.into());
         }
 
-        let status = crate::util::wait_timeout(&mut child, self.timeout())?;
+        let status =
+            crate::util::wait_timeout(&mut child, self.timeout(), cmd)?;
         self.ctx.last_exit = status.code().unwrap_or(-1);
         Ok(status.success())
     }
 
     fn timeout(&self) -> Duration {
-        let secs = self.get_var_as_num(VAR_TIMEOUT, DEF_TIMEOUT) as u64;
-        Duration::from_secs(secs)
+        self.env.timeout()
     }
 
     fn eval_size(
@@ -743,7 +743,8 @@ impl Engine {
             return Err(e.into());
         }
 
-        let status = crate::util::wait_timeout(&mut child, self.timeout())?;
+        let status =
+            crate::util::wait_timeout(&mut child, self.timeout(), &sendmail)?;
         self.ctx.last_exit = status.code().unwrap_or(-1);
 
         if !status.success() {

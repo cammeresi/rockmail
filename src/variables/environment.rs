@@ -46,11 +46,16 @@ impl Environment {
         self.vars.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
+    /// Zero or negative means "no timeout", matching procmail's `alarm(0)`.
     pub fn timeout(&self) -> Duration {
         let secs = self
             .get(VAR_TIMEOUT)
             .map(|v| value_as_int(v, DEF_TIMEOUT))
-            .unwrap_or(DEF_TIMEOUT) as u64;
-        Duration::from_secs(secs)
+            .unwrap_or(DEF_TIMEOUT);
+        if secs <= 0 {
+            Duration::MAX
+        } else {
+            Duration::from_secs(secs as u64)
+        }
     }
 }
