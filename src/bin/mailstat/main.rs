@@ -267,7 +267,7 @@ fn acquire_locks(base: &Path) -> Result<Vec<FileLock>, ExitCode> {
     let mut locks = Vec::new();
     let old = base.with_added_extension("old");
     for path in [base, old.as_path()] {
-        match FileLock::acquire(path) {
+        match FileLock::acquire_blocking(path) {
             Ok(l) => locks.push(l),
             Err(e) => {
                 eprintln!(

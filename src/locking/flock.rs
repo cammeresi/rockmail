@@ -14,13 +14,14 @@ pub struct FileLock {
 }
 
 impl FileLock {
-    pub fn acquire(path: &Path) -> Result<Self, LockError> {
-        Self::open(path, None)
+    /// Acquire a blocking lock (waits until available).
+    pub fn acquire_blocking(path: &Path) -> Result<Self, LockError> {
+        Self::open(path, None, FlockArg::LockExclusive)
     }
 
     /// Acquire a lock and remove the file on drop.
     pub fn acquire_temp(path: &Path) -> Result<Self, LockError> {
-        Self::open(path, Some(path.to_path_buf()))
+        Self::open(path, Some(path.to_path_buf()), FlockArg::LockExclusiveNonblock)
     }
 
     /// Acquire a temp lock with retry and stale-lock removal.
@@ -62,7 +63,9 @@ impl FileLock {
         }
     }
 
-    fn open(path: &Path, cleanup: Option<PathBuf>) -> Result<Self, LockError> {
+    fn open(
+        path: &Path, cleanup: Option<PathBuf>, arg: FlockArg,
+    ) -> Result<Self, LockError> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -73,8 +76,8 @@ impl FileLock {
                 std::io::ErrorKind::NotFound => LockError::Unavailable,
                 _ => LockError::Io(e),
             })?;
-        let lock = Flock::lock(file, FlockArg::LockExclusiveNonblock)
-            .map_err(|_| LockError::Exists)?;
+        let lock =
+            Flock::lock(file, arg).map_err(|_| LockError::Exists)?;
         Ok(Self { lock, cleanup })
     }
 }

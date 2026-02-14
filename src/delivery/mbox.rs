@@ -127,7 +127,7 @@ pub fn deliver(
 ) -> Result<DeliveryResult, DeliveryError> {
     // Locking /dev/null would be silly (matches procmail behavior).
     let _guard = if path != Path::new(DEV_NULL) {
-        Some(FileLock::acquire(path)?)
+        Some(FileLock::acquire_blocking(path)?)
     } else {
         None
     };
