@@ -7,7 +7,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use clap::Parser;
-use rockmail::locking::{create_lock, lock_mtime, remove_lock};
+use rockmail::locking::{MAX_LOCK_SIZE, create_lock, lock_mtime, remove_lock};
 use rockmail::util::{LockError, exit, now_secs, signals, *};
 
 const DEF_LOCKSLEEP: u64 = 8;
@@ -104,6 +104,12 @@ fn check_signal(path: &Path) -> Result<(), u8> {
 
 fn try_force_unlock(path: &Path, force: u64, suspend: u64) -> bool {
     if force == 0 {
+        return false;
+    }
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if meta.is_dir() || meta.len() > MAX_LOCK_SIZE {
         return false;
     }
     let Some(mtime) = lock_mtime(path) else {

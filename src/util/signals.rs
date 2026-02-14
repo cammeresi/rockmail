@@ -2,7 +2,9 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use nix::sys::signal::{SigHandler, SigSet, SigmaskHow, Signal, signal, sigprocmask};
+use nix::sys::signal::{
+    SigHandler, SigSet, SigmaskHow, Signal, signal, sigprocmask,
+};
 
 static EXIT_FLAG: AtomicBool = AtomicBool::new(false);
 
@@ -41,7 +43,12 @@ pub fn should_exit() -> bool {
 
 fn term_set() -> SigSet {
     let mut set = SigSet::empty();
-    for sig in [Signal::SIGHUP, Signal::SIGINT, Signal::SIGQUIT, Signal::SIGTERM] {
+    for sig in [
+        Signal::SIGHUP,
+        Signal::SIGINT,
+        Signal::SIGQUIT,
+        Signal::SIGTERM,
+    ] {
         set.add(sig);
     }
     set

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use nix::fcntl::{Flock, FlockArg};
 
+use super::MAX_LOCK_SIZE;
 use crate::util::{LockError, signals};
 
 pub struct FileLock {
@@ -21,7 +22,11 @@ impl FileLock {
 
     /// Acquire a lock and remove the file on drop.
     pub fn acquire_temp(path: &Path) -> Result<Self, LockError> {
-        Self::open(path, Some(path.to_path_buf()), FlockArg::LockExclusiveNonblock)
+        Self::open(
+            path,
+            Some(path.to_path_buf()),
+            FlockArg::LockExclusiveNonblock,
+        )
     }
 
     /// Acquire a temp lock with retry and stale-lock removal.
@@ -46,6 +51,8 @@ impl FileLock {
 
             if !forced
                 && let Ok(meta) = fs::metadata(path)
+                && !meta.is_dir()
+                && meta.len() <= MAX_LOCK_SIZE
                 && let Ok(mtime) = meta.modified()
                 && let Ok(age) = SystemTime::now().duration_since(mtime)
                 && age > timeout
@@ -76,8 +83,7 @@ impl FileLock {
                 std::io::ErrorKind::NotFound => LockError::Unavailable,
                 _ => LockError::Io(e),
             })?;
-        let lock =
-            Flock::lock(file, arg).map_err(|_| LockError::Exists)?;
+        let lock = Flock::lock(file, arg).map_err(|_| LockError::Exists)?;
         Ok(Self { lock, cleanup })
     }
 }
