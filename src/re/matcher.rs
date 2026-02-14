@@ -81,7 +81,7 @@ fn expand_macros(pat: &str) -> String {
 
     let mut result = pat.to_string();
     for (key, sub) in macros {
-        if let Some(pos) = result.find(key) {
+        while let Some(pos) = result.find(key) {
             result.replace_range(pos..pos + key.len(), sub);
         }
     }

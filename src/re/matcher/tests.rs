@@ -257,4 +257,8 @@ fn macro_expand() {
     assert_eq!(expand_macros("^TO_foo"), format!("{}foo", TO_SUBSTITUTE));
     assert_eq!(expand_macros("^TOfoo"), format!("{}foo", TO2_SUBSTITUTE));
     assert_eq!(expand_macros("plain"), "plain");
+    assert_eq!(
+        expand_macros("^FROM_DAEMON|^FROM_DAEMON"),
+        format!("{FROMD_SUBSTITUTE}|{FROMD_SUBSTITUTE}"),
+    );
 }
