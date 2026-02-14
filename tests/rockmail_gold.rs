@@ -11,7 +11,7 @@
 use std::borrow::Borrow;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::{env, fs, panic, process};
+use std::{fs, panic, process};
 
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -74,7 +74,7 @@ fn copy_dir(src: &Path, dst: &Path) {
 
 fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
     let dir =
-        env::temp_dir().join(format!("rockmail-gold-fail-{}", process::id(),));
+        PathBuf::from("tmp").join(format!("rockmail-gold-fail-{}", process::id(),));
     let _ = fs::create_dir_all(&dir);
     fs::write(dir.join("rcfile"), rc_template).ok();
     for (i, msg) in inputs.iter().enumerate() {
