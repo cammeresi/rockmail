@@ -1,6 +1,72 @@
 use super::*;
 
 #[test]
+fn null_bytes_in_header() {
+    let msg = Message::parse(b"Subject: Test\x00null\n\nBody");
+    let s = msg.get_header("Subject").unwrap();
+    // Null is valid UTF-8; passes through unchanged
+    assert!(s.contains('\0'));
+}
+
+#[test]
+fn long_header_line() {
+    let v = "x".repeat(2000);
+    let raw = format!("Subject: {v}\n\nBody");
+    let msg = Message::parse(raw.as_bytes());
+    assert_eq!(msg.get_header("Subject").unwrap().len(), 2000);
+}
+
+#[test]
+fn header_empty_value() {
+    let msg = Message::parse(b"Subject:\n\nBody");
+    assert_eq!(msg.get_header("Subject").unwrap().as_ref(), "");
+}
+
+#[test]
+fn utf8_invalid_sequences() {
+    let msg = Message::parse(b"Subject: \xFF\xFE invalid\n\nBody");
+    let s = msg.get_header("Subject").unwrap();
+    assert!(s.contains('\u{FFFD}'));
+}
+
+#[test]
+fn crlf_in_continuation() {
+    let msg = Message::parse(b"Subject: Line1\r\n continuing\n\nBody");
+    let s = msg.get_header("Subject").unwrap();
+    assert_eq!(s.as_ref(), "Line1 continuing");
+}
+
+#[test]
+fn content_length_mismatch() {
+    let msg = Message::parse(b"Content-Length: 5\n\nThis is longer");
+    assert_eq!(msg.content_length(), Some(5));
+    assert_eq!(msg.body().len(), 14);
+}
+
+#[test]
+fn empty_from_line() {
+    let msg = Message::parse(b"From \nSubject: Test\n\nBody");
+    assert_eq!(msg.envelope_sender(), Some(""));
+}
+
+#[test]
+fn from_sender_no_timestamp() {
+    let msg = Message::parse(b"From sender\nSubject: Test\n\nBody");
+    assert_eq!(msg.envelope_sender(), Some("sender"));
+    assert_eq!(msg.envelope_timestamp(), None);
+}
+
+#[test]
+fn skip_escaped_from_line() {
+    let msg = Message::parse(
+        b"From user@host Mon Jan 1 00:00:00 2024\n>From forwarded\nSubject: Test\n\nBody",
+    );
+    let hdrs: Vec<_> = msg.headers().collect();
+    assert_eq!(hdrs.len(), 1);
+    assert_eq!(hdrs[0].0.as_ref(), "Subject");
+}
+
+#[test]
 fn parse_simple_message() {
     let msg =
         Message::parse(b"From: test@example.com\nSubject: Hello\n\nBody text");

@@ -137,8 +137,8 @@ impl<'a> Iterator for HeaderIter<'a> {
             self.pos = end;
             let field = &self.data[start..end];
 
-            // Skip From_ line (mbox envelope, not a header)
-            if field.starts_with(b"From ") {
+            // Skip From_ line and >From_ escaped lines (mbox envelope)
+            if field.starts_with(b"From ") || field.starts_with(b">From ") {
                 continue;
             }
 
