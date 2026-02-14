@@ -1,9 +1,11 @@
 use std::borrow::Borrow;
 
 mod builtins;
+mod environment;
 mod substitution;
 
 pub use builtins::*;
+pub use environment::*;
 pub use substitution::*;
 
 #[cfg(test)]

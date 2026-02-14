@@ -1,53 +1,10 @@
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::env;
 use std::iter::Peekable;
 use std::str::Chars;
 
+use super::Environment;
+
 #[cfg(test)]
 mod tests;
-
-/// Canonical variable store for all variable lookups.
-#[derive(Default)]
-pub struct Environment {
-    vars: HashMap<String, String>,
-}
-
-impl Environment {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Copy all current process env vars into a new Environment.
-    pub fn from_process() -> Self {
-        Self {
-            vars: env::vars().collect(),
-        }
-    }
-
-    pub fn get<T>(&self, name: &T) -> Option<&str>
-    where
-        T: Borrow<str> + ?Sized,
-    {
-        self.vars.get(name.borrow()).map(|s| s.as_str())
-    }
-
-    pub fn set<T, U>(&mut self, name: T, value: U)
-    where
-        T: Into<String>,
-        U: Into<String>,
-    {
-        self.vars.insert(name.into(), value.into());
-    }
-
-    pub fn remove(&mut self, name: &str) {
-        self.vars.remove(name);
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.vars.iter().map(|(k, v)| (k.as_str(), v.as_str()))
-    }
-}
 
 /// Holds context for variable substitution (positional args, special vars)
 pub struct SubstCtx {

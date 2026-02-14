@@ -43,16 +43,15 @@ impl FileLock {
                 Err(e) => return Err(e),
             }
 
-            if !forced {
-                if let Ok(meta) = fs::metadata(path)
-                    && let Ok(mtime) = meta.modified()
-                    && let Ok(age) = SystemTime::now().duration_since(mtime)
-                    && age > timeout
-                {
-                    let _ = fs::remove_file(path);
-                    forced = true;
-                    continue;
-                }
+            if !forced
+                && let Ok(meta) = fs::metadata(path)
+                && let Ok(mtime) = meta.modified()
+                && let Ok(age) = SystemTime::now().duration_since(mtime)
+                && age > timeout
+            {
+                let _ = fs::remove_file(path);
+                forced = true;
+                continue;
             }
 
             if start.elapsed() >= timeout || signals::should_exit() {

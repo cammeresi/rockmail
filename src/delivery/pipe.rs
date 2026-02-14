@@ -51,6 +51,8 @@ pub fn deliver(
         .stderr(Stdio::inherit())
         .spawn()?;
 
+    crate::util::spawn_watchdog(child.id(), env.timeout());
+
     let data = msg.as_bytes();
 
     if let Some(mut stdin) = child.stdin.take()

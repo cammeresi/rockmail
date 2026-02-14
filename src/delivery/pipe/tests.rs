@@ -1,5 +1,8 @@
+use std::time::Instant;
+
 use super::*;
 use crate::delivery::tests::msg;
+use crate::variables::VAR_TIMEOUT;
 
 #[test]
 fn pipe_to_cat() {
@@ -62,4 +65,18 @@ fn early_exit() {
     let r = deliver_test("exit 0", &m, false);
     // Should succeed even though we couldn't write everything
     assert!(r.is_ok());
+}
+
+#[test]
+fn timeout_kills_hung_command() {
+    let m = msg("Subject: Test\n\nBody\n");
+    let mut env = Environment::from_process();
+    env.set(VAR_TIMEOUT, "1");
+
+    let start = Instant::now();
+    let r = deliver("exec sleep 60", &m, false, true, false, &env);
+    let elapsed = start.elapsed().as_secs();
+
+    assert!(elapsed < 5);
+    assert!(matches!(r, Err(DeliveryError::PipeSignal(_))));
 }
