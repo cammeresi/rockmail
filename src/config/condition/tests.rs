@@ -32,11 +32,18 @@ fn negated() {
 #[test]
 fn size() {
     let c = Condition::parse("< 10000").unwrap();
-    let Condition::Size { op, bytes, weight } = c else {
+    let Condition::Size {
+        op,
+        bytes,
+        negate,
+        weight,
+    } = c
+    else {
         panic!("expected size");
     };
     assert_eq!(op, Ordering::Less);
     assert_eq!(bytes, 10000);
+    assert!(!negate);
     assert!(weight.is_none());
 }
 
@@ -187,11 +194,18 @@ fn weighted_decimal() {
 #[test]
 fn weighted_size() {
     let c = Condition::parse("-100^3 > 2000").unwrap();
-    let Condition::Size { op, bytes, weight } = c else {
+    let Condition::Size {
+        op,
+        bytes,
+        negate,
+        weight,
+    } = c
+    else {
         panic!("expected size");
     };
     assert_eq!(op, Ordering::Greater);
     assert_eq!(bytes, 2000);
+    assert!(!negate);
     let w = weight.unwrap();
     assert!((w.w - -100.0).abs() < 0.001);
     assert!((w.x - 3.0).abs() < 0.001);

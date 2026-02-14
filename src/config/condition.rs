@@ -45,20 +45,29 @@ fn parse_shell(
 }
 
 fn parse_size(
-    rest: &str, weight: Option<Weight>, op: Ordering,
+    rest: &str, negate: bool, weight: Option<Weight>, op: Ordering,
 ) -> Option<Condition> {
     let bytes = rest.trim().parse().ok()?;
-    Some(Condition::Size { op, bytes, weight })
+    Some(Condition::Size {
+        op,
+        bytes,
+        negate,
+        weight,
+    })
 }
 
-fn parse_size_less(s: &str, weight: Option<Weight>) -> Option<Condition> {
+fn parse_size_less(
+    s: &str, negate: bool, weight: Option<Weight>,
+) -> Option<Condition> {
     let rest = s.strip_prefix('<')?;
-    parse_size(rest, weight, Ordering::Less)
+    parse_size(rest, negate, weight, Ordering::Less)
 }
 
-fn parse_size_greater(s: &str, weight: Option<Weight>) -> Option<Condition> {
+fn parse_size_greater(
+    s: &str, negate: bool, weight: Option<Weight>,
+) -> Option<Condition> {
     let rest = s.strip_prefix('>')?;
-    parse_size(rest, weight, Ordering::Greater)
+    parse_size(rest, negate, weight, Ordering::Greater)
 }
 
 fn parse_variable(s: &str, weight: Option<Weight>) -> Option<Condition> {
@@ -103,10 +112,10 @@ fn parse_inner(
         return parse_shell(s, negate, weight);
     }
     if s.starts_with('<') {
-        return parse_size_less(s, weight);
+        return parse_size_less(s, negate, weight);
     }
     if s.starts_with('>') {
-        return parse_size_greater(s, weight);
+        return parse_size_greater(s, negate, weight);
     }
     if s.contains("??") {
         return parse_variable(s, weight);
@@ -127,6 +136,7 @@ pub enum Condition {
     Size {
         op: Ordering,
         bytes: u64,
+        negate: bool,
         weight: Option<Weight>,
     },
     /// Shell command exit code (? prefix)

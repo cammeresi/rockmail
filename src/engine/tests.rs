@@ -104,6 +104,7 @@ fn size_condition_less() {
         conds: vec![Condition::Size {
             op: std::cmp::Ordering::Less,
             bytes: 1000,
+            negate: false,
             weight: None,
         }],
         action: Action::Folder(vec![PathBuf::from(t.maildir("small"))]),
@@ -120,6 +121,7 @@ fn size_condition_greater_fails() {
         conds: vec![Condition::Size {
             op: std::cmp::Ordering::Greater,
             bytes: 1000,
+            negate: false,
             weight: None,
         }],
         action: Action::Folder(vec![PathBuf::from(t.maildir("large"))]),

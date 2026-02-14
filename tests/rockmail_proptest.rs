@@ -91,10 +91,7 @@ fn build_rc(spec: &RcSpec) -> String {
         if r.copy {
             b.copy();
         }
-        // TODO: negated size conditions trigger a rockmail bug
-        let negate =
-            r.negate && !matches!(r.kind, Rule::SizeGt(_) | Rule::SizeLt(_));
-        if negate {
+        if r.negate {
             b.negate();
         }
         match &r.kind {

@@ -437,7 +437,8 @@ impl Engine {
     }
 
     fn eval_size(
-        &self, op: Ordering, bytes: u64, weight: Option<Weight>, msg: &Message,
+        &self, op: Ordering, bytes: u64, negate: bool, weight: Option<Weight>,
+        msg: &Message,
     ) -> EngineResult<ConditionResult> {
         let size = msg.len() as u64;
         let matched = match op {
@@ -445,6 +446,7 @@ impl Engine {
             Ordering::Equal => size == bytes,
             Ordering::Greater => size > bytes,
         };
+        let matched = matched ^ negate;
 
         if self.verbose {
             let sym = match op {
@@ -589,9 +591,12 @@ impl Engine {
                 negate,
                 weight,
             } => self.eval_regex(pattern, *negate, *weight, recipe, msg),
-            Condition::Size { op, bytes, weight } => {
-                self.eval_size(*op, *bytes, *weight, msg)
-            }
+            Condition::Size {
+                op,
+                bytes,
+                negate,
+                weight,
+            } => self.eval_size(*op, *bytes, *negate, *weight, msg),
             Condition::Shell {
                 cmd,
                 negate,

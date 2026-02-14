@@ -84,14 +84,20 @@ fn format_condition(c: &Condition) -> String {
                 format!("{}regex {:?}", prefix, pattern)
             }
         }
-        Condition::Size { op, bytes, weight } => {
+        Condition::Size {
+            op,
+            bytes,
+            negate,
+            weight,
+        } => {
             let prefix = format_weight(*weight);
+            let neg = if *negate { "!" } else { "" };
             let cmp = match op {
                 Ordering::Less => "<",
                 Ordering::Greater => ">",
                 Ordering::Equal => "=",
             };
-            format!("{}size {} {} bytes", prefix, cmp, bytes)
+            format!("{}{}size {} {} bytes", prefix, neg, cmp, bytes)
         }
         Condition::Shell {
             cmd,
