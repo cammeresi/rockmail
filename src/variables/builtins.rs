@@ -21,7 +21,6 @@ pub const VAR_ORGMAIL: &str = "ORGMAIL";
 pub const VAR_LINEBUF: &str = "LINEBUF";
 pub const VAR_DELIVERED: &str = "DELIVERED";
 pub const VAR_EXITCODE: &str = "EXITCODE";
-pub const VAR_COMSAT: &str = "COMSAT";
 pub const VAR_MSGPREFIX: &str = "MSGPREFIX";
 pub const VAR_INCLUDERC: &str = "INCLUDERC";
 pub const VAR_SWITCHRC: &str = "SWITCHRC";
