@@ -73,8 +73,8 @@ fn copy_dir(src: &Path, dst: &Path) {
 }
 
 fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
-    let dir =
-        PathBuf::from("tmp").join(format!("rockmail-gold-fail-{}", process::id(),));
+    let dir = PathBuf::from("tmp")
+        .join(format!("rockmail-gold-fail-{}", process::id(),));
     let _ = fs::create_dir_all(&dir);
     fs::write(dir.join("rcfile"), rc_template).ok();
     for (i, msg) in inputs.iter().enumerate() {
@@ -118,13 +118,15 @@ fn run_gold_inner(
     cmp(r, &g.proc_dir.path().join("maildir"));
 }
 
-fn run_gold_full(
+fn run_gold_setup(
     rc_template: &str, extra: &[&str], inputs: &[&[u8]], count: Option<usize>,
-    cmp: fn(&Path, &Path),
+    cmp: fn(&Path, &Path), pre: impl Fn(&Path),
 ) {
     let g = Gold::new();
     setup(g.rust_dir.path(), rc_template);
     setup(g.proc_dir.path(), rc_template);
+    pre(&g.rust_dir.path().join("maildir"));
+    pre(&g.proc_dir.path().join("maildir"));
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         run_gold_inner(&g, extra, inputs, count, cmp);
@@ -134,6 +136,13 @@ fn run_gold_full(
         eprintln!("preserved failure artifacts in {}", dir.display());
         panic::resume_unwind(e);
     }
+}
+
+fn run_gold_full(
+    rc_template: &str, extra: &[&str], inputs: &[&[u8]], count: Option<usize>,
+    cmp: fn(&Path, &Path),
+) {
+    run_gold_setup(rc_template, extra, inputs, count, cmp, |_| {});
 }
 
 fn run_gold_with<S>(
@@ -446,28 +455,49 @@ fn mh_trailing_single_newline() {
     run_gold(&rc, msgs, 1);
 }
 
-#[test]
-#[ignore] // blocked on delivery-dir-is-maildir.md
-fn dir_trailing_no_newline() {
-    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody"];
-    run_gold(&rc, msgs, 1);
+fn run_dir_gold(rc: &str, inputs: &[&[u8]], count: usize) {
+    run_gold_setup(rc, &[], inputs, Some(count), assert_dirs, |maildir| {
+        fs::create_dir(maildir.join("inbox")).unwrap();
+    });
 }
 
 #[test]
-#[ignore] // blocked on delivery-dir-is-maildir.md
-fn dir_trailing_single_newline() {
+fn deliver_dir() {
     let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n"];
-    run_gold(&rc, msgs, 1);
+    run_dir_gold(&rc, MSGS, 5);
 }
 
 #[test]
-#[ignore] // blocked on delivery-dir-is-maildir.md
 fn dir_trailing_blank() {
     let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];
-    run_gold(&rc, msgs, 1);
+    run_dir_gold(&rc, msgs, 1);
+}
+
+#[test]
+fn dir_trailing_no_newline() {
+    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody"];
+    run_dir_gold(&rc, msgs, 1);
+}
+
+#[test]
+fn dir_trailing_single_newline() {
+    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n"];
+    run_dir_gold(&rc, msgs, 1);
+}
+
+#[test]
+fn complex_filtering_static_dir() {
+    let msgs = build_complex_msgs();
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    let rc = build_complex_rc(FolderType::Dir);
+    run_gold_setup(&rc, &[], &refs, None, assert_dirs, |maildir| {
+        for name in ["spam", "lists", "urgent", "alice", "bob"] {
+            fs::create_dir(maildir.join(name)).unwrap();
+        }
+    });
 }
 
 #[test]

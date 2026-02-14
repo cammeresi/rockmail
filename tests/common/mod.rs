@@ -217,8 +217,8 @@ pub fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     map
 }
 
-fn is_maildir(base: &Path, top: &str) -> bool {
-    base.join(top).join("new").is_dir()
+fn is_dir_delivery(base: &Path, top: &str) -> bool {
+    base.join(top).is_dir()
 }
 
 fn diff_by_name(
@@ -298,7 +298,7 @@ pub fn diff_dirs(a: &Path, b: &Path) -> Result<(), String> {
     }
     for (top, fa) in &ga {
         let fb = &gb[top];
-        if is_maildir(a, top) {
+        if is_dir_delivery(a, top) {
             diff_by_content(top, fa, fb)?;
         } else {
             diff_by_name(fa, fb)?;

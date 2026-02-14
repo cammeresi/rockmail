@@ -68,7 +68,7 @@ pub enum FolderType {
     Maildir,
     /// MH folder (path ends with /.).
     Mh,
-    /// Directory with msgprefix (path ends with //).
+    /// Existing directory (runtime detection, not suffix-based).
     Dir,
 }
 
@@ -80,7 +80,7 @@ impl FolderType {
             Self::File => "",
             Self::Maildir => "/",
             Self::Mh => "/.",
-            Self::Dir => "//",
+            Self::Dir => "",
         }
     }
 
@@ -93,8 +93,7 @@ impl FolderType {
     ///
     /// - `foo/` → Maildir
     /// - `foo/.` → MH
-    /// - `foo//` → Dir (directory with msgprefix)
-    /// - `foo` → File (or Dir if path is an existing directory)
+    /// - `foo` → File, or Dir if the path is an existing directory
     ///
     /// Returns the type and the path with specifier stripped.
     pub fn parse(path: &str) -> (FolderType, &str) {
@@ -105,12 +104,11 @@ impl FolderType {
             let stripped = &path[..len - 2];
             let stripped = stripped.trim_end_matches('/');
             (FolderType::Mh, stripped)
-        } else if len >= 2 && bytes[len - 1] == b'/' && bytes[len - 2] == b'/' {
-            let stripped = path.trim_end_matches('/');
-            (FolderType::Dir, stripped)
         } else if len >= 1 && bytes[len - 1] == b'/' {
             let stripped = path.trim_end_matches('/');
             (FolderType::Maildir, stripped)
+        } else if Path::new(path).is_dir() {
+            (FolderType::Dir, path)
         } else {
             (FolderType::File, path)
         }

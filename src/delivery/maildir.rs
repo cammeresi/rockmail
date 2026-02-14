@@ -71,15 +71,21 @@ fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
     Ok(())
 }
 
+struct WriteOpts {
+    raw: bool,
+    strip_from: bool,
+    /// Ensure trailing blank line (like procmail ft_forceblank).
+    force_blank: bool,
+}
+
 fn write_msg(
-    path: &Path, msg: &Message, opts: DeliveryOpts,
+    path: &Path, msg: &Message, opts: WriteOpts,
 ) -> Result<usize, DeliveryError> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
-    // Maildir doesn't use From_ lines
     let data = msg.as_bytes();
-    let data = if msg.from_line().is_some() {
+    let data = if opts.strip_from && msg.from_line().is_some() {
         skip_from_lines(data)
     } else {
         data
@@ -88,8 +94,12 @@ fn write_msg(
     w.write_all(data)?;
     let bytes = data.len();
 
-    // Ensure trailing newline (unless raw mode)
-    let extra = if !opts.raw && !data.ends_with(b"\n") {
+    let tail = if opts.force_blank {
+        b"\n\n".as_slice()
+    } else {
+        b"\n"
+    };
+    let extra = if !opts.raw && !data.ends_with(tail) {
         w.write_all(b"\n")?;
         1
     } else {
@@ -103,9 +113,10 @@ fn write_msg(
     Ok(bytes + extra)
 }
 
-/// Deliver a message directly to a directory (procmail // mode).
+/// Deliver a message to an existing directory.
 ///
 /// Unlike Maildir, writes directly without tmp/new/cur structure.
+/// Unlike Maildir, preserves From_ lines (matching procmail ft_DIR).
 pub fn deliver_dir(
     path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
@@ -114,7 +125,12 @@ pub fn deliver_dir(
     let name = Namer::new().filename()?;
     let dest = path.join(format!("msg.{}", name));
 
-    let bytes = write_msg(&dest, msg, opts)?;
+    let wo = WriteOpts {
+        raw: opts.raw,
+        strip_from: false,
+        force_blank: true,
+    };
+    let bytes = write_msg(&dest, msg, wo)?;
 
     Ok(DeliveryResult {
         bytes,
@@ -135,7 +151,12 @@ pub fn deliver(
     let tmp = path.join("tmp").join(&name);
     let new = path.join("new").join(&name);
 
-    let bytes = write_msg(&tmp, msg, opts)?;
+    let wo = WriteOpts {
+        raw: opts.raw,
+        strip_from: true,
+        force_blank: false,
+    };
+    let bytes = write_msg(&tmp, msg, wo)?;
 
     if fs::hard_link(&tmp, &new).is_err() {
         fs::rename(&tmp, &new)?;

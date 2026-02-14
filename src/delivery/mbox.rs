@@ -85,8 +85,11 @@ fn write_body(
 fn deliver_inner(
     path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
-    let mut file =
-        OpenOptions::new().create(true).write(true).open(path)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
     file.seek(SeekFrom::End(0))?;
     let saved = file.metadata()?.len();
 

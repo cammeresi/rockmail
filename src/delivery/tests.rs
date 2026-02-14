@@ -1,3 +1,5 @@
+use tempfile::TempDir;
+
 use super::*;
 use crate::mail::Message;
 
@@ -22,7 +24,7 @@ fn parse_maildir() {
 #[test]
 fn parse_maildir_trailing_slashes() {
     let (t, p) = FolderType::parse("/home/user/Maildir///");
-    assert_eq!(t, FolderType::Dir);
+    assert_eq!(t, FolderType::Maildir);
     assert_eq!(p, "/home/user/Maildir");
 }
 
@@ -43,6 +45,14 @@ fn parse_mh_trailing_slashes() {
 #[test]
 fn parse_dir() {
     let (t, p) = FolderType::parse("/home/user/backup//");
-    assert_eq!(t, FolderType::Dir);
+    assert_eq!(t, FolderType::Maildir);
     assert_eq!(p, "/home/user/backup");
+}
+
+#[test]
+fn parse_existing_dir() {
+    let d = TempDir::new().unwrap();
+    let p = d.path().to_str().unwrap();
+    let (t, _) = FolderType::parse(p);
+    assert_eq!(t, FolderType::Dir);
 }
