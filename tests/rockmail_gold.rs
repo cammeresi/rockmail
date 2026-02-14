@@ -8,7 +8,6 @@
 
 #![cfg(feature = "gold")]
 
-use std::borrow::Borrow;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::{fs, panic, process};
@@ -21,9 +20,7 @@ use rockmail::delivery::FolderType;
 #[allow(unused)]
 mod common;
 
-use common::{
-    Gold, RcBuilder, diff_dirs, procmail, rockmail, run, setup,
-};
+use common::{Gold, RcBuilder, diff_dirs, procmail, rockmail, run, setup};
 
 const MSGS: &[&[u8]] = &[
     b"From: a@host\nSubject: one\n\nBody one\n",
@@ -85,73 +82,100 @@ fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
     dir
 }
 
-fn assert_dirs(a: &Path, b: &Path) {
-    diff_dirs(a, b).unwrap();
+#[allow(clippy::type_complexity)]
+struct GoldTest<'a> {
+    rc: &'a str,
+    inputs: &'a [&'a [u8]],
+    args: Vec<&'a str>,
+    sender: &'a str,
+    cmp: Option<Box<dyn Fn(&Path, &Path) + 'a>>,
+    pre: Option<Box<dyn Fn(&Path) + 'a>>,
+    post: Option<Box<dyn FnOnce(&Gold) + 'a>>,
 }
 
-fn run_gold_inner(
-    g: &Gold, extra: &[&str], inputs: &[&[u8]],
-    cmp: fn(&Path, &Path),
-) {
-    let rc_r = g.rust_dir.path().join("rcfile");
-    let rc_p = g.proc_dir.path().join("rcfile");
-    let mut args_r: Vec<&str> = vec!["-f", "sender@test"];
-    let mut args_p: Vec<&str> = vec!["-f", "sender@test"];
-    args_r.extend_from_slice(extra);
-    args_p.extend_from_slice(extra);
-    args_r.push(rc_r.to_str().unwrap());
-    args_p.push(rc_p.to_str().unwrap());
-    for input in inputs {
-        let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
-        let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
-        assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
+impl<'a> GoldTest<'a> {
+    fn new(rc: &'a str, inputs: &'a [&'a [u8]]) -> Self {
+        Self {
+            rc,
+            inputs,
+            args: Vec::new(),
+            sender: "sender@test",
+            cmp: Some(Box::new(|a, b| diff_dirs(a, b).unwrap())),
+            pre: None,
+            post: None,
+        }
     }
-    cmp(
-        &g.rust_dir.path().join("maildir"),
-        &g.proc_dir.path().join("maildir"),
-    );
-}
 
-fn run_gold_setup(
-    rc_template: &str, extra: &[&str], inputs: &[&[u8]],
-    cmp: fn(&Path, &Path), pre: impl Fn(&Path),
-) {
-    let g = Gold::new();
-    setup(g.rust_dir.path(), rc_template);
-    setup(g.proc_dir.path(), rc_template);
-    pre(&g.rust_dir.path().join("maildir"));
-    pre(&g.proc_dir.path().join("maildir"));
-
-    let result = panic::catch_unwind(AssertUnwindSafe(|| {
-        run_gold_inner(&g, extra, inputs, cmp);
-    }));
-    if let Err(e) = result {
-        let dir = preserve_failure(&g, rc_template, inputs);
-        eprintln!("preserved failure artifacts in {}", dir.display());
-        panic::resume_unwind(e);
+    fn args(mut self, extra: &[&'a str]) -> Self {
+        self.args.extend_from_slice(extra);
+        self
     }
-}
 
-fn run_gold_full(
-    rc_template: &str, extra: &[&str], inputs: &[&[u8]],
-    cmp: fn(&Path, &Path),
-) {
-    run_gold_setup(rc_template, extra, inputs, cmp, |_| {});
-}
+    fn sender(mut self, s: &'a str) -> Self {
+        self.sender = s;
+        self
+    }
 
-fn run_gold_with<S>(rc_template: S, inputs: &[&[u8]], cmp: fn(&Path, &Path))
-where
-    S: Borrow<str>,
-{
-    run_gold_full(rc_template.borrow(), &[], inputs, cmp);
-}
+    fn no_cmp(mut self) -> Self {
+        self.cmp = None;
+        self
+    }
 
-fn run_gold(rc_template: &str, inputs: &[&[u8]]) {
-    run_gold_with(rc_template, inputs, assert_dirs);
-}
+    fn pre(mut self, f: impl Fn(&Path) + 'a) -> Self {
+        self.pre = Some(Box::new(f));
+        self
+    }
 
-fn run_gold_args(rc_template: &str, extra: &[&str], inputs: &[&[u8]]) {
-    run_gold_full(rc_template, extra, inputs, assert_dirs);
+    fn post(mut self, f: impl FnOnce(&Gold) + 'a) -> Self {
+        self.post = Some(Box::new(f));
+        self
+    }
+
+    fn run(self) {
+        let g = Gold::new();
+        setup(g.rust_dir.path(), self.rc);
+        setup(g.proc_dir.path(), self.rc);
+        if let Some(ref pre) = self.pre {
+            pre(&g.rust_dir.path().join("maildir"));
+            pre(&g.proc_dir.path().join("maildir"));
+        }
+
+        let rc = self.rc;
+        let inputs = self.inputs;
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            self.run_inner(&g);
+        }));
+        if let Err(e) = result {
+            let dir = preserve_failure(&g, rc, inputs);
+            eprintln!("preserved failure artifacts in {}", dir.display());
+            panic::resume_unwind(e);
+        }
+    }
+
+    fn run_inner(self, g: &Gold) {
+        let rc_r = g.rust_dir.path().join("rcfile");
+        let rc_p = g.proc_dir.path().join("rcfile");
+        let mut args_r = vec!["-f", self.sender];
+        let mut args_p = vec!["-f", self.sender];
+        args_r.extend_from_slice(&self.args);
+        args_p.extend_from_slice(&self.args);
+        args_r.push(rc_r.to_str().unwrap());
+        args_p.push(rc_p.to_str().unwrap());
+        for input in self.inputs {
+            let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
+            let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
+            assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
+        }
+        if let Some(cmp) = &self.cmp {
+            cmp(
+                &g.rust_dir.path().join("maildir"),
+                &g.proc_dir.path().join("maildir"),
+            );
+        }
+        if let Some(post) = self.post {
+            post(g);
+        }
+    }
 }
 
 fn build_complex_rc(kind: FolderType) -> String {
@@ -295,7 +319,7 @@ fn run_random(kind: FolderType) {
     let rc = build_random_rc(&mut rng, kind);
     let msgs = build_random_msgs(&mut rng);
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(rc, &refs, assert_dirs);
+    GoldTest::new(&rc, &refs).run();
 }
 
 fn run_size(kind: FolderType) {
@@ -303,52 +327,55 @@ fn run_size(kind: FolderType) {
     let rc = build_size_rc(&mut rng, kind);
     let msgs = build_size_msgs(&mut rng);
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(rc, &refs, assert_dirs);
+    GoldTest::new(&rc, &refs).run();
 }
 
 #[test]
 fn deliver_mbox() {
     let rc = RcBuilder::new(FolderType::File).folder("inbox").build();
-    run_gold(&rc, MSGS);
+    GoldTest::new(&rc, MSGS).run();
 }
 
 #[test]
 fn deliver_maildir() {
     let rc = RcBuilder::new(FolderType::Maildir).folder("inbox").build();
-    run_gold_with(rc, MSGS, assert_dirs);
+    GoldTest::new(&rc, MSGS).run();
 }
 
 #[test]
 fn deliver_mh() {
     let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
-    run_gold(&rc, MSGS);
+    GoldTest::new(&rc, MSGS).run();
 }
 
 #[test]
 fn deliver_dev_null() {
     let rc = RcBuilder::new(FolderType::File).dev_null().build();
-    run_gold(&rc, MSGS);
+    GoldTest::new(&rc, MSGS).run();
 }
 
 #[test]
 fn complex_filtering_static_mbox() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold(&build_complex_rc(FolderType::File), &refs);
+    let rc = build_complex_rc(FolderType::File);
+    GoldTest::new(&rc, &refs).run();
 }
 
 #[test]
 fn complex_filtering_static_maildir() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(build_complex_rc(FolderType::Maildir), &refs, assert_dirs);
+    let rc = build_complex_rc(FolderType::Maildir);
+    GoldTest::new(&rc, &refs).run();
 }
 
 #[test]
 fn complex_filtering_static_mh() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    run_gold_with(build_complex_rc(FolderType::Mh), &refs, assert_dirs);
+    let rc = build_complex_rc(FolderType::Mh);
+    GoldTest::new(&rc, &refs).run();
 }
 
 #[test]
@@ -396,7 +423,7 @@ matched
         b"From: a@host\nSubject: one\n\nBody\n",
         b"From: b@host\nSubject: two\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -416,34 +443,34 @@ matched
         b"From: a@host\nSubject: one\n\nBody\n",
         b"From: b@host\nSubject: two\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
 fn mh_trailing_blank() {
     let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];
-    run_gold(&rc, msgs);
+    GoldTest::new(&rc, msgs).run();
 }
 
 #[test]
 fn mh_trailing_no_newline() {
     let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody"];
-    run_gold(&rc, msgs);
+    GoldTest::new(&rc, msgs).run();
 }
 
 #[test]
 fn mh_trailing_single_newline() {
     let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n"];
-    run_gold(&rc, msgs);
+    GoldTest::new(&rc, msgs).run();
 }
 
 fn run_dir_gold(rc: &str, inputs: &[&[u8]]) {
-    run_gold_setup(rc, &[], inputs, assert_dirs, |maildir| {
-        fs::create_dir(maildir.join("inbox")).unwrap();
-    });
+    GoldTest::new(rc, inputs)
+        .pre(|d| fs::create_dir(d.join("inbox")).unwrap())
+        .run();
 }
 
 #[test]
@@ -478,11 +505,13 @@ fn complex_filtering_static_dir() {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
     let rc = build_complex_rc(FolderType::Dir);
-    run_gold_setup(&rc, &[], &refs, assert_dirs, |maildir| {
-        for name in ["spam", "lists", "urgent", "alice", "bob"] {
-            fs::create_dir(maildir.join(name)).unwrap();
-        }
-    });
+    GoldTest::new(&rc, &refs)
+        .pre(|d| {
+            for name in ["spam", "lists", "urgent", "alice", "bob"] {
+                fs::create_dir(d.join(name)).unwrap();
+            }
+        })
+        .run();
 }
 
 #[test]
@@ -500,7 +529,7 @@ matched
         b"From: a@host\nSubject: one\n\nBody\n",
         b"From: b@host\nSubject: two\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -517,7 +546,7 @@ matched
         b"From: a@host\nSubject: fallback here\n\nBody\n",
         b"From: b@host\nSubject: other\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -536,7 +565,7 @@ matched
         b"From: a@host\nSubject: hello world\n\nBody\n",
         b"From: b@host\nSubject: fallback\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -553,7 +582,7 @@ matched
         b"From: a@host\nSubject: target\n\nBody\n",
         b"From: b@host\nSubject: other\n\nBody\n",
     ];
-    run_gold_args(rc, &["-a", "target"], msgs);
+    GoldTest::new(rc, msgs).args(&["-a", "target"]).run();
 }
 
 #[test]
@@ -573,7 +602,7 @@ matched
         b"From: a@host\nSubject: captured\n\nBody\n",
         b"From: b@host\nSubject: other\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -585,7 +614,7 @@ DEFAULT=$DEFAULT/.
 :0
 inbox/. copy/.
 ";
-    run_gold_with(rc, MSGS, assert_dirs);
+    GoldTest::new(rc, MSGS).run();
 }
 
 #[test]
@@ -598,7 +627,7 @@ DEFAULT=$DEFAULT
 :0
 inbox copy/
 ";
-    run_gold_with(rc, MSGS, assert_dirs);
+    GoldTest::new(rc, MSGS).run();
 }
 
 #[test]
@@ -613,7 +642,7 @@ WANT=one
 matched
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -627,7 +656,7 @@ DEFAULT=$DEFAULT
 matched/
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test test test\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -641,7 +670,7 @@ DEFAULT=$DEFAULT
 matched/
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: hello\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -655,7 +684,7 @@ DEFAULT=$DEFAULT
 matched/
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -669,7 +698,7 @@ DEFAULT=$DEFAULT
 matched/
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: hello\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -686,7 +715,7 @@ matched/
         b"From: a@host\nSubject: test test test test\n\nBody\n",
         b"From: b@host\nSubject: nope\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -700,7 +729,7 @@ DEFAULT=$DEFAULT
 matched/
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -715,7 +744,7 @@ DEFAULT=$DEFAULT
 matched/
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test hello\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -733,7 +762,7 @@ matched/
         b"From: alice@host\nSubject: urgent\n\nBody\n",
         b"From: bob@host\nSubject: urgent\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -747,7 +776,7 @@ DEFAULT=$DEFAULT
 matched/
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: hi\n\nBody\n"];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -765,7 +794,7 @@ matched/
         b"From: a@host\nSubject: test hello\n\nBody\n",
         b"From: b@host\nSubject: hello hello hello\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -774,23 +803,9 @@ fn refresh_from_line_preserves_timestamp() {
 MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT/
 ";
-    let input =
-        b"From old@host  Wed Jan  1 12:34:56 2025\nSubject: Test\n\nBody\n";
-    let g = Gold::new();
-    setup(g.rust_dir.path(), rc);
-    setup(g.proc_dir.path(), rc);
-    let rc_r = g.rust_dir.path().join("rcfile");
-    let rc_p = g.proc_dir.path().join("rcfile");
-    let args_r = ["-f", "-", rc_r.to_str().unwrap()];
-    let args_p = ["-f", "-", rc_p.to_str().unwrap()];
-    let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
-    let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
-    assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
-    diff_dirs(
-        &g.rust_dir.path().join("maildir"),
-        &g.proc_dir.path().join("maildir"),
-    )
-    .unwrap();
+    let input: &[&[u8]] =
+        &[b"From old@host  Wed Jan  1 12:34:56 2025\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, input).sender("-").run();
 }
 
 /// Extract and normalize LOGABSTRACT lines from a logfile.
@@ -828,29 +843,25 @@ DEFAULT=$DEFAULT
 LOGFILE=$MAILDIR/log
 LOGABSTRACT=yes
 ";
-    let g = Gold::new();
-    setup(g.rust_dir.path(), rc);
-    setup(g.proc_dir.path(), rc);
-    // Pre-create the mbox so delivery succeeds
-    fs::write(g.rust_dir.path().join("maildir/default"), b"").unwrap();
-    fs::write(g.proc_dir.path().join("maildir/default"), b"").unwrap();
-
-    let input = b"Subject: Hello World\n\nBody\n";
-    let rc_r = g.rust_dir.path().join("rcfile");
-    let rc_p = g.proc_dir.path().join("rcfile");
-    let args_r = ["-f", "sender@test", rc_r.to_str().unwrap()];
-    let args_p = ["-f", "sender@test", rc_p.to_str().unwrap()];
-    let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
-    let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
-    assert_eq!(rc, pc, "exit codes differ");
-
-    let rlog =
-        fs::read_to_string(g.rust_dir.path().join("maildir/log")).unwrap();
-    let plog =
-        fs::read_to_string(g.proc_dir.path().join("maildir/log")).unwrap();
-    let ra = normalize_abstract(&rlog);
-    let pa = normalize_abstract(&plog);
-    assert_eq!(ra, pa, "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}");
+    let input: &[&[u8]] = &[b"Subject: Hello World\n\nBody\n"];
+    GoldTest::new(rc, input)
+        .pre(|d| fs::write(d.join("default"), b"").unwrap())
+        .no_cmp()
+        .post(|g| {
+            let rlog =
+                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                    .unwrap();
+            let plog =
+                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                    .unwrap();
+            let ra = normalize_abstract(&rlog);
+            let pa = normalize_abstract(&plog);
+            assert_eq!(
+                ra, pa,
+                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
+            );
+        })
+        .run();
 }
 
 #[test]
@@ -868,7 +879,7 @@ matched
         b"From: x@host\nCc: alice@example.com\n\nBody\n",
         b"From: x@host\nTo: bob@host\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -885,7 +896,7 @@ matched
         b"From: x@host\nTo: alice@host\n\nBody\n",
         b"From: x@host\nTo: malice@host\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -903,5 +914,5 @@ daemon
         b"From: x@host\nPrecedence: bulk\nSubject: list\n\nBody\n",
         b"From: user@host\nSubject: hello\n\nBody\n",
     ];
-    run_gold(rc, msgs);
+    GoldTest::new(rc, msgs).run();
 }
