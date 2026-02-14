@@ -101,6 +101,13 @@ Rockmail sends SIGTERM, waits 1 second, then sends SIGKILL if the
 process is still running. This ensures hung processes are cleaned up
 but gives less time for graceful shutdown.
 
+## NFS atime hack
+
+Procmail has a `NO_NFS_ATIME_HACK` guard that writes the first byte of
+an mbox, checks if `atime == mtime`, and sleeps one second if needed.
+This tricks NFS into cache invalidation so other processes see new mail.
+Rockmail does not implement this.  NFS mbox delivery is increasingly rare.
+
 ## /etc/procmail.conf configuration file
 
 Although this file is undocumented, procmail will read sitewide configuration,

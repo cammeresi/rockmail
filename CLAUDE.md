@@ -70,9 +70,6 @@ Procmail's iterative match-by-match accumulation and is missing:
 tail sums for convergent series, exit-code-based shell scoring,
 correct negated-weighted logic, empty-match handling, and score clamping.
 
-Delivery is missing mbox truncation on error, maildir retry on
-collision, and dir/MH trailing-newline enforcement.
-
 See the `issues/` directory for the full list.
 
 # Instructions

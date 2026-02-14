@@ -39,24 +39,22 @@ impl Namer {
 
     /// Generate unique filename in Maildir format: time.pid_serial.hostname
     pub fn filename(&mut self) -> Result<String, DeliveryError> {
-        let now = SystemTime::now()
+        let t = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| DeliveryError::UniqueFile)?;
+            .map_err(|_| DeliveryError::UniqueFile)?
+            .as_secs();
+        Ok(self.filename_at(t))
+    }
 
-        let t = now.as_secs();
-        let pid = process::id();
-
+    /// Like `filename` but with a caller-supplied timestamp (for testing).
+    pub fn filename_at(&mut self, t: u64) -> String {
         if t != self.last_time {
             self.last_time = t;
             self.serial = 0;
         }
-        let serial = self.serial;
-        self.serial = self
-            .serial
-            .checked_add(1)
-            .ok_or(DeliveryError::UniqueFile)?;
-
-        Ok(format!("{}.{}_{}.{}", t, pid, serial, self.host))
+        let s = self.serial;
+        self.serial = self.serial.saturating_add(1);
+        format!("{}.{}_{}.{}", t, process::id(), s, self.host)
     }
 }
 

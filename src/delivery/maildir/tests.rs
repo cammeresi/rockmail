@@ -63,10 +63,8 @@ fn unique_names() {
 #[test]
 fn serial_increments_same_second() {
     let mut namer = Namer::new();
-    // FIXME race, needs to pass time as a parameter
-    let n1 = namer.filename().unwrap();
-    let n2 = namer.filename().unwrap();
-    // Both in same second, serial should differ
+    let n1 = namer.filename_at(1_000_000);
+    let n2 = namer.filename_at(1_000_000);
     assert!(n1.contains("_0."));
     assert!(n2.contains("_1."));
 }
