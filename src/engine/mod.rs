@@ -19,12 +19,13 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_SENDMAIL,
+    DEF_LINEBUF, DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_SENDMAIL,
     DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL, Environment,
-    SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_LOCKEXT, VAR_LOCKFILE, VAR_LOCKSLEEP,
-    VAR_LOCKTIMEOUT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_SENDMAIL,
-    VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_TRAP,
-    VAR_UMASK, VAR_VERBOSE, value_as_int,
+    SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_LINEBUF, VAR_LOCKEXT, VAR_LOCKFILE,
+    VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR,
+    VAR_PROCMAIL_OVERFLOW, VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL,
+    VAR_SHELLFLAGS, VAR_SHIFT, VAR_TRAP, VAR_UMASK, VAR_VERBOSE,
+    subst_limited, value_as_int,
 };
 
 #[cfg(test)]
@@ -308,12 +309,18 @@ impl Engine {
     }
 
     /// Expand variables in a string.
-    fn expand(&self, s: &str) -> String {
-        crate::variables::subst(s, &self.ctx, &self.env)
+    fn expand(&mut self, s: &str) -> String {
+        let limit =
+            self.get_var_as_num(VAR_LINEBUF, DEF_LINEBUF as i64) as usize;
+        let (r, overflow) = subst_limited(&self.env, &self.ctx, s, limit);
+        if overflow {
+            self.env.set(VAR_PROCMAIL_OVERFLOW, "yes");
+        }
+        r
     }
 
     /// Return a copy of `cond` with all string fields expanded.
-    fn expand_condition(&self, cond: &Condition) -> Condition {
+    fn expand_condition(&mut self, cond: &Condition) -> Condition {
         match cond {
             Condition::Regex {
                 pattern,
@@ -654,7 +661,7 @@ impl Engine {
     }
 
     /// Resolve the lockfile path for a recipe.
-    fn resolve_lockfile(&self, recipe: &Recipe) -> Option<String> {
+    fn resolve_lockfile(&mut self, recipe: &Recipe) -> Option<String> {
         let lock = recipe.lockfile.as_ref()?;
         if lock.is_empty() {
             match &recipe.action {
