@@ -7,7 +7,7 @@ use std::time::UNIX_EPOCH;
 
 use nix::unistd::getpid;
 
-use crate::util::{LockError, now_secs};
+use crate::util::{LockError, now_secs, signals};
 
 #[cfg(test)]
 mod tests;
@@ -96,47 +96,39 @@ pub fn remove_lock(target: &Path) -> Result<(), LockError> {
     fs::remove_file(target).map_err(LockError::Io)
 }
 
-/// Create a lockfile using NFS-safe technique: create unique file, then rename.
-pub fn create_lock(target: &Path) -> Result<(), LockError> {
-    let dir = target.parent().unwrap_or(Path::new("."));
-    let tmp = unique_name(dir);
-
-    // Create with write permission, write content, then set final permissions
+fn create_lock_inner(target: &Path, tmp: &Path) -> Result<(), LockError> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o644)
-        .open(&tmp)
+        .open(tmp)
         .map_err(|e| match e.kind() {
             io::ErrorKind::AlreadyExists => LockError::Exists,
             io::ErrorKind::NotFound => LockError::Unavailable,
             _ => LockError::Io(e),
         })?;
 
-    let mut guard = TmpGuard::new(&tmp);
+    let mut guard = TmpGuard::new(tmp);
 
-    // Write "0" to the file (pid 0 works across networks)
     file.write_all(b"0").map_err(LockError::Io)?;
     drop(file);
 
-    // Set final read-only permissions
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(LOCK_PERM))
+    fs::set_permissions(tmp, fs::Permissions::from_mode(LOCK_PERM))
         .map_err(LockError::Io)?;
 
-    // Hard link to target - this is atomic on POSIX
-    match fs::hard_link(&tmp, target) {
+    match fs::hard_link(tmp, target) {
         Ok(()) => {
             guard.disarm();
-            let _ = fs::remove_file(&tmp);
+            let _ = fs::remove_file(tmp);
             Ok(())
         }
         Err(e) => {
             // Check if link succeeded despite error (NFS issue)
-            if let Ok(meta) = fs::metadata(&tmp)
+            if let Ok(meta) = fs::metadata(tmp)
                 && meta.nlink() > 1
             {
                 guard.disarm();
-                let _ = fs::remove_file(&tmp);
+                let _ = fs::remove_file(tmp);
                 return Ok(());
             }
             if e.kind() == io::ErrorKind::AlreadyExists {
@@ -146,4 +138,17 @@ pub fn create_lock(target: &Path) -> Result<(), LockError> {
             }
         }
     }
+}
+
+/// Create a lockfile using NFS-safe technique: create unique file, then
+/// hard-link.  Signals are blocked during the critical section to prevent
+/// orphaned temp files or unreleased locks.
+pub fn create_lock(target: &Path) -> Result<(), LockError> {
+    let dir = target.parent().unwrap_or(Path::new("."));
+    let tmp = unique_name(dir);
+
+    signals::block_signals();
+    let r = create_lock_inner(target, &tmp);
+    signals::unblock_signals();
+    r
 }
