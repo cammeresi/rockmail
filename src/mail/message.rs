@@ -300,33 +300,22 @@ impl Message {
 
     /// Set or replace the From_ line with a new sender.
     pub fn set_envelope_sender(&mut self, sender: &str) {
-        let from_line = super::generate(sender);
-        let header_without_from = if self.data.starts_with(b"From ") {
-            let end =
-                self.data.iter().position(|&b| b == b'\n').unwrap_or(0) + 1;
-            &self.data[end..self.header_end]
+        let from = super::generate(sender);
+        let old = if self.data.starts_with(b"From ") {
+            self.data.iter().position(|&b| b == b'\n').unwrap_or(0) + 1
         } else {
-            &self.data[..self.header_end]
+            0
         };
 
-        let mut new_data =
-            Vec::with_capacity(from_line.len() + self.data.len());
-        new_data.extend_from_slice(&from_line);
-        new_data.extend_from_slice(header_without_from);
-        new_data.extend_from_slice(&self.data[self.header_end..]);
+        let mut buf = Vec::with_capacity(from.len() + self.data.len());
+        buf.extend_from_slice(&from);
+        buf.extend_from_slice(&self.data[old..self.header_end]);
+        buf.extend_from_slice(&self.data[self.header_end..]);
 
-        let offset = from_line.len() as isize
-            - if self.data.starts_with(b"From ") {
-                let end =
-                    self.data.iter().position(|&b| b == b'\n').unwrap_or(0) + 1;
-                end as isize
-            } else {
-                0
-            };
-
-        self.header_end = (self.header_end as isize + offset) as usize;
-        self.body_start = (self.body_start as isize + offset) as usize;
-        self.data = new_data;
+        let delta = from.len() as isize - old as isize;
+        self.header_end = (self.header_end as isize + delta) as usize;
+        self.body_start = (self.body_start as isize + delta) as usize;
+        self.data = buf;
     }
 
     /// Strip the From_ line if present.

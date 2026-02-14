@@ -198,3 +198,59 @@ fn parse_owned_with_leading_newlines() {
     assert_eq!(msg.header(), b"Subject: Test\n");
     assert_eq!(msg.body(), b"Body");
 }
+
+#[test]
+fn set_envelope_sender_no_existing() {
+    let mut msg = Message::parse(b"Subject: Test\n\nBody");
+    msg.set_envelope_sender("alice@host");
+    assert_eq!(msg.envelope_sender(), Some("alice@host"));
+    assert!(msg.get_header("Subject").is_some());
+    assert_eq!(msg.body(), b"Body");
+}
+
+#[test]
+fn set_envelope_sender_replaces() {
+    let mut msg = Message::parse(
+        b"From old@host  Thu Jan  1 00:00:00 1970\nSubject: Test\n\nBody",
+    );
+    msg.set_envelope_sender("new@host");
+    assert_eq!(msg.envelope_sender(), Some("new@host"));
+    assert!(!msg.as_bytes().windows(8).any(|w| w == b"old@host"));
+    assert_eq!(msg.body(), b"Body");
+}
+
+#[test]
+fn set_envelope_sender_long() {
+    let sender = "a".repeat(500) + "@host";
+    let mut msg = Message::parse(b"Subject: Test\n\nBody");
+    msg.set_envelope_sender(&sender);
+    assert_eq!(msg.envelope_sender(), Some(sender.as_str()));
+}
+
+#[test]
+fn strip_from_line_removes() {
+    let mut msg = Message::parse(
+        b"From user@host  Thu Jan  1 00:00:00 1970\nSubject: Test\n\nBody",
+    );
+    msg.strip_from_line();
+    assert!(msg.from_line().is_none());
+    assert_eq!(msg.get_header("Subject").unwrap().as_ref(), "Test");
+    assert_eq!(msg.body(), b"Body");
+}
+
+#[test]
+fn strip_from_line_noop() {
+    let msg_a = Message::parse(b"Subject: Test\n\nBody");
+    let mut msg_b = msg_a.clone();
+    msg_b.strip_from_line();
+    assert_eq!(msg_a.as_bytes(), msg_b.as_bytes());
+}
+
+#[test]
+fn set_then_strip_roundtrip() {
+    let orig = Message::parse(b"Subject: Test\n\nBody");
+    let mut msg = orig.clone();
+    msg.set_envelope_sender("user@host");
+    msg.strip_from_line();
+    assert_eq!(orig.as_bytes(), msg.as_bytes());
+}
