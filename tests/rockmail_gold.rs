@@ -504,6 +504,26 @@ matched
 }
 
 #[test]
+fn pipe_capture() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+CAPTURED=| /bin/echo captured
+
+:0
+* $ ^Subject:.*$CAPTURED
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: captured\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    run_gold(rc, msgs, 2);
+}
+
+#[test]
 fn subst_in_shell_condition() {
     let rc = "\
 MAILDIR=$MAILDIR

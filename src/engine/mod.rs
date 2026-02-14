@@ -614,8 +614,14 @@ impl Engine {
         let wait = recipe.flags.wait;
         let quiet = recipe.flags.quiet;
 
-        let result =
-            delivery::pipe(cmd, &delivery_msg, filter, wait, &self.env);
+        let result = delivery::pipe(
+            cmd,
+            &delivery_msg,
+            filter,
+            wait,
+            capture.is_some(),
+            &self.env,
+        );
 
         // Handle pipe errors based on w/W flags
         let result = match result {

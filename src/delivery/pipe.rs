@@ -37,19 +37,17 @@ impl From<PipeResult> for DeliveryResult {
 /// If `wait` is true, returns error on non-zero exit (caller handles messaging).
 /// If `wait` is false, ignores exit status (original behavior for non-w recipes).
 pub fn deliver(
-    cmd: &str, msg: &Message, filter: bool, wait: bool, env: &Environment,
+    cmd: &str, msg: &Message, filter: bool, wait: bool, capture: bool,
+    env: &Environment,
 ) -> Result<PipeResult, DeliveryError> {
+    let grab = filter || capture;
     let mut child = Command::new(DEF_SHELL)
         .arg(DEF_SHELLFLAGS)
         .arg(cmd)
         .env_clear()
         .envs(env.iter())
         .stdin(Stdio::piped())
-        .stdout(if filter {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
+        .stdout(if grab { Stdio::piped() } else { Stdio::null() })
         .stderr(Stdio::inherit())
         .spawn()?;
 
@@ -80,7 +78,7 @@ pub fn deliver(
 
     Ok(PipeResult {
         bytes: data.len(),
-        output: if filter { Some(output.stdout) } else { None },
+        output: if grab { Some(output.stdout) } else { None },
     })
 }
 
@@ -88,5 +86,5 @@ pub fn deliver(
 pub fn deliver_test(
     cmd: &str, msg: &Message, filter: bool,
 ) -> Result<PipeResult, DeliveryError> {
-    deliver(cmd, msg, filter, false, &Environment::from_process())
+    deliver(cmd, msg, filter, false, false, &Environment::from_process())
 }
