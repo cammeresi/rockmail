@@ -73,9 +73,6 @@ pub struct State {
     pub last_succ: bool,
     /// Previous condition (for E flag).
     pub prev_cond: bool,
-    /// Current score (for weighted conditions).
-    #[allow(dead_code)]
-    pub score: f64,
     /// Current INCLUDERC/SWITCHRC recursion depth.
     pub depth: usize,
 }
