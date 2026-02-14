@@ -6,11 +6,10 @@ use std::process::ExitCode;
 use std::sync::LazyLock;
 use std::time::UNIX_EPOCH;
 
+use chrono::{DateTime, Local};
 use clap::Parser;
 use filetime::FileTime;
 use regex::Regex;
-use time::format_description::OwnedFormatItem;
-use time::{OffsetDateTime, UtcOffset};
 
 use rockmail::locking::FileLock;
 use rockmail::util::{EX_CANTCREAT, EX_NOINPUT, EX_OK, EX_TEMPFAIL, exit};
@@ -21,12 +20,7 @@ mod tests;
 static MAILDIR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/new/[^/]+$").unwrap());
 
-static DATE_FMT: LazyLock<OwnedFormatItem> = LazyLock::new(|| {
-    time::format_description::parse_owned::<1>(
-        "[day] [month repr:short], [hour]:[minute]",
-    )
-    .expect("DATE_FMT is valid")
-});
+static DATE_FMT: &str = "%e %b, %H:%M";
 
 #[derive(Default)]
 struct Stats {
@@ -44,7 +38,7 @@ impl Stats {
 #[derive(Default)]
 struct RcConfig {
     ignores: HashSet<String>,
-    date_fmt: Option<OwnedFormatItem>,
+    date_fmt: Option<String>,
 }
 
 struct Widths {
@@ -253,14 +247,7 @@ fn load_rc() -> RcConfig {
         if let Some(arg) = line.strip_prefix("ignore ") {
             ignores.insert(arg.to_string());
         } else if let Some(arg) = line.strip_prefix("date_format ") {
-            match time::format_description::parse_owned::<1>(arg) {
-                Ok(fmt) => date_fmt = Some(fmt),
-                Err(e) => eprintln!(
-                    "mailstat: bad date_format on line {} in ~/.mailstatrc: {}",
-                    lineno + 1,
-                    e
-                ),
-            }
+            date_fmt = Some(arg.to_string());
         } else {
             eprintln!(
                 "mailstat: unknown command on line {} in ~/.mailstatrc",
@@ -304,25 +291,24 @@ fn input_path(base: &Path, old: bool) -> PathBuf {
 }
 
 fn print_no_mail(
-    meta: &Metadata, date_fmt: &Option<OwnedFormatItem>, silent: bool,
+    meta: &Metadata, date_fmt: &Option<String>, silent: bool,
 ) -> u8 {
     if silent {
         return EX_OK;
     }
 
-    let mtime = meta
+    let secs = meta
         .modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
+        .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    let utc = OffsetDateTime::from_unix_timestamp(mtime as i64)
-        .unwrap_or_else(|_| OffsetDateTime::now_utc());
-    let local = utc
-        .to_offset(UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC));
-    let fmt = date_fmt.as_ref().unwrap_or(&DATE_FMT);
-    let when = local.format(fmt).unwrap_or_else(|_| "unknown".to_string());
+    let local = DateTime::from_timestamp(secs, 0)
+        .unwrap_or_default()
+        .with_timezone(&Local);
+    let fmt = date_fmt.as_deref().unwrap_or(DATE_FMT);
+    let when = local.format(fmt);
 
     println!("No mail arrived since {}", when);
     EX_OK

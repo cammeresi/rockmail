@@ -59,11 +59,10 @@ Procmail's `mailstat` has no configuration file. Rockmail adds support for
 - `ignore <folder>` — Exclude a folder from the summary output. Suppressed
   by the `-z` flag.
 - `date_format <spec>` — Override the date format used in the "No mail
-  arrived since ..." message. The spec uses the `time` crate's v1 format
-  description syntax (e.g. `[day] [month repr:short], [hour]:[minute]`).
-  Not affected by `-z`.
+  arrived since ..." message. The spec uses strftime syntax
+  (e.g. `%e %b, %H:%M`).  Not affected by `-z`.
 
-The default date format is `[day] [month repr:short], [hour]:[minute]`.
+The default date format is `%e %b, %H:%M`.
 
 ## formail: -Y flag
 
