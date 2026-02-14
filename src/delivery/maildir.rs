@@ -1,11 +1,14 @@
 use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{DeliveryError, DeliveryOpts, DeliveryResult};
 use crate::mail::{Message, skip_from_lines};
+
+/// Matches procmail's MAILDIRretries (config.h:243).
+const RETRIES: u32 = 5;
 
 #[cfg(test)]
 mod tests;
@@ -71,6 +74,7 @@ fn ensure_dirs(path: &Path) -> Result<(), DeliveryError> {
     Ok(())
 }
 
+#[derive(Clone, Copy)]
 struct WriteOpts {
     raw: bool,
     strip_from: bool,
@@ -142,33 +146,57 @@ pub fn deliver_dir(
 ///
 /// Creates the Maildir structure (tmp, new, cur) if needed.
 /// Writes to tmp/ then hard-links to new/ for atomic delivery.
+/// Retries with a fresh filename on EEXIST (matching procmail).
 pub fn deliver(
     namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
 ) -> Result<DeliveryResult, DeliveryError> {
     ensure_dirs(path)?;
-
-    let name = namer.filename()?;
-    let tmp = path.join("tmp").join(&name);
-    let new = path.join("new").join(&name);
 
     let wo = WriteOpts {
         raw: opts.raw,
         strip_from: true,
         force_blank: false,
     };
-    let bytes = write_msg(&tmp, msg, wo)?;
 
-    if fs::hard_link(&tmp, &new).is_err() {
-        fs::rename(&tmp, &new)?;
-    } else if let Err(e) = fs::remove_file(&tmp) {
-        let tmp = tmp.display();
-        eprintln!("error unlinking {tmp}: {e}");
+    for _ in 0..RETRIES {
+        let name = namer.filename()?;
+        let tmp = path.join("tmp").join(&name);
+        let new = path.join("new").join(&name);
+
+        let bytes = write_msg(&tmp, msg, wo)?;
+
+        match fs::hard_link(&tmp, &new) {
+            Ok(()) => {
+                if let Err(e) = fs::remove_file(&tmp) {
+                    eprintln!("error unlinking {}: {e}", tmp.display());
+                }
+                return Ok(DeliveryResult {
+                    bytes,
+                    path: new.display().to_string(),
+                });
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                fs::remove_file(&tmp)?;
+                continue;
+            }
+            Err(_) => {
+                // Fall back to rename for non-collision link failures like
+                // EXDEV, matching procmail mailfold.c:274-276.
+                if !new.exists()
+                    && let Ok(()) = fs::rename(&tmp, &new)
+                {
+                    return Ok(DeliveryResult {
+                        bytes,
+                        path: new.display().to_string(),
+                    });
+                }
+                fs::remove_file(&tmp)?;
+                continue;
+            }
+        }
     }
 
-    Ok(DeliveryResult {
-        bytes,
-        path: new.display().to_string(),
-    })
+    Err(DeliveryError::UniqueFile)
 }
 
 #[cfg(test)]
