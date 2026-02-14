@@ -7,6 +7,7 @@ use std::time::UNIX_EPOCH;
 
 use nix::unistd::getpid;
 
+use super::map_io_err;
 use crate::util::{LockError, now_secs, signals};
 
 #[cfg(test)]
@@ -105,7 +106,7 @@ fn create_lock_inner(target: &Path, tmp: &Path) -> Result<(), LockError> {
         .map_err(|e| match e.kind() {
             io::ErrorKind::AlreadyExists => LockError::Exists,
             io::ErrorKind::NotFound => LockError::Unavailable,
-            _ => LockError::Io(e),
+            _ => map_io_err(e),
         })?;
 
     let mut guard = TmpGuard::new(tmp);
@@ -134,7 +135,7 @@ fn create_lock_inner(target: &Path, tmp: &Path) -> Result<(), LockError> {
             if e.kind() == io::ErrorKind::AlreadyExists {
                 Err(LockError::Exists)
             } else {
-                Err(LockError::Io(e))
+                Err(map_io_err(e))
             }
         }
     }

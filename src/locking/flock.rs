@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use nix::fcntl::{Flock, FlockArg};
 
-use super::MAX_LOCK_SIZE;
+use super::{MAX_LOCK_SIZE, map_io_err, truncate_lock_path};
 use crate::util::{LockError, signals};
 
 pub struct FileLock {
@@ -41,23 +41,38 @@ impl FileLock {
         let timeout = Duration::from_secs(timeout);
         let sleep = Duration::from_secs(sleep);
         let mut forced = false;
+        let mut owned = String::new();
 
         loop {
-            match Self::acquire_temp(path) {
+            let p = if owned.is_empty() {
+                path
+            } else {
+                Path::new(&owned)
+            };
+            match Self::acquire_temp(p) {
                 Ok(lock) => return Ok(lock),
                 Err(LockError::Exists) => {}
+                Err(LockError::TooLong) => {
+                    if owned.is_empty() {
+                        owned = path.to_string_lossy().into_owned();
+                    }
+                    if !truncate_lock_path(&mut owned) {
+                        return Err(LockError::TooLong);
+                    }
+                    continue;
+                }
                 Err(e) => return Err(e),
             }
 
             if !forced
-                && let Ok(meta) = fs::metadata(path)
+                && let Ok(meta) = fs::metadata(p)
                 && !meta.is_dir()
                 && meta.len() <= MAX_LOCK_SIZE
                 && let Ok(mtime) = meta.modified()
                 && let Ok(age) = SystemTime::now().duration_since(mtime)
                 && age > timeout
             {
-                let _ = fs::remove_file(path);
+                let _ = fs::remove_file(p);
                 forced = true;
                 continue;
             }
@@ -81,7 +96,7 @@ impl FileLock {
             .open(path)
             .map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => LockError::Unavailable,
-                _ => LockError::Io(e),
+                _ => map_io_err(e),
             })?;
         let lock = Flock::lock(file, arg).map_err(|_| LockError::Exists)?;
         Ok(Self { lock, cleanup })

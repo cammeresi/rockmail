@@ -891,19 +891,25 @@ impl Engine {
     fn perform_action(
         &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
-        // Acquire lockfile if specified
+        // Acquire lockfile if specified, unless it matches the global lock.
         let _lock = if let Some(p) = self.resolve_lockfile(recipe) {
-            let timeout =
-                self.get_var_as_num(VAR_LOCKTIMEOUT, DEF_LOCKTIMEOUT) as u64;
-            let sleep =
-                self.get_var_as_num(VAR_LOCKSLEEP, DEF_LOCKSLEEP) as u64;
-            Some(
-                FileLock::acquire_temp_retry(Path::new(&p), timeout, sleep)
-                    .map_err(|e| {
-                        eprintln!("failed to acquire lock {}: {}", p, e);
-                        EngineError::Lock(p)
-                    })?,
-            )
+            if self.env.get(VAR_LOCKFILE).is_some_and(|gl| gl == p) {
+                eprintln!("Deadlock attempted on \"{p}\"");
+                None
+            } else {
+                let timeout = self
+                    .get_var_as_num(VAR_LOCKTIMEOUT, DEF_LOCKTIMEOUT)
+                    as u64;
+                let sleep =
+                    self.get_var_as_num(VAR_LOCKSLEEP, DEF_LOCKSLEEP) as u64;
+                Some(
+                    FileLock::acquire_temp_retry(Path::new(&p), timeout, sleep)
+                        .map_err(|e| {
+                            eprintln!("failed to acquire lock {}: {}", p, e);
+                            EngineError::Lock(p)
+                        })?,
+                )
+            }
         } else {
             None
         };

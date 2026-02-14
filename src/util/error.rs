@@ -9,6 +9,9 @@ pub enum LockError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
+    #[error("filename too long")]
+    TooLong,
+
     #[error("permission denied or missing directory")]
     Unavailable,
 }

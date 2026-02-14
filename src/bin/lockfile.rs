@@ -7,7 +7,9 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use clap::Parser;
-use rockmail::locking::{MAX_LOCK_SIZE, create_lock, lock_mtime, remove_lock};
+use rockmail::locking::{
+    MAX_LOCK_SIZE, create_lock, lock_mtime, remove_lock, truncate_lock_path,
+};
 use rockmail::util::{LockError, exit, now_secs, signals, *};
 
 const DEF_LOCKSLEEP: u64 = 8;
@@ -168,20 +170,38 @@ fn try_lock(
     acquired: &mut Vec<PathBuf>,
 ) -> Result<(), u8> {
     let mut nfs_retry = NFS_RETRIES;
+    let mut owned = String::new();
 
     loop {
-        check_signal(path)?;
+        let p = if owned.is_empty() {
+            path
+        } else {
+            Path::new(&owned)
+        };
+        check_signal(p)?;
 
-        match create_lock(path) {
+        match create_lock(p) {
             Ok(()) => {
-                acquired.push(path.to_path_buf());
+                acquired.push(p.to_path_buf());
                 return Ok(());
             }
             Err(LockError::Exists) => {
-                handle_exists(path, sleepsec, retries, force, suspend)?;
+                handle_exists(p, sleepsec, retries, force, suspend)?;
+            }
+            Err(LockError::TooLong) => {
+                if owned.is_empty() {
+                    owned = path.to_string_lossy().into_owned();
+                }
+                if !truncate_lock_path(&mut owned) {
+                    eprintln!(
+                        "lockfile: Filename too long: \"{}\"",
+                        path.display()
+                    );
+                    return Err(EX_UNAVAILABLE);
+                }
             }
             Err(LockError::Unavailable | LockError::Io(_)) => {
-                handle_nfs_error(path, sleepsec, &mut nfs_retry)?;
+                handle_nfs_error(p, sleepsec, &mut nfs_retry)?;
             }
         }
     }
