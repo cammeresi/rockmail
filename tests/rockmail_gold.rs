@@ -8,9 +8,7 @@
 
 #![cfg(feature = "gold")]
 
-use std::panic::AssertUnwindSafe;
-use std::path::{Path, PathBuf};
-use std::{fs, panic, process};
+use std::fs;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -19,164 +17,10 @@ use rockmail::delivery::FolderType;
 
 #[allow(unused)]
 mod common;
+mod gold;
 
-use common::{Gold, RcBuilder, diff_dirs, procmail, rockmail, run, setup};
-
-const MSGS: &[&[u8]] = &[
-    b"From: a@host\nSubject: one\n\nBody one\n",
-    b"From: b@host\nSubject: two\n\nBody two\n",
-    b"From: c@host\nSubject: three\n\nBody three\n",
-    b"From: d@host\nSubject: four\n\nBody four\n",
-    b"From: e@host\nSubject: five\n\nBody five\n",
-];
-
-const ADDRS: &[&str] = &[
-    "alice@example.com",
-    "bob@work.org",
-    "carol@lists.net",
-    "dave@spam.biz",
-    "eve@friend.io",
-];
-
-const SUBJECTS: &[&str] = &[
-    "Meeting tomorrow",
-    "URGENT deal",
-    "Re: project update",
-    "Newsletter #42",
-    "Invitation to connect",
-];
-
-const LISTS: &[&str] =
-    &["dev@lists.net", "announce@lists.net", "security@lists.net"];
-
-fn copy_dir(src: &Path, dst: &Path) {
-    let _ = fs::create_dir_all(dst);
-    let Ok(entries) = fs::read_dir(src) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let p = e.path();
-        let target = dst.join(e.file_name());
-        if p.is_dir() {
-            copy_dir(&p, &target);
-        } else {
-            fs::copy(&p, &target).ok();
-        }
-    }
-}
-
-fn preserve_failure(g: &Gold, rc_template: &str, inputs: &[&[u8]]) -> PathBuf {
-    let dir = PathBuf::from("tmp")
-        .join(format!("rockmail-gold-fail-{}", process::id(),));
-    let _ = fs::create_dir_all(&dir);
-    fs::write(dir.join("rcfile"), rc_template).ok();
-    for (i, msg) in inputs.iter().enumerate() {
-        fs::write(dir.join(format!("msg-{i:02}")), msg).ok();
-    }
-
-    // Copy the maildir trees for comparison
-    let rust_out = dir.join("rust");
-    let proc_out = dir.join("proc");
-    copy_dir(&g.rust_dir.path().join("maildir"), &rust_out);
-    copy_dir(&g.proc_dir.path().join("maildir"), &proc_out);
-    dir
-}
-
-#[allow(clippy::type_complexity)]
-struct GoldTest<'a> {
-    rc: &'a str,
-    inputs: &'a [&'a [u8]],
-    args: Vec<&'a str>,
-    sender: &'a str,
-    cmp: Option<Box<dyn Fn(&Path, &Path) + 'a>>,
-    pre: Option<Box<dyn Fn(&Path) + 'a>>,
-    post: Option<Box<dyn FnOnce(&Gold) + 'a>>,
-}
-
-impl<'a> GoldTest<'a> {
-    fn new(rc: &'a str, inputs: &'a [&'a [u8]]) -> Self {
-        Self {
-            rc,
-            inputs,
-            args: Vec::new(),
-            sender: "sender@test",
-            cmp: Some(Box::new(|a, b| diff_dirs(a, b).unwrap())),
-            pre: None,
-            post: None,
-        }
-    }
-
-    fn args(mut self, extra: &[&'a str]) -> Self {
-        self.args.extend_from_slice(extra);
-        self
-    }
-
-    fn sender(mut self, s: &'a str) -> Self {
-        self.sender = s;
-        self
-    }
-
-    fn no_cmp(mut self) -> Self {
-        self.cmp = None;
-        self
-    }
-
-    fn pre(mut self, f: impl Fn(&Path) + 'a) -> Self {
-        self.pre = Some(Box::new(f));
-        self
-    }
-
-    fn post(mut self, f: impl FnOnce(&Gold) + 'a) -> Self {
-        self.post = Some(Box::new(f));
-        self
-    }
-
-    fn run(self) {
-        let g = Gold::new();
-        setup(g.rust_dir.path(), self.rc);
-        setup(g.proc_dir.path(), self.rc);
-        if let Some(ref pre) = self.pre {
-            pre(&g.rust_dir.path().join("maildir"));
-            pre(&g.proc_dir.path().join("maildir"));
-        }
-
-        let rc = self.rc;
-        let inputs = self.inputs;
-        let result = panic::catch_unwind(AssertUnwindSafe(|| {
-            self.run_inner(&g);
-        }));
-        if let Err(e) = result {
-            let dir = preserve_failure(&g, rc, inputs);
-            eprintln!("preserved failure artifacts in {}", dir.display());
-            panic::resume_unwind(e);
-        }
-    }
-
-    fn run_inner(self, g: &Gold) {
-        let rc_r = g.rust_dir.path().join("rcfile");
-        let rc_p = g.proc_dir.path().join("rcfile");
-        let mut args_r = vec!["-f", self.sender];
-        let mut args_p = vec!["-f", self.sender];
-        args_r.extend_from_slice(&self.args);
-        args_p.extend_from_slice(&self.args);
-        args_r.push(rc_r.to_str().unwrap());
-        args_p.push(rc_p.to_str().unwrap());
-        for input in self.inputs {
-            let (_, rc) = run(g.rust_dir.path(), rockmail(), &args_r, input);
-            let (_, pc) = run(g.proc_dir.path(), procmail(), &args_p, input);
-            assert_eq!(rc, pc, "exit codes differ: rust={rc}, proc={pc}");
-        }
-        if let Some(cmp) = &self.cmp {
-            cmp(
-                &g.rust_dir.path().join("maildir"),
-                &g.proc_dir.path().join("maildir"),
-            );
-        }
-        if let Some(post) = self.post {
-            post(g);
-        }
-    }
-}
+use common::RcBuilder;
+use gold::{ADDRS, GoldTest, LISTS, MSGS, SUBJECTS};
 
 fn build_complex_rc(kind: FolderType) -> String {
     let mut b = RcBuilder::new(kind);
@@ -200,38 +44,25 @@ fn build_complex_msgs() -> Vec<Vec<u8>> {
         format!("{hdrs}\n\nBody\n").into_bytes()
     };
     vec![
-        // 0: spam — discarded
         msg(ADDRS[3], ADDRS[0], SUBJECTS[0], "X-Spam-Flag: YES"),
-        // 1: to list, no other match — lists
         msg(ADDRS[4], LISTS[0], SUBJECTS[2], ""),
-        // 2: high priority from alice — urgent (copy) + alice
         msg(ADDRS[0], ADDRS[4], SUBJECTS[0], "X-Priority: 1"),
-        // 3: from bob, normal — bob
         msg(ADDRS[1], ADDRS[0], SUBJECTS[2], ""),
-        // 4: URGENT subject, from carol — urgent
         msg(ADDRS[2], ADDRS[0], SUBJECTS[1], ""),
-        // 5: high priority to list — urgent (copy) + lists
         msg(ADDRS[4], LISTS[1], SUBJECTS[3], "X-Priority: 1"),
-        // 6: from alice, normal — alice
         msg(ADDRS[0], ADDRS[1], SUBJECTS[4], ""),
-        // 7: no match — default
         msg(ADDRS[4], ADDRS[3], SUBJECTS[0], ""),
-        // 8: spam with high priority — discarded (spam rule first)
         msg(
             ADDRS[3],
             ADDRS[0],
             SUBJECTS[1],
             "X-Spam-Flag: YES\nX-Priority: 1",
         ),
-        // 9: from bob, URGENT subject — bob (from rule before subject rule)
         msg(ADDRS[1], ADDRS[0], SUBJECTS[1], ""),
     ]
 }
 
-fn build_random_rc<R>(rng: &mut R, kind: FolderType) -> String
-where
-    R: Rng,
-{
+fn build_random_rc<R: Rng>(rng: &mut R, kind: FolderType) -> String {
     let mut b = RcBuilder::new(kind);
     if rng.gen_bool(0.5) {
         b.spam().folder("spam");
@@ -254,10 +85,7 @@ where
     b.build()
 }
 
-fn build_random_msgs<R>(rng: &mut R) -> Vec<Vec<u8>>
-where
-    R: Rng,
-{
+fn build_random_msgs<R: Rng>(rng: &mut R) -> Vec<Vec<u8>> {
     let n = rng.gen_range(10..=20);
     let msg = |from: &str, to: &str, subj: &str, extra: &str| {
         let hdrs = if extra.is_empty() {
@@ -283,28 +111,22 @@ where
         .collect()
 }
 
-fn build_size_msgs<R>(rng: &mut R) -> Vec<Vec<u8>>
-where
-    R: Rng,
-{
+fn build_size_msgs<R: Rng>(rng: &mut R) -> Vec<Vec<u8>> {
     let n = rng.gen_range(10..=20);
     (0..n)
         .map(|_| {
             let from = ADDRS.choose(rng).unwrap();
             let to = ADDRS.choose(rng).unwrap();
             let subj = SUBJECTS.choose(rng).unwrap();
-            let body_len = rng.gen_range(10..=500);
-            let body: String = (0..body_len).map(|_| 'x').collect();
+            let len = rng.gen_range(10..=500);
+            let body: String = (0..len).map(|_| 'x').collect();
             format!("From: {from}\nTo: {to}\nSubject: {subj}\n\n{body}\n")
                 .into_bytes()
         })
         .collect()
 }
 
-fn build_size_rc<R>(rng: &mut R, kind: FolderType) -> String
-where
-    R: Rng,
-{
+fn build_size_rc<R: Rng>(rng: &mut R, kind: FolderType) -> String {
     let thresh = rng.gen_range(100..=300);
     let addr = ADDRS.choose(rng).unwrap();
     let mut b = RcBuilder::new(kind);
@@ -808,11 +630,6 @@ DEFAULT=$DEFAULT/
     GoldTest::new(rc, input).sender("-").run();
 }
 
-/// Extract and normalize LOGABSTRACT lines from a logfile.
-///
-/// Keeps only the From_, Subject, and Folder lines.  Normalizes the
-/// From_ timestamp and replaces absolute folder paths with basenames
-/// so that the two temp-dir trees can be compared.
 fn normalize_abstract(log: &str) -> Vec<String> {
     let from_re = regex::Regex::new(r"^(From \S+).*").unwrap();
     let folder_re =

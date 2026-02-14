@@ -27,6 +27,7 @@ required-features = ["nfs"]
 [dev-dependencies]
 flate2 = "1"
 libtest-mimic = "0.8"
+proptest = "1"
 rand = "0.8"
 tar = "0.4"
 tempfile = "3"
