@@ -288,3 +288,72 @@ LOCKFILE={}
         "global lockfile should be removed after exit"
     );
 }
+
+#[test]
+fn trap_runs_on_exit() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let marker = d.join("trap_ran");
+    let rc = write_rc(
+        d,
+        &format!(
+            "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=touch {}\n",
+            marker.display()
+        ),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(marker.exists(), "TRAP did not run");
+}
+
+#[test]
+fn trap_receives_message_on_stdin() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let out = d.join("stdin_dump");
+    let rc = write_rc(
+        d,
+        &format!(
+            "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=cat > {}\n",
+            out.display()
+        ),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nTrapBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&out).unwrap();
+    assert!(
+        content.contains("TrapBody"),
+        "TRAP didn't get message: {content:?}"
+    );
+}
+
+#[test]
+fn trap_exitcode_available() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let out = d.join("exitcode");
+    let rc = write_rc(
+        d,
+        &format!(
+            "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=echo \\$EXITCODE > {}\n",
+            out.display()
+        ),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&out).unwrap();
+    assert_eq!(content.trim(), "0", "EXITCODE not available: {content:?}");
+}
+
+#[test]
+fn trap_exit_overrides_exitcode() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=exit 7\n");
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 7, "TRAP exit code should override");
+}

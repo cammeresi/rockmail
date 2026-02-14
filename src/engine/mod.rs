@@ -23,8 +23,8 @@ use crate::variables::{
     DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL, Environment,
     SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_LOCKEXT, VAR_LOCKFILE, VAR_LOCKSLEEP,
     VAR_LOCKTIMEOUT, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_SENDMAIL,
-    VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_UMASK,
-    VAR_VERBOSE, value_as_int,
+    VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_TRAP,
+    VAR_UMASK, VAR_VERBOSE, value_as_int,
 };
 
 #[cfg(test)]
@@ -1054,5 +1054,39 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         let mut state = State::default();
         self.process_items(items, msg, &mut state)
+    }
+
+    /// Execute TRAP command before exit (pipes.c:288-312).
+    pub fn run_trap(&mut self, msg: &Message) {
+        let trap = match self.get_var(VAR_TRAP) {
+            Some(t) if !t.is_empty() => t.to_owned(),
+            _ => return,
+        };
+        let user_set = self.get_var(VAR_EXITCODE).is_some();
+        if !user_set {
+            self.set_var(VAR_EXITCODE, "0");
+        }
+        let cmd = self.expand(&trap);
+        let shell = self.get_var(VAR_SHELL).unwrap_or(DEF_SHELL).to_owned();
+        let child = self
+            .spawn(&shell)
+            .arg(DEF_SHELLFLAGS)
+            .arg(&cmd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn();
+        let Ok(mut child) = child else { return };
+        if let Some(mut w) = child.stdin.take() {
+            let _ = w.write_all(msg.as_bytes());
+        }
+        let timeout = self.timeout();
+        if let Ok(status) = crate::util::wait_timeout(&mut child, timeout, &cmd)
+        {
+            let code = status.code().unwrap_or(-1);
+            if !user_set && code != 0 {
+                self.set_var(VAR_EXITCODE, &code.to_string());
+            }
+        }
     }
 }

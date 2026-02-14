@@ -457,3 +457,56 @@ fn action_pipe_expands_variable() {
     })];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
+
+#[test]
+fn score_underflow_forces_failure() {
+    let mut t = Test::with_msg("Subject: test\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "test".to_string(),
+            negate: false,
+            weight: Some(Weight {
+                w: super::MIN32,
+                x: 1.0,
+            }),
+        }],
+        action: Action::Folder(vec![PathBuf::from(t.maildir("fail"))]),
+    })];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn positive_fractional_score_rounds_to_one() {
+    let mut t = Test::with_msg("Subject: test\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "test".to_string(),
+            negate: false,
+            weight: Some(Weight { w: 0.5, x: 0.0 }),
+        }],
+        action: Action::Folder(vec![PathBuf::from(t.maildir("frac"))]),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    assert_eq!(t.engine.ctx.last_score, 1);
+}
+
+#[test]
+fn last_score_set_after_weighted_recipe() {
+    let mut t = Test::with_msg("Subject: test test test\n\nBody");
+    let items = vec![Item::Recipe(Recipe {
+        flags: Flags::new(),
+        lockfile: None,
+        conds: vec![Condition::Regex {
+            pattern: "test".to_string(),
+            negate: false,
+            weight: Some(Weight { w: 10.0, x: 1.0 }),
+        }],
+        action: Action::Folder(vec![PathBuf::from(t.maildir("score"))]),
+    })];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    assert_eq!(t.engine.ctx.last_score, 30);
+}

@@ -444,6 +444,8 @@ fn run(
         deliver_default(&mut engine, &msg)?;
     }
 
+    engine.run_trap(&msg);
+
     Ok(exit_code(&engine))
 }
 
