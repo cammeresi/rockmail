@@ -4,7 +4,10 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nix::sys::signal::{Signal, kill};
+use nix::sys::stat::{self, Mode};
 use nix::unistd::Pid;
+
+use crate::variables::DEF_UMASK;
 
 mod error;
 pub mod signals;
@@ -22,6 +25,11 @@ pub const EX_OSERR: u8 = 71;
 pub const EX_CANTCREAT: u8 = 73;
 pub const EX_NOINPUT: u8 = 66;
 
+/// Set the default umask to 077, matching procmail's INIT_UMASK.
+pub fn init_umask() {
+    stat::umask(Mode::from_bits_truncate(DEF_UMASK));
+}
+
 pub fn exit(code: u8) -> ExitCode {
     ExitCode::from(code)
 }
@@ -30,7 +38,9 @@ pub fn exit(code: u8) -> ExitCode {
 ///
 /// Polls `try_wait` every 100ms. On timeout, sends SIGTERM, waits 1s,
 /// then SIGKILL. Returns the exit status (which may reflect the signal).
-pub fn wait_timeout(child: &mut Child, timeout: Duration) -> io::Result<ExitStatus> {
+pub fn wait_timeout(
+    child: &mut Child, timeout: Duration,
+) -> io::Result<ExitStatus> {
     let start = Instant::now();
     let poll = Duration::from_millis(100);
 

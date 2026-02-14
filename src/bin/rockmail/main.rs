@@ -14,7 +14,9 @@ use rockmail::config::{self, is_var_name};
 use rockmail::delivery::{DeliveryOpts, FolderType};
 use rockmail::engine::{Engine, Outcome};
 use rockmail::mail::Message;
-use rockmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, signals};
+use rockmail::util::{
+    EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, init_umask, signals,
+};
 use rockmail::variables::*;
 
 #[cfg(test)]
@@ -379,6 +381,7 @@ unsafe fn init_env(
     env.set(VAR_NORESRETRY, DEF_NORESRETRY.to_string());
     env.set(VAR_SUSPEND, DEF_SUSPEND.to_string());
     env.set(VAR_LOGABSTRACT, DEF_LOGABSTRACT.to_string());
+    env.set(VAR_UMASK, format!("{:03o}", DEF_UMASK));
 
     for (name, value) in assignments {
         env.set(name, value);
@@ -449,6 +452,7 @@ fn main() -> ExitCode {
     }
 
     signals::setup();
+    init_umask();
 
     let fail_code = if args.tempfail {
         EX_TEMPFAIL

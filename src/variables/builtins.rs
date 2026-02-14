@@ -52,6 +52,7 @@ pub const DEF_SUSPEND: i64 = 16;
 pub const DEF_LINEBUF: usize = 2048;
 pub const MIN_LINEBUF: usize = 128;
 pub const DEF_LOGABSTRACT: i64 = -1;
+pub const DEF_UMASK: u32 = 0o077;
 pub const DEF_SENDMAILFLAGS: &str = "-oi";
 pub const DEF_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 pub const DEV_NULL: &str = "/dev/null";
