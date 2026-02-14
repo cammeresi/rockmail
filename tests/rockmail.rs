@@ -1,6 +1,6 @@
 //! Integration tests for the rockmail binary.
 
-use std::fs;
+use std::fs::{self, Permissions};
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
@@ -356,4 +356,100 @@ fn trap_exit_overrides_exitcode() {
     let input = b"From: user@host\nSubject: Test\n\nBody\n";
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 7, "TRAP exit code should override");
+}
+
+const UMASK_MSG: &[u8] = b"From: user@host\nSubject: Test\n\nBody\n";
+
+#[test]
+fn default_umask_0600() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n");
+    let (_, code) = run(d, &["-f", "sender@test", &rc], UMASK_MSG);
+    assert_eq!(code, 0);
+    let mode = fs::metadata(&mbox).unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o600, "expected 0600, got {mode:03o}");
+}
+
+#[test]
+fn umask_override() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\nUMASK=022\n");
+    let (_, code) = run(d, &["-f", "sender@test", &rc], UMASK_MSG);
+    assert_eq!(code, 0);
+    let mode = fs::metadata(&mbox).unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o644, "expected 0644, got {mode:03o}");
+}
+
+#[test]
+fn maildir_file_perms() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let inbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/fallback\nUMASK=022\n\n:0\ninbox/\n",
+    );
+    let (_, code) = run(d, &["-f", "sender@test", &rc], UMASK_MSG);
+    assert_eq!(code, 0);
+    let entry = fs::read_dir(inbox.join("new"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    let mode = entry.metadata().unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o644, "message file: expected 0644, got {mode:03o}");
+}
+
+#[test]
+fn mh_perms() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let inbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/fallback\nUMASK=022\n\n:0\ninbox/.\n",
+    );
+    let (_, code) = run(d, &["-f", "sender@test", &rc], UMASK_MSG);
+    assert_eq!(code, 0);
+
+    let mode = fs::metadata(&inbox).unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o755, "MH dir: expected 0755, got {mode:03o}");
+
+    let msg = inbox.join("1");
+    let mode = fs::metadata(&msg).unwrap().mode() & 0o777;
+    assert_eq!(mode, 0o644, "MH message: expected 0644, got {mode:03o}");
+}
+
+#[test]
+fn maildir_execute_bit() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let inbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/fallback\nUMASK=022\n\n:0\ninbox/\n",
+    );
+    let (_, code) = run(d, &["-f", "sender@test", &rc], UMASK_MSG);
+    assert_eq!(code, 0);
+    for sub in ["tmp", "new", "cur"] {
+        let p = inbox.join(sub);
+        let mode = fs::metadata(&p).unwrap().mode() & 0o777;
+        assert_eq!(mode, 0o755, "inbox/{sub}: expected 0755, got {mode:03o}");
+    }
+
+    let mode = fs::metadata(&inbox).unwrap().mode() & 0o777;
+    fs::set_permissions(&inbox, Permissions::from_mode(mode & !0o001)).unwrap();
+
+    let (_, code) = run(d, &["-f", "sender@test", &rc], UMASK_MSG);
+    assert_eq!(code, 0);
+    let mode = fs::metadata(&inbox).unwrap().mode() & 0o777;
+    assert_eq!(
+        mode & 0o001,
+        0o001,
+        "inbox after re-delivery: expected o+x set, got {mode:03o}"
+    );
 }
