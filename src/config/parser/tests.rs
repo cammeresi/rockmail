@@ -504,6 +504,28 @@ fn header_lockfile_with_spaces() {
 }
 
 #[test]
+fn header_lockfile_with_variable() {
+    let p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0:/tmp/lock-$USER", 1).unwrap();
+    assert_eq!(lock.as_deref(), Some("/tmp/lock-$USER"));
+}
+
+#[test]
+fn header_lockfile_special_chars() {
+    let p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0:my.lock_file-1", 1).unwrap();
+    assert_eq!(lock.as_deref(), Some("my.lock_file-1"));
+}
+
+#[test]
+fn header_multiple_colons() {
+    // rfind(':') finds the last colon, so everything before it is flags
+    let p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0::extra", 1).unwrap();
+    assert_eq!(lock.as_deref(), Some("extra"));
+}
+
+#[test]
 fn block_empty() {
     let mut p = Parser::new("}");
     let items = p.parse_block(1).unwrap();
