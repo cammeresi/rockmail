@@ -4,6 +4,36 @@
 use linker_set::*;
 use pastey::paste;
 
+/// Trait for types that can identify a variable by name and default.
+pub trait VarName {
+    fn name(&self) -> &str;
+    fn default(&self) -> Option<&'static str> {
+        None
+    }
+}
+
+impl VarName for Variable {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn default(&self) -> Option<&'static str> {
+        self.def
+    }
+}
+
+impl VarName for str {
+    fn name(&self) -> &str {
+        self
+    }
+}
+
+impl VarName for String {
+    fn name(&self) -> &str {
+        self
+    }
+}
+
 /// A named variable with an optional default value.
 pub struct Variable {
     pub name: &'static str,

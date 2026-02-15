@@ -1,11 +1,10 @@
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
 
 use linker_set::set;
 
-use super::{TIMEOUT, Variable, defaults, value_as_int};
+use super::{TIMEOUT, VarName, Variable, defaults, value_as_int};
 
 /// Canonical variable store for all variable lookups.
 #[derive(Default)]
@@ -27,22 +26,28 @@ impl Environment {
     }
 
     /// Look up a variable by name.
-    pub fn get<T>(&self, name: &T) -> Option<&str>
+    pub fn get<T>(&self, v: &T) -> Option<&str>
     where
-        T: Borrow<str> + ?Sized,
+        T: VarName + ?Sized,
     {
-        self.vars.get(name.borrow()).map(|s| s.as_str())
+        self.vars.get(v.name()).map(|s| s.as_str())
     }
 
-    /// Returns value or default, or "" if no default.
-    pub fn get_or_default(&self, v: &Variable) -> &str {
-        self.get(v.name).or(v.def).unwrap_or("")
+    /// Returns value, or the variable's default, or "".
+    pub fn get_or_default<T>(&self, v: &T) -> &str
+    where
+        T: VarName + ?Sized,
+    {
+        self.get(v).or_else(|| v.default()).unwrap_or("")
     }
 
     /// Parse as integer.  Uses variable's default if unset or unparseable.
-    pub fn get_num(&self, v: &Variable) -> i64 {
-        let def = v.def.map(|d| d.parse::<i64>().unwrap_or(0)).unwrap_or(0);
-        match self.get(v.name) {
+    pub fn get_num<T>(&self, v: &T) -> i64
+    where
+        T: VarName + ?Sized,
+    {
+        let def = v.default().and_then(|d| d.parse::<i64>().ok()).unwrap_or(0);
+        match self.get(v) {
             Some(s) => value_as_int(s, def),
             None => def,
         }
