@@ -27,8 +27,16 @@ pub fn setup() {
         ] {
             signal(sig, handler).expect("failed to install signal handler");
         }
-        signal(Signal::SIGPIPE, SigHandler::SigIgn)
-            .expect("failed to ignore SIGPIPE");
+        for sig in [
+            Signal::SIGPIPE,
+            Signal::SIGXCPU,
+            Signal::SIGXFSZ,
+        ] {
+            signal(sig, SigHandler::SigIgn)
+                .expect("failed to ignore signal");
+        }
+        signal(Signal::SIGCHLD, SigHandler::SigDfl)
+            .expect("failed to reset SIGCHLD");
     }
 }
 

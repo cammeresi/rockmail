@@ -39,11 +39,6 @@ The `^^` anchor syntax is not character-class-aware. A pattern like `[^^]`
 (intended as a negated character class containing `^`) may be misinterpreted.
 Workaround: use `[^\\^]` or reorder the class contents.
 
-## Trailing Backslash
-
-A trailing backslash in a pattern (e.g., `foo\`) is treated as a literal
-backslash, matching `foo\`. This matches procmail behavior.
-
 ## mailstat: Maildir only
 
 Rockmail's `mailstat` currently assumes Maildir layout. Folder paths in the
@@ -107,13 +102,37 @@ an mbox, checks if `atime == mtime`, and sleeps one second if needed.
 This tricks NFS into cache invalidation so other processes see new mail.
 Rockmail does not implement this.  NFS mbox delivery is increasingly rare.
 
-## Signal handling (SIGUSR1/SIGUSR2)
+## Signal handling
 
 Procmail uses SIGUSR1 to toggle verbose mode at runtime and SIGUSR2 to
 terminate the current child process. Rockmail does not act on these
 signals.
 
+Procmail also uses per-signal exit codes when terminated: SIGTERM exits
+with `EX_TEMPFAIL` (75), SIGHUP/SIGINT with `EX_CANTCREAT` (73), and
+SIGQUIT with its own handler. Rockmail uses a single exit flag for all
+termination signals.
+
+Procmail's `qsignal` wrapper preserves pre-existing `SIG_IGN` dispositions
+when installing handlers.  Rockmail installs handlers unconditionally.
+
 ## /etc/procmail.conf configuration file
 
 Although this file is undocumented, procmail will read sitewide configuration,
 but not rules, from this file.  Rockmail ignores this file.
+
+## Exit codes
+
+Procmail uses specific sysexits codes in situations that rockmail handles
+differently or does not implement:
+
+- `EX_NOUSER` (67) and `EX_NOPERM` (77) are returned by procmail's `-d`
+  delivery mode, which rockmail does not support.
+- `EX_OSFILE` (72) is returned when `/dev/null` cannot be opened at
+  startup; rockmail does not open `/dev/null` at startup.
+- Suspicious rcfiles (wrong owner, world writable) cause procmail to
+  silently skip the rcfile and fall through to default delivery.
+  Rockmail treats these as fatal errors.
+
+In all cases, delivery failures produce `EX_CANTCREAT` (73), or
+`EX_TEMPFAIL` (75) with the `-t` flag, matching procmail.
