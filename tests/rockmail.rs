@@ -481,10 +481,7 @@ fn dryrun_folder_delivery() {
     let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
     let err = String::from_utf8_lossy(&stderr);
-    assert!(
-        err.contains("deliver:"),
-        "expected dryrun message: {err:?}"
-    );
+    assert!(err.contains("deliver:"), "expected dryrun message: {err:?}");
     assert!(
         !d.join("inbox").exists(),
         "folder should not be created in dryrun mode"

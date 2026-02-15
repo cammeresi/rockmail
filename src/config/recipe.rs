@@ -147,29 +147,35 @@ pub enum HeaderOp {
 
 /// An rcfile item: variable assignment, recipe, or include directive.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub enum Item {
-    /// Variable assignment (`NAME=value`).
     Assign {
-        /// Variable name.
         name: String,
-        /// Assigned value (after `=`).
         value: String,
+        line: usize,
     },
-    /// Regex substitution on a variable (`VAR =~ s/pat/rep/flags`).
-    #[allow(missing_docs)]
     Subst {
         name: String,
         pattern: String,
         replace: String,
         global: bool,
         case_insensitive: bool,
+        line: usize,
     },
-    /// Native header manipulation (`@X Header: value`).
-    HeaderOp(HeaderOp),
-    /// A recipe block.
-    Recipe(Recipe),
-    /// Include an rcfile (INCLUDERC assignment).
-    Include(String),
-    /// Switch to a different rcfile (SWITCHRC assignment).
-    Switch(String),
+    HeaderOp {
+        op: HeaderOp,
+        line: usize,
+    },
+    Recipe {
+        recipe: Recipe,
+        line: usize,
+    },
+    Include {
+        path: String,
+        line: usize,
+    },
+    Switch {
+        path: String,
+        line: usize,
+    },
 }

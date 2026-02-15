@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
+use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -233,6 +234,8 @@ pub struct Engine {
     globlock: Option<FileLock>,
     /// Signal to stop processing current rcfile (HOST mismatch).
     abort: bool,
+    /// Current rcfile name for dry-run output.
+    rcfile: String,
 }
 
 impl Engine {
@@ -250,6 +253,7 @@ impl Engine {
             real_host,
             globlock: None,
             abort: false,
+            rcfile: String::new(),
         }
     }
 
@@ -276,6 +280,15 @@ impl Engine {
     /// Whether dry-run mode is active.
     pub fn dryrun(&self) -> bool {
         self.dryrun
+    }
+
+    /// Set the current rcfile name for dry-run output.
+    pub fn set_rcfile(&mut self, name: &str) {
+        self.rcfile = name.to_owned();
+    }
+
+    fn drylog(&self, line: usize, msg: &str) {
+        eprintln!("[{}:{}] {}", self.rcfile, line, msg);
     }
 
     /// Look up a variable by name.
@@ -1029,7 +1042,8 @@ impl Engine {
 
     /// Evaluate a single recipe.
     fn eval_recipe(
-        &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
+        &mut self, recipe: &Recipe, line: usize, msg: &mut Message,
+        state: &mut State,
     ) -> EngineResult<Outcome> {
         if !self.check_chain_flags(&recipe.flags, state) {
             return Ok(Outcome::Default);
@@ -1056,7 +1070,7 @@ impl Engine {
         }
 
         if self.dryrun {
-            self.log_match(recipe);
+            self.log_match(recipe, line);
         }
 
         let result = self.perform_action(recipe, msg, state)?;
@@ -1113,9 +1127,11 @@ impl Engine {
         let Some(items) = self.load_rcfile(&expanded) else {
             return Ok(None);
         };
+        let prev = mem::replace(&mut self.rcfile, expanded.clone());
         state.depth += 1;
         let outcome = self.process_items(&items, msg, state);
         state.depth -= 1;
+        self.rcfile = prev;
         if switch {
             return outcome.map(Some);
         }
@@ -1217,10 +1233,15 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         for item in items {
             match item {
-                Item::Assign { name, value } => {
+                Item::Assign {
+                    name, value, line, ..
+                } => {
                     let expanded = self.expand(value, Some(msg));
                     if self.dryrun && !is_builtin(name) {
-                        eprintln!("assign: {}={:?}", name, expanded);
+                        self.drylog(
+                            *line,
+                            &format!("assign: {}={:?}", name, expanded),
+                        );
                     }
                     self.set_var(name, &expanded);
                     if self.abort {
@@ -1234,6 +1255,7 @@ impl Engine {
                     replace,
                     global,
                     case_insensitive,
+                    line,
                 } => {
                     self.apply_subst(
                         name,
@@ -1250,26 +1272,30 @@ impl Engine {
                             (false, false) => "",
                         };
                         let val = self.get_var(name).unwrap_or("");
-                        eprintln!(
-                            "subst: {} =~ s/{}/{}/{} -> {:?}",
-                            name, pattern, replace, flags, val
+                        self.drylog(
+                            *line,
+                            &format!(
+                                "subst: {} =~ s/{}/{}/{} -> {:?}",
+                                name, pattern, replace, flags, val
+                            ),
                         );
                     }
                 }
-                Item::HeaderOp(op) => {
+                Item::HeaderOp { op, line } => {
                     if self.dryrun {
-                        self.log_header_op(op);
+                        self.log_header_op(op, *line);
                     }
                     self.apply_header_op(op, msg);
                 }
-                Item::Recipe(recipe) => {
-                    let outcome = self.eval_recipe(recipe, msg, state)?;
+                Item::Recipe { recipe, line } => {
+                    let outcome =
+                        self.eval_recipe(recipe, *line, msg, state)?;
                     match outcome {
                         Outcome::Delivered(_) => return Ok(outcome),
                         Outcome::Continue | Outcome::Default => {}
                     }
                 }
-                Item::Include(path) => {
+                Item::Include { path, .. } => {
                     if let Some(o) = self.process_rcfile(
                         path,
                         VAR_INCLUDERC,
@@ -1280,7 +1306,7 @@ impl Engine {
                         return Ok(o);
                     }
                 }
-                Item::Switch(path) => {
+                Item::Switch { path, .. } => {
                     if path.is_empty() {
                         return Ok(Outcome::Default);
                     }
@@ -1308,57 +1334,59 @@ impl Engine {
     }
 
     /// Log the matched recipe action in dryrun mode.
-    fn log_match(&mut self, recipe: &Recipe) {
-        match &recipe.action {
+    fn log_match(&mut self, recipe: &Recipe, line: usize) {
+        let msg = match &recipe.action {
             Action::Folder(paths) => {
                 let expanded: Vec<_> = paths
                     .iter()
                     .map(|p| self.expand(&p.to_string_lossy(), None))
                     .collect();
-                eprintln!("deliver: {}", expanded.join(" "));
+                format!("deliver: {}", expanded.join(" "))
             }
             Action::Pipe { cmd, capture } => {
                 let expanded = self.expand(cmd, None);
                 if let Some(var) = capture {
-                    eprintln!("capture: {}=| {}", var, expanded);
+                    format!("capture: {}=| {}", var, expanded)
                 } else if recipe.flags.filter {
-                    eprintln!("filter: {}", expanded);
+                    format!("filter: {}", expanded)
                 } else {
-                    eprintln!("pipe: {}", expanded);
+                    format!("pipe: {}", expanded)
                 }
             }
             Action::Forward(addrs) => {
                 let expanded: Vec<_> =
                     addrs.iter().map(|a| self.expand(a, None)).collect();
-                eprintln!("forward: {}", expanded.join(" "));
+                format!("forward: {}", expanded.join(" "))
             }
-            Action::Nested(_) => {}
-        }
+            Action::Nested(_) => return,
+        };
+        self.drylog(line, &msg);
     }
 
     /// Log a header operation in dryrun mode.
-    fn log_header_op(&mut self, op: &HeaderOp) {
-        match op {
+    fn log_header_op(&mut self, op: &HeaderOp, line: usize) {
+        let msg = match op {
             HeaderOp::DeleteInsert { field, value } => {
                 let val = self.expand(value, None);
-                eprintln!("header: @I {}: {}", field, val);
+                format!("header: @I {}: {}", field, val)
             }
             HeaderOp::RenameInsert { field, value } => {
                 let val = self.expand(value, None);
-                eprintln!("header: @i {}: {}", field, val);
+                format!("header: @i {}: {}", field, val)
             }
             HeaderOp::AddIfNot { field, value } => {
                 let val = self.expand(value, None);
-                eprintln!("header: @a {}: {}", field, val);
+                format!("header: @a {}: {}", field, val)
             }
             HeaderOp::AddAlways { field, value } => {
                 let val = self.expand(value, None);
-                eprintln!("header: @A {}: {}", field, val);
+                format!("header: @A {}: {}", field, val)
             }
             HeaderOp::Delete { field } => {
-                eprintln!("header: @D {}:", field);
+                format!("header: @D {}:", field)
             }
-        }
+        };
+        self.drylog(line, &msg);
     }
 
     /// Log delivery abstract (From_ line, Subject, Folder, size).

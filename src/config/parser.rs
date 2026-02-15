@@ -214,7 +214,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse `VAR =~ s/pat/rep/flags`.
-    fn parse_subst(line: &str) -> Option<Item> {
+    fn parse_subst(line: &str, line_num: usize) -> Option<Item> {
         let pos = line.find("=~")?;
         let name = line[..pos].trim();
         if !is_var_name(name) {
@@ -242,11 +242,12 @@ impl<'a> Parser<'a> {
             replace: replace.to_string(),
             global: flags.contains('g'),
             case_insensitive: flags.contains('i'),
+            line: line_num,
         })
     }
 
     /// Parse `@X Header: value`.
-    fn parse_header_op(line: &str) -> Option<Item> {
+    fn parse_header_op(line: &str, line_num: usize) -> Option<Item> {
         let rest = line.strip_prefix('@')?;
         let mut chars = rest.chars();
         let op = chars.next()?;
@@ -265,22 +266,29 @@ impl<'a> Parser<'a> {
             'D' => HeaderOp::Delete { field },
             _ => return None,
         };
-        Some(Item::HeaderOp(op))
+        Some(Item::HeaderOp { op, line: line_num })
     }
 
-    fn parse_assignment(&self, line: &str) -> Option<Item> {
+    fn parse_assignment(&self, line: &str, line_num: usize) -> Option<Item> {
         if let Some(eq) = line.find('=') {
             let name = line[..eq].trim();
             let value = strip_comment(line[eq + 1..].trim());
             if is_var_name(name) {
                 if name == "INCLUDERC" {
-                    Some(Item::Include(value.to_string()))
+                    Some(Item::Include {
+                        path: value.to_string(),
+                        line: line_num,
+                    })
                 } else if name == "SWITCHRC" {
-                    Some(Item::Switch(value.to_string()))
+                    Some(Item::Switch {
+                        path: value.to_string(),
+                        line: line_num,
+                    })
                 } else {
                     Some(Item::Assign {
                         name: name.to_string(),
                         value: value.to_string(),
+                        line: line_num,
                     })
                 }
             } else {
@@ -292,11 +300,15 @@ impl<'a> Parser<'a> {
             if is_var_name(name) {
                 if name == "SWITCHRC" {
                     // aborts processing
-                    Some(Item::Switch(String::new()))
+                    Some(Item::Switch {
+                        path: String::new(),
+                        line: line_num,
+                    })
                 } else {
                     Some(Item::Assign {
                         name: name.to_string(),
                         value: String::new(),
+                        line: line_num,
                     })
                 }
             } else {
@@ -450,10 +462,16 @@ impl<'a> Parser<'a> {
             };
 
             let trimmed = line.trim();
+            let ln = self.line_num();
 
             // Recipe starts with :
             if trimmed.starts_with(':') {
-                return self.parse_recipe().map(|r| Some(Item::Recipe(r)));
+                return self.parse_recipe().map(|r| {
+                    Some(Item::Recipe {
+                        recipe: r,
+                        line: ln,
+                    })
+                });
             }
 
             // Closing brace: return None to end nested block
@@ -465,16 +483,16 @@ impl<'a> Parser<'a> {
             self.advance();
 
             if trimmed.starts_with('@')
-                && let Some(item) = Self::parse_header_op(trimmed)
+                && let Some(item) = Self::parse_header_op(trimmed, ln)
             {
                 return Ok(Some(item));
             }
 
-            if let Some(item) = Self::parse_subst(trimmed) {
+            if let Some(item) = Self::parse_subst(trimmed, ln) {
                 return Ok(Some(item));
             }
 
-            if let Some(item) = self.parse_assignment(trimmed) {
+            if let Some(item) = self.parse_assignment(trimmed, ln) {
                 return Ok(Some(item));
             }
 

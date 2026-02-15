@@ -46,16 +46,19 @@ impl Test {
 }
 
 fn regex_recipe(pattern: &str, folder: &str) -> Item {
-    Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: pattern.to_string(),
-            negate: false,
-            weight: None,
-        }],
-        action: Action::Folder(vec![PathBuf::from(folder)]),
-    })
+    Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: pattern.to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(folder)]),
+        },
+        line: 0,
+    }
 }
 
 #[test]
@@ -83,50 +86,59 @@ fn non_matching_regex_skips() {
 #[test]
 fn negated_regex() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "X-Spam:".to_string(),
-            negate: true,
-            weight: None,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "X-Spam:".to_string(),
+                negate: true,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
 #[test]
 fn size_condition_less() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Size {
-            op: std::cmp::Ordering::Less,
-            bytes: 1000,
-            negate: false,
-            weight: None,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("small"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Size {
+                op: std::cmp::Ordering::Less,
+                bytes: 1000,
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("small"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
 #[test]
 fn size_condition_greater_fails() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Size {
-            op: std::cmp::Ordering::Greater,
-            bytes: 1000,
-            negate: false,
-            weight: None,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("large"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Size {
+                op: std::cmp::Ordering::Greater,
+                bytes: 1000,
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("large"))]),
+        },
+        line: 0,
+    }];
     assert_eq!(t.process(&items), Outcome::Default);
 }
 
@@ -137,17 +149,23 @@ fn variable_assignment() {
         Item::Assign {
             name: "FOO".to_string(),
             value: "bar".to_string(),
+            line: 0,
         },
-        Item::Recipe(Recipe {
-            flags: Flags::new(),
-            lockfile: None,
-            conds: vec![Condition::Variable {
-                name: "FOO".to_string(),
-                pattern: "bar".to_string(),
-                weight: None,
-            }],
-            action: Action::Folder(vec![PathBuf::from(t.maildir("matched"))]),
-        }),
+        Item::Recipe {
+            recipe: Recipe {
+                flags: Flags::new(),
+                lockfile: None,
+                conds: vec![Condition::Variable {
+                    name: "FOO".to_string(),
+                    pattern: "bar".to_string(),
+                    weight: None,
+                }],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("matched"),
+                )]),
+            },
+            line: 0,
+        },
     ];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
@@ -160,12 +178,17 @@ fn chain_a_flag_skips_when_prev_false() {
 
     let items = vec![
         regex_recipe("X-NotPresent:", &t.maildir("first")),
-        Item::Recipe(Recipe {
-            flags,
-            lockfile: None,
-            conds: vec![],
-            action: Action::Folder(vec![PathBuf::from(t.maildir("second"))]),
-        }),
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("second"),
+                )]),
+            },
+            line: 0,
+        },
     ];
     assert_eq!(t.process(&items), Outcome::Default);
 }
@@ -178,12 +201,15 @@ fn else_flag_runs_when_prev_false() {
 
     let items = vec![
         regex_recipe("X-NotPresent:", &t.maildir("first")),
-        Item::Recipe(Recipe {
-            flags,
-            lockfile: None,
-            conds: vec![],
-            action: Action::Folder(vec![PathBuf::from(t.maildir("else"))]),
-        }),
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("else"))]),
+            },
+            line: 0,
+        },
     ];
     assert!(
         matches!(t.process(&items), Outcome::Delivered(p) if p.contains("else"))
@@ -197,16 +223,19 @@ fn body_flag_greps_body() {
     flags.head = false;
     flags.body = true;
 
-    let items = vec![Item::Recipe(Recipe {
-        flags,
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "body".to_string(),
-            negate: false,
-            weight: None,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("body"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "body".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("body"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
@@ -217,18 +246,26 @@ fn copy_flag_continues() {
     flags.copy = true;
 
     let items = vec![
-        Item::Recipe(Recipe {
-            flags,
-            lockfile: None,
-            conds: vec![],
-            action: Action::Folder(vec![PathBuf::from(t.maildir("first"))]),
-        }),
-        Item::Recipe(Recipe {
-            flags: Flags::new(),
-            lockfile: None,
-            conds: vec![],
-            action: Action::Folder(vec![PathBuf::from(t.maildir("second"))]),
-        }),
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("first"))]),
+            },
+            line: 0,
+        },
+        Item::Recipe {
+            recipe: Recipe {
+                flags: Flags::new(),
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("second"),
+                )]),
+            },
+            line: 0,
+        },
     ];
     assert!(
         matches!(t.process(&items), Outcome::Delivered(p) if p.contains("second"))
@@ -238,21 +275,29 @@ fn copy_flag_continues() {
 #[test]
 fn nested_block() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "Subject:".to_string(),
-            negate: false,
-            weight: None,
-        }],
-        action: Action::Nested(vec![Item::Recipe(Recipe {
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
             flags: Flags::new(),
             lockfile: None,
-            conds: vec![],
-            action: Action::Folder(vec![PathBuf::from(t.maildir("inner"))]),
-        })]),
-    })];
+            conds: vec![Condition::Regex {
+                pattern: "Subject:".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Nested(vec![Item::Recipe {
+                recipe: Recipe {
+                    flags: Flags::new(),
+                    lockfile: None,
+                    conds: vec![],
+                    action: Action::Folder(vec![PathBuf::from(
+                        t.maildir("inner"),
+                    )]),
+                },
+                line: 0,
+            }]),
+        },
+        line: 0,
+    }];
     assert!(
         matches!(t.process(&items), Outcome::Delivered(p) if p.contains("inner"))
     );
@@ -261,30 +306,36 @@ fn nested_block() {
 #[test]
 fn invalid_regex_returns_error() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "[invalid".to_string(),
-            negate: false,
-            weight: None,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "[invalid".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.try_process(&items), Err(EngineError::Regex(_))));
 }
 
 #[test]
 fn delivery_to_unwritable_path_returns_error() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![],
-        action: Action::Folder(vec![PathBuf::from(
-            "/nonexistent/deeply/nested/path/",
-        )]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![],
+            action: Action::Folder(vec![PathBuf::from(
+                "/nonexistent/deeply/nested/path/",
+            )]),
+        },
+        line: 0,
+    }];
     assert!(matches!(
         t.try_process(&items),
         Err(EngineError::Delivery(_))
@@ -294,19 +345,22 @@ fn delivery_to_unwritable_path_returns_error() {
 #[test]
 fn subst_negation_inverts_match() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Subst {
-            inner: Box::new(Condition::Regex {
-                pattern: "X-NotPresent:".to_string(),
-                negate: false,
-                weight: None,
-            }),
-            negate: true,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Subst {
+                inner: Box::new(Condition::Regex {
+                    pattern: "X-NotPresent:".to_string(),
+                    negate: false,
+                    weight: None,
+                }),
+                negate: true,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
@@ -314,19 +368,22 @@ fn subst_negation_inverts_match() {
 fn subst_expands_variables() {
     let mut t = Test::new();
     t.engine.set_var("SENDER", "test");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Subst {
-            inner: Box::new(Condition::Regex {
-                pattern: "^Subject:.*$SENDER".to_string(),
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Subst {
+                inner: Box::new(Condition::Regex {
+                    pattern: "^Subject:.*$SENDER".to_string(),
+                    negate: false,
+                    weight: None,
+                }),
                 negate: false,
-                weight: None,
-            }),
-            negate: false,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("subst"))]),
-    })];
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("subst"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
@@ -334,97 +391,115 @@ fn subst_expands_variables() {
 fn regex_without_subst_no_expansion() {
     let mut t = Test::new();
     t.engine.set_var("SENDER", "test");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        // Without $, the literal string "$SENDER" should NOT be expanded
-        conds: vec![Condition::Regex {
-            pattern: "^Subject:.*$SENDER".to_string(),
-            negate: false,
-            weight: None,
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("nosubst"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            // Without $, the literal string "$SENDER" should NOT be expanded
+            conds: vec![Condition::Regex {
+                pattern: "^Subject:.*$SENDER".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("nosubst"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Default));
 }
 
 #[test]
 fn weighted_condition_positive_score_matches() {
     let mut t = Test::with_msg("Subject: test test test\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "test".to_string(),
-            negate: false,
-            weight: Some(Weight { w: 100.0, x: 1.0 }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("weighted"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "test".to_string(),
+                negate: false,
+                weight: Some(Weight { w: 100.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("weighted"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
 #[test]
 fn weighted_condition_zero_matches_fails() {
     let mut t = Test::new();
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "nomatch".to_string(),
-            negate: false,
-            weight: Some(Weight { w: 100.0, x: 1.0 }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("weighted"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "nomatch".to_string(),
+                negate: false,
+                weight: Some(Weight { w: 100.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("weighted"))]),
+        },
+        line: 0,
+    }];
     assert_eq!(t.process(&items), Outcome::Default);
 }
 
 #[test]
 fn weighted_negated_match_scores_zero() {
     let mut t = Test::with_msg("Subject: spam spam spam\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "spam".to_string(),
-            negate: true,
-            weight: Some(Weight { w: 100.0, x: 1.0 }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "spam".to_string(),
+                negate: true,
+                weight: Some(Weight { w: 100.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
+        },
+        line: 0,
+    }];
     assert_eq!(t.process(&items), Outcome::Default);
 }
 
 #[test]
 fn weighted_negated_nonmatch_adds_weight() {
     let mut t = Test::with_msg("Subject: hello\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "spam".to_string(),
-            negate: true,
-            weight: Some(Weight { w: 100.0, x: 1.0 }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "spam".to_string(),
+                negate: true,
+                weight: Some(Weight { w: 100.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("negated"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
 #[test]
 fn weighted_empty_match_tail_sum() {
     let mut t = Test::with_msg("Subject: test\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "^".to_string(),
-            negate: false,
-            weight: Some(Weight { w: 2.0, x: 0.5 }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("tailsum"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "^".to_string(),
+                negate: false,
+                weight: Some(Weight { w: 2.0, x: 0.5 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("tailsum"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
@@ -433,12 +508,15 @@ fn action_folder_expands_variable() {
     let mut t = Test::new();
     let dir = t.maildir("expanded");
     t.engine.set_var("DEST", &dir);
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![],
-        action: Action::Folder(vec![PathBuf::from("$DEST")]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![],
+            action: Action::Folder(vec![PathBuf::from("$DEST")]),
+        },
+        line: 0,
+    }];
     assert!(matches!(
         t.process(&items),
         Outcome::Delivered(p) if p.contains("expanded")
@@ -449,50 +527,59 @@ fn action_folder_expands_variable() {
 fn action_pipe_expands_variable() {
     let mut t = Test::new();
     t.engine.set_var("CMD", "cat");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![],
-        action: Action::Pipe {
-            cmd: "$CMD".to_string(),
-            capture: None,
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![],
+            action: Action::Pipe {
+                cmd: "$CMD".to_string(),
+                capture: None,
+            },
         },
-    })];
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
 }
 
 #[test]
 fn score_underflow_forces_failure() {
     let mut t = Test::with_msg("Subject: test\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "test".to_string(),
-            negate: false,
-            weight: Some(Weight {
-                w: super::MIN32,
-                x: 1.0,
-            }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("fail"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "test".to_string(),
+                negate: false,
+                weight: Some(Weight {
+                    w: super::MIN32,
+                    x: 1.0,
+                }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("fail"))]),
+        },
+        line: 0,
+    }];
     assert_eq!(t.process(&items), Outcome::Default);
 }
 
 #[test]
 fn positive_fractional_score_rounds_to_one() {
     let mut t = Test::with_msg("Subject: test\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "test".to_string(),
-            negate: false,
-            weight: Some(Weight { w: 0.5, x: 0.0 }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("frac"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "test".to_string(),
+                negate: false,
+                weight: Some(Weight { w: 0.5, x: 0.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("frac"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
     assert_eq!(t.engine.ctx.last_score, 1);
 }
@@ -500,16 +587,19 @@ fn positive_fractional_score_rounds_to_one() {
 #[test]
 fn last_score_set_after_weighted_recipe() {
     let mut t = Test::with_msg("Subject: test test test\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![Condition::Regex {
-            pattern: "test".to_string(),
-            negate: false,
-            weight: Some(Weight { w: 10.0, x: 1.0 }),
-        }],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("score"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "test".to_string(),
+                negate: false,
+                weight: Some(Weight { w: 10.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("score"))]),
+        },
+        line: 0,
+    }];
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
     assert_eq!(t.engine.ctx.last_score, 30);
 }
@@ -519,23 +609,26 @@ fn no_short_circuit_accumulates_score() {
     // A failing non-weighted condition followed by a weighted condition:
     // score should still be accumulated even though the recipe fails.
     let mut t = Test::with_msg("Subject: test test\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![
-            Condition::Regex {
-                pattern: "NOMATCH".to_string(),
-                negate: false,
-                weight: None,
-            },
-            Condition::Regex {
-                pattern: "test".to_string(),
-                negate: false,
-                weight: Some(Weight { w: 10.0, x: 1.0 }),
-            },
-        ],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("fail"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![
+                Condition::Regex {
+                    pattern: "NOMATCH".to_string(),
+                    negate: false,
+                    weight: None,
+                },
+                Condition::Regex {
+                    pattern: "test".to_string(),
+                    negate: false,
+                    weight: Some(Weight { w: 10.0, x: 1.0 }),
+                },
+            ],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("fail"))]),
+        },
+        line: 0,
+    }];
     assert_eq!(t.process(&items), Outcome::Default);
     // Score was accumulated despite the non-weighted failure
     assert_eq!(t.engine.ctx.last_score, 20);
@@ -546,23 +639,26 @@ fn no_short_circuit_weighted_after_fail() {
     // Weighted condition alone would match, but non-weighted failure
     // prevents delivery.
     let mut t = Test::with_msg("Subject: hello\n\nBody");
-    let items = vec![Item::Recipe(Recipe {
-        flags: Flags::new(),
-        lockfile: None,
-        conds: vec![
-            Condition::Regex {
-                pattern: "hello".to_string(),
-                negate: false,
-                weight: Some(Weight { w: 5.0, x: 1.0 }),
-            },
-            Condition::Regex {
-                pattern: "NOPE".to_string(),
-                negate: false,
-                weight: None,
-            },
-        ],
-        action: Action::Folder(vec![PathBuf::from(t.maildir("nope"))]),
-    })];
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![
+                Condition::Regex {
+                    pattern: "hello".to_string(),
+                    negate: false,
+                    weight: Some(Weight { w: 5.0, x: 1.0 }),
+                },
+                Condition::Regex {
+                    pattern: "NOPE".to_string(),
+                    negate: false,
+                    weight: None,
+                },
+            ],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("nope"))]),
+        },
+        line: 0,
+    }];
     assert_eq!(t.process(&items), Outcome::Default);
 }
 
@@ -611,6 +707,7 @@ fn subst_replaces_variable() {
         replace: "rust".into(),
         global: false,
         case_insensitive: false,
+        line: 0,
     }];
     t.process(&items);
     assert_eq!(t.engine.get_var("X"), Some("hello rust"));
@@ -626,6 +723,7 @@ fn subst_global() {
         replace: "b".into(),
         global: true,
         case_insensitive: false,
+        line: 0,
     }];
     t.process(&items);
     assert_eq!(t.engine.get_var("X"), Some("bbb"));
@@ -641,6 +739,7 @@ fn subst_case_insensitive() {
         replace: "bye".into(),
         global: false,
         case_insensitive: true,
+        line: 0,
     }];
     t.process(&items);
     assert_eq!(t.engine.get_var("X"), Some("bye"));
@@ -649,10 +748,13 @@ fn subst_case_insensitive() {
 #[test]
 fn header_op_delete_insert() {
     let mut t = Test::with_msg("Subject: old\nX-Foo: bar\n\nbody");
-    let items = vec![Item::HeaderOp(HeaderOp::DeleteInsert {
-        field: "Subject".into(),
-        value: "new".into(),
-    })];
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::DeleteInsert {
+            field: "Subject".into(),
+            value: "new".into(),
+        },
+        line: 0,
+    }];
     t.process(&items);
     assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
 }
@@ -660,10 +762,13 @@ fn header_op_delete_insert() {
 #[test]
 fn header_op_add_if_not_absent() {
     let mut t = Test::with_msg("Subject: test\n\nbody");
-    let items = vec![Item::HeaderOp(HeaderOp::AddIfNot {
-        field: "Lines".into(),
-        value: "5".into(),
-    })];
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::AddIfNot {
+            field: "Lines".into(),
+            value: "5".into(),
+        },
+        line: 0,
+    }];
     t.process(&items);
     assert_eq!(t.msg.get_header("Lines").as_deref(), Some("5"));
 }
@@ -671,10 +776,13 @@ fn header_op_add_if_not_absent() {
 #[test]
 fn header_op_add_if_not_present() {
     let mut t = Test::with_msg("Subject: test\nLines: 10\n\nbody");
-    let items = vec![Item::HeaderOp(HeaderOp::AddIfNot {
-        field: "Lines".into(),
-        value: "5".into(),
-    })];
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::AddIfNot {
+            field: "Lines".into(),
+            value: "5".into(),
+        },
+        line: 0,
+    }];
     t.process(&items);
     assert_eq!(t.msg.get_header("Lines").as_deref(), Some("10"));
 }
@@ -682,9 +790,12 @@ fn header_op_add_if_not_present() {
 #[test]
 fn header_op_delete() {
     let mut t = Test::with_msg("Subject: test\nX-Spam: yes\n\nbody");
-    let items = vec![Item::HeaderOp(HeaderOp::Delete {
-        field: "X-Spam".into(),
-    })];
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::Delete {
+            field: "X-Spam".into(),
+        },
+        line: 0,
+    }];
     t.process(&items);
     assert!(t.msg.get_header("X-Spam").is_none());
 }
@@ -692,10 +803,13 @@ fn header_op_delete() {
 #[test]
 fn header_op_rename_insert() {
     let mut t = Test::with_msg("Subject: old\n\nbody");
-    let items = vec![Item::HeaderOp(HeaderOp::RenameInsert {
-        field: "Subject".into(),
-        value: "new".into(),
-    })];
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::RenameInsert {
+            field: "Subject".into(),
+            value: "new".into(),
+        },
+        line: 0,
+    }];
     t.process(&items);
     assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
     assert_eq!(t.msg.get_header("Old-Subject").as_deref(), Some("old"));

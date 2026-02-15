@@ -430,6 +430,7 @@ fn run(
         let name = rc.path.display().to_string();
         let items = config::parse(&content, &name)?;
         engine.set_var("_", &name);
+        engine.set_rcfile(&name);
 
         match engine.process(&items, &mut msg)? {
             Outcome::Delivered(_) => delivered = true,

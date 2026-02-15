@@ -160,7 +160,7 @@ fn format_action(a: &Action, depth: usize) -> String {
 fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
     let indent = "  ".repeat(depth);
     match item {
-        Item::Assign { name, value } => {
+        Item::Assign { name, value, .. } => {
             if value.is_empty() {
                 format!("{}{:3}. [UNSET] {}\n", indent, num, name)
             } else {
@@ -170,7 +170,7 @@ fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
                 )
             }
         }
-        Item::Recipe(r) => {
+        Item::Recipe { recipe: r, .. } => {
             let mut out = format!("{}{:3}. [RECIPE]\n", indent, num);
             let inner_indent = "  ".repeat(depth + 1);
 
@@ -214,6 +214,7 @@ fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
             replace,
             global,
             case_insensitive,
+            ..
         } => {
             let flags = match (*global, *case_insensitive) {
                 (true, true) => "gi",
@@ -226,13 +227,13 @@ fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
                 indent, num, name, pattern, replace, flags
             )
         }
-        Item::HeaderOp(op) => {
+        Item::HeaderOp { op, .. } => {
             format!("{}{:3}. [HEADEROP] {:?}\n", indent, num, op)
         }
-        Item::Include(path) => {
+        Item::Include { path, .. } => {
             format!("{}{:3}. [INCLUDERC] {:?}\n", indent, num, path)
         }
-        Item::Switch(path) => {
+        Item::Switch { path, .. } => {
             if path.is_empty() {
                 format!("{}{:3}. [SWITCHRC] (abort)\n", indent, num)
             } else {
@@ -278,7 +279,7 @@ fn print_recipe(r: &Recipe, depth: usize) {
 fn print_item(item: &Item, num: usize, depth: usize) {
     let indent = "  ".repeat(depth);
     match item {
-        Item::Assign { name, value } => {
+        Item::Assign { name, value, .. } => {
             if value.is_empty() {
                 println!("{}{:3}. [UNSET] {}", indent, num, name);
             } else {
@@ -288,7 +289,7 @@ fn print_item(item: &Item, num: usize, depth: usize) {
                 );
             }
         }
-        Item::Recipe(r) => {
+        Item::Recipe { recipe: r, .. } => {
             println!("{}{:3}. [RECIPE]", indent, num);
             print_recipe(r, depth + 1);
         }
@@ -298,6 +299,7 @@ fn print_item(item: &Item, num: usize, depth: usize) {
             replace,
             global,
             case_insensitive,
+            ..
         } => {
             let flags = match (*global, *case_insensitive) {
                 (true, true) => "gi",
@@ -310,13 +312,13 @@ fn print_item(item: &Item, num: usize, depth: usize) {
                 indent, num, name, pattern, replace, flags
             );
         }
-        Item::HeaderOp(op) => {
+        Item::HeaderOp { op, .. } => {
             println!("{}{:3}. [HEADEROP] {:?}", indent, num, op);
         }
-        Item::Include(path) => {
+        Item::Include { path, .. } => {
             println!("{}{:3}. [INCLUDERC] {:?}", indent, num, path);
         }
-        Item::Switch(path) => {
+        Item::Switch { path, .. } => {
             if path.is_empty() {
                 println!("{}{:3}. [SWITCHRC] (abort)", indent, num);
             } else {
