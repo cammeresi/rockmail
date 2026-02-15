@@ -836,6 +836,7 @@ impl Engine {
         if let Some(ref output) = result.output {
             if filter {
                 *msg = Message::parse(output);
+                return Ok(Outcome::Continue);
             }
             if let Some(var) = capture {
                 let text = String::from_utf8_lossy(output);

@@ -510,3 +510,21 @@ fn dryrun_forward() {
         "expected forward dryrun message: {err:?}"
     );
 }
+
+#[test]
+fn dryrun_pipe_runs_normally() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let marker = d.join("pipe_ran");
+    let rc = write_rc(
+        d,
+        &format!(
+            "MAILDIR=$DIR\nDEFAULT=$DIR/default\n\n:0\n| touch {}\n",
+            marker.display()
+        ),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(marker.exists(), "pipe should still run in dryrun");
+}
