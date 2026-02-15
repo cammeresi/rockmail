@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use linker_set::set;
 
-use super::{TIMEOUT, VarName, Variable, defaults, value_as_int};
+use super::{TIMEOUT, VarName, Variable, value_as_int, variables};
 
 /// Canonical variable store for all variable lookups.
 #[derive(Default)]
@@ -69,7 +69,7 @@ impl Environment {
 
     /// Set all variables that have defaults from the linker set.
     pub fn set_all_defaults(&mut self) {
-        for v in set!(defaults).iter() {
+        for v in set!(variables).iter().filter(|v| v.def.is_some()) {
             self.set_default(v);
         }
     }

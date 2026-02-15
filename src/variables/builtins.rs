@@ -1,6 +1,9 @@
 //! Procmail builtin variable names and their defaults.
 #![allow(missing_docs)]
 
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
 use linker_set::*;
 use pastey::paste;
 
@@ -40,17 +43,17 @@ pub struct Variable {
     pub def: Option<&'static str>,
 }
 
-set_declare!(defaults, Variable);
+set_declare!(variables, Variable);
 
 macro_rules! var {
     ($id:ident) => {
-        var!(@inner $id, None,);
+        var!(@inner $id, None);
     };
     ($id:ident, $def:expr) => {
-        var!(@inner $id, Some($def), #[set_entry(defaults)]);
+        var!(@inner $id, Some($def));
     };
-    (@inner $id:ident, $def:expr, $(#[$attr:meta])*) => {
-        $(#[$attr])*
+    (@inner $id:ident, $def:expr) => {
+        #[set_entry(variables)]
         pub static $id: Variable = Variable {
             name: stringify!($id),
             def: $def,
@@ -59,6 +62,14 @@ macro_rules! var {
             pub const [<VAR_ $id>]: &str = stringify!($id);
         }
     };
+}
+
+/// Returns true if `name` is a known builtin variable.
+pub fn is_builtin(name: &str) -> bool {
+    static NAMES: OnceLock<HashSet<&str>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| set!(variables).iter().map(|v| v.name).collect())
+        .contains(name)
 }
 
 var!(SHELL, "/bin/sh");

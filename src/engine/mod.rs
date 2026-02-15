@@ -28,7 +28,7 @@ use crate::variables::{
     SHELL, SHELLFLAGS, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC,
     VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE, VAR_LOG, VAR_LOGFILE,
     VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW, VAR_SHIFT, VAR_SWITCHRC,
-    VAR_TRAP, VAR_UMASK, VAR_VERBOSE, subst_limited, value_as_int,
+    VAR_TRAP, VAR_UMASK, VAR_VERBOSE, is_builtin, subst_limited, value_as_int,
 };
 
 #[cfg(test)]
@@ -1219,6 +1219,9 @@ impl Engine {
             match item {
                 Item::Assign { name, value } => {
                     let expanded = self.expand(value, Some(msg));
+                    if self.dryrun && !is_builtin(name) {
+                        eprintln!("assign: {}={:?}", name, expanded);
+                    }
                     self.set_var(name, &expanded);
                     if self.abort {
                         self.abort = false;
