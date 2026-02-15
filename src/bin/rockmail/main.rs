@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
-use miette::{GraphicalTheme, MietteHandlerOpts};
+use miette::MietteHandlerOpts;
 use nix::unistd::{ROOT, Uid, User};
 use rockmail::config::{self, is_var_name};
 use rockmail::delivery::{DeliveryOpts, FolderType};
@@ -484,16 +484,13 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // miette's own supports-color detection is unreliable, so we do it ourselves
-    miette::set_hook(Box::new(|_| {
-        let theme = if std::io::stderr().is_terminal() {
-            GraphicalTheme::unicode()
-        } else {
-            GraphicalTheme::unicode_nocolor()
-        };
-        Box::new(MietteHandlerOpts::new().graphical_theme(theme).build())
-    }))
-    .ok();
+    // Snapshot terminal capabilities before clearing the environment.
+    let term = io::stderr().is_terminal();
+    let opts = MietteHandlerOpts::new()
+        .color(term)
+        .unicode(term)
+        .terminal_links(false);
+    miette::set_hook(Box::new(move |_| Box::new(opts.clone().build()))).ok();
 
     signals::setup();
     init_umask();

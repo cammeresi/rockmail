@@ -2,6 +2,12 @@
 
 Features that extend beyond procmail's rcfile syntax.
 
+## Pretty-Printed Errors
+
+Rcfile parse errors are rendered with context via miette when stderr is a
+terminal.  Run rockmail interactively to see annotated source spans,
+underlines, and color.
+
 ## Variable Regex Substitution (`=~`)
 
 Apply a regex substitution to a variable's current value, without
