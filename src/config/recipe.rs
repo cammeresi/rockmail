@@ -139,6 +139,15 @@ pub enum Item {
         /// Assigned value (after `=`).
         value: String,
     },
+    /// Regex substitution on a variable (`VAR =~ s/pat/rep/flags`).
+    #[allow(missing_docs)]
+    Subst {
+        name: String,
+        pattern: String,
+        replace: String,
+        global: bool,
+        case_insensitive: bool,
+    },
     /// A recipe block.
     Recipe(Recipe),
     /// Include an rcfile (INCLUDERC assignment).

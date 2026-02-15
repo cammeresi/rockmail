@@ -482,7 +482,7 @@ fn dryrun_folder_delivery() {
     assert_eq!(code, 0);
     let err = String::from_utf8_lossy(&stderr);
     assert!(
-        err.contains("deliver to"),
+        err.contains("deliver:"),
         "expected dryrun message: {err:?}"
     );
     assert!(

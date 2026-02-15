@@ -13,6 +13,8 @@ use std::time::Duration;
 use nix::sys::stat::{self, Mode};
 use nix::unistd::dup2;
 
+use regex::RegexBuilder;
+
 use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
 use crate::locking::FileLock;
@@ -1068,6 +1070,29 @@ impl Engine {
         }
     }
 
+    /// Apply `VAR =~ s/pat/rep/flags` substitution.
+    fn apply_subst(
+        &mut self, name: &str, pattern: &str, replace: &str, global: bool,
+        case_insensitive: bool,
+    ) {
+        let pat = self.expand(pattern);
+        let rep = self.expand(replace);
+        let Ok(re) = RegexBuilder::new(&pat)
+            .case_insensitive(case_insensitive)
+            .build()
+        else {
+            eprintln!("bad regex in =~: {pat}");
+            return;
+        };
+        let val = self.env.get_or_default(name).to_owned();
+        let result = if global {
+            re.replace_all(&val, rep.as_str())
+        } else {
+            re.replace(&val, rep.as_str())
+        };
+        self.set_var(name, &result);
+    }
+
     fn process_items(
         &mut self, items: &[Item], msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
@@ -1079,6 +1104,34 @@ impl Engine {
                     if self.abort {
                         self.abort = false;
                         return Ok(Outcome::Default);
+                    }
+                }
+                Item::Subst {
+                    name,
+                    pattern,
+                    replace,
+                    global,
+                    case_insensitive,
+                } => {
+                    self.apply_subst(
+                        name,
+                        pattern,
+                        replace,
+                        *global,
+                        *case_insensitive,
+                    );
+                    if self.dryrun {
+                        let flags = match (*global, *case_insensitive) {
+                            (true, true) => "gi",
+                            (true, false) => "g",
+                            (false, true) => "i",
+                            (false, false) => "",
+                        };
+                        let val = self.get_var(name).unwrap_or("");
+                        eprintln!(
+                            "subst: {} =~ s/{}/{}/{} -> {:?}",
+                            name, pattern, replace, flags, val
+                        );
                     }
                 }
                 Item::Recipe(recipe) => {
@@ -1134,22 +1187,22 @@ impl Engine {
                     .iter()
                     .map(|p| self.expand(&p.to_string_lossy()))
                     .collect();
-                eprintln!("deliver to {}", expanded.join(" "));
+                eprintln!("deliver: {}", expanded.join(" "));
             }
             Action::Pipe { cmd, capture } => {
                 let expanded = self.expand(cmd);
                 if let Some(var) = capture {
-                    eprintln!("capture {}=| {}", var, expanded);
+                    eprintln!("capture: {}=| {}", var, expanded);
                 } else if recipe.flags.filter {
-                    eprintln!("filter | {}", expanded);
+                    eprintln!("filter: {}", expanded);
                 } else {
-                    eprintln!("pipe | {}", expanded);
+                    eprintln!("pipe: {}", expanded);
                 }
             }
             Action::Forward(addrs) => {
                 let expanded: Vec<_> =
                     addrs.iter().map(|a| self.expand(a)).collect();
-                eprintln!("forward ! {}", expanded.join(" "));
+                eprintln!("forward: {}", expanded.join(" "));
             }
             Action::Nested(_) => {}
         }

@@ -208,6 +208,24 @@ fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
             ));
             out
         }
+        Item::Subst {
+            name,
+            pattern,
+            replace,
+            global,
+            case_insensitive,
+        } => {
+            let flags = match (*global, *case_insensitive) {
+                (true, true) => "gi",
+                (true, false) => "g",
+                (false, true) => "i",
+                (false, false) => "",
+            };
+            format!(
+                "{}{:3}. [SUBST] {} =~ s/{}/{}/{}\n",
+                indent, num, name, pattern, replace, flags
+            )
+        }
         Item::Include(path) => {
             format!("{}{:3}. [INCLUDERC] {:?}\n", indent, num, path)
         }
@@ -270,6 +288,24 @@ fn print_item(item: &Item, num: usize, depth: usize) {
         Item::Recipe(r) => {
             println!("{}{:3}. [RECIPE]", indent, num);
             print_recipe(r, depth + 1);
+        }
+        Item::Subst {
+            name,
+            pattern,
+            replace,
+            global,
+            case_insensitive,
+        } => {
+            let flags = match (*global, *case_insensitive) {
+                (true, true) => "gi",
+                (true, false) => "g",
+                (false, true) => "i",
+                (false, false) => "",
+            };
+            println!(
+                "{}{:3}. [SUBST] {} =~ s/{}/{}/{}",
+                indent, num, name, pattern, replace, flags
+            );
         }
         Item::Include(path) => {
             println!("{}{:3}. [INCLUDERC] {:?}", indent, num, path);

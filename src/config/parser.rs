@@ -213,6 +213,38 @@ impl<'a> Parser<'a> {
         result
     }
 
+    /// Parse `VAR =~ s/pat/rep/flags`.
+    fn parse_subst(line: &str) -> Option<Item> {
+        let pos = line.find("=~")?;
+        let name = line[..pos].trim();
+        if !is_var_name(name) {
+            return None;
+        }
+        let rhs = line[pos + 2..].trim();
+        let mut chars = rhs.chars();
+        if chars.next()? != 's' {
+            return None;
+        }
+        let delim = chars.next()?;
+        if delim.is_alphanumeric() {
+            return None;
+        }
+        let rest = &rhs[2..];
+        let mid = rest.find(delim)?;
+        let pattern = &rest[..mid];
+        let after = &rest[mid + delim.len_utf8()..];
+        let end = after.find(delim)?;
+        let replace = &after[..end];
+        let flags = &after[end + delim.len_utf8()..];
+        Some(Item::Subst {
+            name: name.to_string(),
+            pattern: pattern.to_string(),
+            replace: replace.to_string(),
+            global: flags.contains('g'),
+            case_insensitive: flags.contains('i'),
+        })
+    }
+
     fn parse_assignment(&self, line: &str) -> Option<Item> {
         if let Some(eq) = line.find('=') {
             let name = line[..eq].trim();
@@ -406,9 +438,13 @@ impl<'a> Parser<'a> {
                 return Ok(None);
             }
 
-            // Variable assignment: NAME=value or NAME (unset)
             let off = self.cur_offset();
             self.advance();
+
+            if let Some(item) = Self::parse_subst(trimmed) {
+                return Ok(Some(item));
+            }
+
             if let Some(item) = self.parse_assignment(trimmed) {
                 return Ok(Some(item));
             }
