@@ -4,11 +4,16 @@ use std::str;
 #[cfg(test)]
 mod tests;
 
-/// Normalize CRLF to LF.
-fn normalize_crlf(data: &[u8]) -> Vec<u8> {
+/// Normalize CRLF to LF, borrowing when no CRs are present.
+fn normalize_crlf(data: &[u8]) -> Cow<'_, [u8]> {
     if !data.contains(&b'\r') {
-        return data.to_vec();
+        return Cow::Borrowed(data);
     }
+    Cow::Owned(strip_cr(data))
+}
+
+/// Replace CRLF pairs with LF. Caller must ensure `data` contains `\r`.
+fn strip_cr(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len());
     let mut i = 0;
     while i < data.len() {
@@ -90,7 +95,8 @@ fn parse_header_field(field: &[u8]) -> Option<(Cow<'_, str>, Cow<'_, str>)> {
         value = &value[..value.len() - 1];
     }
 
-    // Unfold continuation lines: replace \n followed by whitespace with single space
+    // Unfold continuation lines: replace \n followed by whitespace with
+    // single space
     let name = String::from_utf8_lossy(name);
     let value = unfold_header(value);
 
@@ -173,34 +179,32 @@ impl Message {
     /// Leading blank lines before headers are skipped.
     /// CRLF line endings are normalized to LF.
     pub fn parse(input: &[u8]) -> Self {
-        let data = normalize_crlf(input);
-        let start = skip_leading_newlines(&data);
-        let data = data[start..].to_vec();
-
-        let (header_end, body_start) = find_boundary(&data);
-
-        Self {
-            data,
-            header_end,
-            body_start,
-        }
+        Self::from_cow(normalize_crlf(input))
     }
 
     /// Parse a message from owned bytes, avoiding a copy when possible.
-    ///
-    /// If the input contains no CRLF sequences and no leading newlines,
-    /// this avoids allocating a new buffer.
-    pub fn parse_owned(mut input: Vec<u8>) -> Self {
+    pub fn parse_owned(input: Vec<u8>) -> Self {
         if input.contains(&b'\r') {
-            return Self::parse(&input);
+            Self::from_cow(Cow::Owned(strip_cr(&input)))
+        } else {
+            Self::from_cow(Cow::Owned(input))
         }
-        let start = skip_leading_newlines(&input);
-        if start > 0 {
-            input.drain(..start);
-        }
-        let (header_end, body_start) = find_boundary(&input);
+    }
+
+    fn from_cow(norm: Cow<'_, [u8]>) -> Self {
+        let start = skip_leading_newlines(&norm);
+        let data = match norm {
+            Cow::Borrowed(b) => b[start..].to_vec(),
+            Cow::Owned(mut v) => {
+                if start > 0 {
+                    v.drain(..start);
+                }
+                v
+            }
+        };
+        let (header_end, body_start) = find_boundary(&data);
         Self {
-            data: input,
+            data,
             header_end,
             body_start,
         }
