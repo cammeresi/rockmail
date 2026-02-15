@@ -6,6 +6,9 @@ use super::Environment;
 #[cfg(test)]
 mod tests;
 
+/// Callback that executes a shell command and returns captured stdout.
+pub type BacktickFn<'a> = &'a dyn Fn(&str) -> String;
+
 /// Holds context for variable substitution (positional args, special vars).
 pub struct SubstCtx {
     /// Positional arguments (`$1`, `$2`, ...).
@@ -119,9 +122,32 @@ fn skip_to_brace(chars: &mut Peekable<Chars>) {
     }
 }
 
+/// Collect chars until closing backtick, expanding `$var` inside.
+fn collect_backtick(
+    chars: &mut Peekable<Chars>, env: &Environment, ctx: &SubstCtx,
+    run: Option<BacktickFn>,
+) -> String {
+    let mut cmd = String::new();
+    while let Some(c) = chars.next() {
+        if c == '`' {
+            return cmd;
+        } else if c == '\\'
+            && chars.peek().is_some_and(|&n| matches!(n, '`' | '\\' | '$'))
+        {
+            cmd.push(chars.next().unwrap());
+        } else if c == '$' {
+            expand_var(chars, ctx, env, &mut cmd, run);
+        } else {
+            cmd.push(c);
+        }
+    }
+    // Unclosed backtick: use what we collected (matches Procmail)
+    cmd
+}
+
 fn expand_braced(
     chars: &mut Peekable<Chars>, ctx: &SubstCtx, env: &Environment,
-    out: &mut String,
+    out: &mut String, run: Option<BacktickFn>,
 ) {
     let name = collect_name(chars);
     if name.is_empty() {
@@ -145,7 +171,7 @@ fn expand_braced(
                     let alt = collect_to_brace(chars);
                     match val {
                         Some(v) if !v.is_empty() => out.push_str(v),
-                        _ => out.push_str(&subst(env, ctx, &alt)),
+                        _ => out.push_str(&subst_with(env, ctx, &alt, run)),
                     }
                 }
                 Some('+') => {
@@ -153,7 +179,7 @@ fn expand_braced(
                     if let Some(v) = val
                         && !v.is_empty()
                     {
-                        out.push_str(&subst(env, ctx, &alt));
+                        out.push_str(&subst_with(env, ctx, &alt, run));
                     }
                 }
                 _ => skip_to_brace(chars),
@@ -164,14 +190,14 @@ fn expand_braced(
             let alt = collect_to_brace(chars);
             match val {
                 Some(v) => out.push_str(v),
-                None => out.push_str(&subst(env, ctx, &alt)),
+                None => out.push_str(&subst_with(env, ctx, &alt, run)),
             }
         }
         Some(&'+') => {
             chars.next();
             let alt = collect_to_brace(chars);
             if val.is_some() {
-                out.push_str(&subst(env, ctx, &alt));
+                out.push_str(&subst_with(env, ctx, &alt, run));
             }
         }
         _ => skip_to_brace(chars),
@@ -180,13 +206,13 @@ fn expand_braced(
 
 fn expand_var(
     chars: &mut Peekable<Chars>, ctx: &SubstCtx, env: &Environment,
-    out: &mut String,
+    out: &mut String, run: Option<BacktickFn>,
 ) {
     match chars.peek() {
         None => out.push('$'),
         Some(&'{') => {
             chars.next();
-            expand_braced(chars, ctx, env, out);
+            expand_braced(chars, ctx, env, out, run);
         }
         Some(&'$') => {
             chars.next();
@@ -243,15 +269,30 @@ fn expand_var(
     }
 }
 
+/// Internal: expand with optional backtick runner.
+fn subst_with(
+    env: &Environment, ctx: &SubstCtx, s: &str, run: Option<BacktickFn>,
+) -> String {
+    subst_limited_with(env, ctx, s, usize::MAX, run).0
+}
+
 /// Expand all `$variable` references in `s`.
 pub fn subst(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
-    subst_limited(env, ctx, s, usize::MAX).0
+    subst_limited_with(env, ctx, s, usize::MAX, None).0
 }
 
 /// Like `subst`, but truncates output at `limit` bytes.
 /// Returns `(result, overflowed)`.
 pub fn subst_limited(
     env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
+    run: Option<BacktickFn>,
+) -> (String, bool) {
+    subst_limited_with(env, ctx, s, limit, run)
+}
+
+fn subst_limited_with(
+    env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
+    run: Option<BacktickFn>,
 ) -> (String, bool) {
     let mut out = String::with_capacity(s.len().min(limit));
     let mut chars = s.chars().peekable();
@@ -270,7 +311,14 @@ pub fn subst_limited(
                 out.push(c);
             }
         } else if c == '$' {
-            expand_var(&mut chars, ctx, env, &mut out);
+            expand_var(&mut chars, ctx, env, &mut out, run);
+        } else if c == '`' {
+            if let Some(runner) = run {
+                let cmd = collect_backtick(&mut chars, env, ctx, run);
+                out.push_str(&runner(&cmd));
+            } else {
+                out.push(c);
+            }
         } else {
             out.push(c);
         }

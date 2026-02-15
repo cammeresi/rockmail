@@ -237,16 +237,80 @@ fn overflow() {
     env.set("V", "abcdefghij");
     let ctx = SubstCtx::default();
 
-    let (r, over) = subst_limited(&env, &ctx, "$V$V", 21);
+    let (r, over) = subst_limited(&env, &ctx, "$V$V", 21, None);
     assert_eq!(r, "abcdefghijabcdefghij");
     assert!(!over);
 
-    let (r, over) = subst_limited(&env, &ctx, "$V$V", 15);
+    let (r, over) = subst_limited(&env, &ctx, "$V$V", 15, None);
     assert_eq!(r, "abcdefghijabcde");
     assert!(over);
 
     // No expansion, under limit
-    let (r, over) = subst_limited(&env, &ctx, "hello", 10);
+    let (r, over) = subst_limited(&env, &ctx, "hello", 10, None);
     assert_eq!(r, "hello");
     assert!(!over);
+}
+
+#[test]
+fn backtick_with_runner() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |cmd: &str| cmd.to_uppercase();
+    let r = subst_limited(&env, &ctx, "`hello`", usize::MAX, Some(&run));
+    assert_eq!(r.0, "HELLO");
+}
+
+#[test]
+fn backtick_var_inside() {
+    let mut env = Environment::new();
+    env.set("X", "world");
+    let ctx = SubstCtx::default();
+    let run = |cmd: &str| cmd.to_owned();
+    let r = subst_limited(&env, &ctx, "`echo $X`", usize::MAX, Some(&run));
+    assert_eq!(r.0, "echo world");
+}
+
+#[test]
+fn backtick_escaped() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |_: &str| "nope".to_owned();
+    // \` should produce literal backtick, not invoke runner
+    let r = subst_limited(&env, &ctx, "\\`lit\\`", usize::MAX, Some(&run));
+    assert_eq!(r.0, "`lit`");
+}
+
+#[test]
+fn backtick_unclosed() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |cmd: &str| cmd.to_owned();
+    let r = subst_limited(&env, &ctx, "`unclosed", usize::MAX, Some(&run));
+    assert_eq!(r.0, "unclosed");
+}
+
+#[test]
+fn backtick_none_runner() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    // Without runner, backticks are literal
+    assert_eq!(subst(&env, &ctx, "`hello`"), "`hello`");
+}
+
+#[test]
+fn backtick_empty() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |cmd: &str| cmd.to_owned();
+    let r = subst_limited(&env, &ctx, "``", usize::MAX, Some(&run));
+    assert_eq!(r.0, "");
+}
+
+#[test]
+fn backtick_in_default() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |_: &str| "val".to_owned();
+    let r = subst_limited(&env, &ctx, "${X:-`cmd`}", usize::MAX, Some(&run));
+    assert_eq!(r.0, "val");
 }

@@ -758,6 +758,39 @@ matched
 }
 
 #[test]
+fn backtick_assignment() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+FOO=`echo hello`
+
+:0
+* FOO ?? hello
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn backtick_reads_stdin() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+CAPTURED=`grep '^Subject:' | sed 's/Subject: //'`
+
+:0
+* CAPTURED ?? magic
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: magic\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
 fn macro_from_daemon() {
     let rc = "\
 MAILDIR=$MAILDIR

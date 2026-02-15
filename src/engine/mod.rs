@@ -21,10 +21,11 @@ use crate::field::{self, Field};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
+use crate::util::wait_timeout;
 use crate::variables::{
-    DEF_LINEBUF, DEV_NULL, Environment, HOST, LINEBUF, LOCKEXT, LOCKSLEEP,
-    LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, SENDMAIL, SENDMAILFLAGS, SHELL,
-    SHELLFLAGS, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC,
+    BacktickFn, DEF_LINEBUF, DEV_NULL, Environment, HOST, LINEBUF, LOCKEXT,
+    LOCKSLEEP, LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, SENDMAIL, SENDMAILFLAGS,
+    SHELL, SHELLFLAGS, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC,
     VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE, VAR_LOG, VAR_LOGFILE,
     VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW, VAR_SHIFT, VAR_SWITCHRC,
     VAR_TRAP, VAR_UMASK, VAR_VERBOSE, subst_limited, value_as_int,
@@ -181,6 +182,38 @@ fn skip_from_line(data: &[u8]) -> &[u8] {
         return &data[pos + 1..];
     }
     data
+}
+
+/// Spawn `$SHELL $SHELLFLAGS cmd` with `input` on stdin, capture stdout,
+/// strip trailing newlines (pipes.c:277).
+fn run_backtick(
+    shell: &str, flags: &str, cmd: &str, input: &[u8],
+    envs: &[(String, String)], timeout: Duration,
+) -> String {
+    let child = Command::new(shell)
+        .arg(flags)
+        .arg(cmd)
+        .env_clear()
+        .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return String::new();
+    };
+    if let Some(mut w) = child.stdin.take() {
+        let _ = w.write_all(input);
+    }
+    let mut buf = Vec::new();
+    if let Some(mut r) = child.stdout.take() {
+        let _ = io::Read::read_to_end(&mut r, &mut buf);
+    }
+    let _ = wait_timeout(&mut child, timeout, cmd);
+    while buf.last() == Some(&b'\n') {
+        buf.pop();
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// Recipe evaluation engine.
@@ -347,10 +380,30 @@ impl Engine {
         }
     }
 
-    /// Expand variables in a string.
-    fn expand(&mut self, s: &str) -> String {
+    /// Expand variables (and backtick commands when `msg` is provided).
+    fn expand(&mut self, s: &str, msg: Option<&Message>) -> String {
         let limit = self.env.get_num(&LINEBUF) as usize;
-        let (r, overflow) = subst_limited(&self.env, &self.ctx, s, limit);
+        let run;
+        let runner: Option<BacktickFn>;
+        if let Some(msg) = msg {
+            let shell = self.env.get_or_default(&SHELL).to_owned();
+            let flags = self.env.get_or_default(&SHELLFLAGS).to_owned();
+            let envs: Vec<_> = self
+                .env
+                .iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect();
+            let timeout = self.timeout();
+            let input = msg.as_bytes().to_vec();
+            run = move |cmd: &str| {
+                run_backtick(&shell, &flags, cmd, &input, &envs, timeout)
+            };
+            runner = Some(&run as BacktickFn);
+        } else {
+            runner = None;
+        }
+        let (r, overflow) =
+            subst_limited(&self.env, &self.ctx, s, limit, runner);
         if overflow {
             self.env.set(VAR_PROCMAIL_OVERFLOW, "yes");
         }
@@ -358,14 +411,16 @@ impl Engine {
     }
 
     /// Return a copy of `cond` with all string fields expanded.
-    fn expand_condition(&mut self, cond: &Condition) -> Condition {
+    fn expand_condition(
+        &mut self, cond: &Condition, msg: &Message,
+    ) -> Condition {
         match cond {
             Condition::Regex {
                 pattern,
                 negate,
                 weight,
             } => Condition::Regex {
-                pattern: self.expand(pattern),
+                pattern: self.expand(pattern, Some(msg)),
                 negate: *negate,
                 weight: *weight,
             },
@@ -374,7 +429,7 @@ impl Engine {
                 negate,
                 weight,
             } => Condition::Shell {
-                cmd: self.expand(cmd),
+                cmd: self.expand(cmd, Some(msg)),
                 negate: *negate,
                 weight: *weight,
             },
@@ -383,13 +438,13 @@ impl Engine {
                 pattern,
                 weight,
             } => Condition::Variable {
-                name: self.expand(name),
-                pattern: self.expand(pattern),
+                name: self.expand(name, Some(msg)),
+                pattern: self.expand(pattern, Some(msg)),
                 weight: *weight,
             },
             Condition::Size { .. } => cond.clone(),
             Condition::Subst { inner, negate } => Condition::Subst {
-                inner: Box::new(self.expand_condition(inner)),
+                inner: Box::new(self.expand_condition(inner, msg)),
                 negate: *negate,
             },
         }
@@ -638,7 +693,7 @@ impl Engine {
                 weight,
             } => self.eval_variable(name, pattern, *weight, recipe, msg),
             Condition::Subst { inner, negate } => {
-                let expanded = self.expand_condition(inner);
+                let expanded = self.expand_condition(inner, msg);
                 let mut r = self.eval_condition(&expanded, recipe, msg)?;
                 r.matched ^= negate;
                 Ok(r)
@@ -702,13 +757,15 @@ impl Engine {
     }
 
     /// Resolve the lockfile path for a recipe.
-    fn resolve_lockfile(&mut self, recipe: &Recipe) -> Option<String> {
+    fn resolve_lockfile(
+        &mut self, recipe: &Recipe, msg: &Message,
+    ) -> Option<String> {
         let lock = recipe.lockfile.as_ref()?;
         if lock.is_empty() {
             match &recipe.action {
                 Action::Folder(paths) => {
                     let path_str = paths[0].to_string_lossy();
-                    let expanded = self.expand(&path_str);
+                    let expanded = self.expand(&path_str, Some(msg));
                     let (ft, _) = FolderType::parse(&expanded);
                     if !ft.needs_lock() {
                         return None;
@@ -719,7 +776,7 @@ impl Engine {
                 _ => None,
             }
         } else {
-            Some(self.expand(lock))
+            Some(self.expand(lock, Some(msg)))
         }
     }
 
@@ -930,7 +987,7 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         let _lock = if self.dryrun {
             None
-        } else if let Some(p) = self.resolve_lockfile(recipe) {
+        } else if let Some(p) = self.resolve_lockfile(recipe, msg) {
             if self.env.get(VAR_LOCKFILE).is_some_and(|gl| gl == p) {
                 eprintln!("Deadlock attempted on \"{p}\"");
                 None
@@ -953,17 +1010,17 @@ impl Engine {
             Action::Folder(paths) => {
                 let expanded: Vec<_> = paths
                     .iter()
-                    .map(|p| self.expand(&p.to_string_lossy()))
+                    .map(|p| self.expand(&p.to_string_lossy(), Some(msg)))
                     .collect();
                 self.deliver_to_folder(&expanded, recipe, msg)
             }
             Action::Pipe { cmd, capture } => {
-                let expanded = self.expand(cmd);
+                let expanded = self.expand(cmd, Some(msg));
                 self.deliver_to_pipe(&expanded, recipe, msg, capture.as_deref())
             }
             Action::Forward(addrs) => {
                 let expanded: Vec<_> =
-                    addrs.iter().map(|a| self.expand(a)).collect();
+                    addrs.iter().map(|a| self.expand(a, Some(msg))).collect();
                 self.forward(recipe, msg, &expanded)
             }
             Action::Nested(items) => self.process_items(items, msg, state),
@@ -1048,7 +1105,7 @@ impl Engine {
         &mut self, path: &str, var: &str, switch: bool, msg: &mut Message,
         state: &mut State,
     ) -> EngineResult<Option<Outcome>> {
-        let expanded = self.expand(path);
+        let expanded = self.expand(path, Some(msg));
         self.set_var(var, &expanded);
         if state.depth >= MAX_INCLUDE_DEPTH {
             return Err(EngineError::RecursionLimit);
@@ -1076,8 +1133,8 @@ impl Engine {
         &mut self, name: &str, pattern: &str, replace: &str, global: bool,
         case_insensitive: bool,
     ) {
-        let pat = self.expand(pattern);
-        let rep = self.expand(replace);
+        let pat = self.expand(pattern, None);
+        let rep = self.expand(replace, None);
         let Ok(re) = RegexBuilder::new(&pat)
             .case_insensitive(case_insensitive)
             .build()
@@ -1101,7 +1158,7 @@ impl Engine {
             | HeaderOp::RenameInsert { field, value }
             | HeaderOp::AddIfNot { field, value }
             | HeaderOp::AddAlways { field, value } => {
-                (field.as_str(), Some(self.expand(value)))
+                (field.as_str(), Some(self.expand(value, None)))
             }
             HeaderOp::Delete { field } => (field.as_str(), None),
         };
@@ -1161,7 +1218,7 @@ impl Engine {
         for item in items {
             match item {
                 Item::Assign { name, value } => {
-                    let expanded = self.expand(value);
+                    let expanded = self.expand(value, Some(msg));
                     self.set_var(name, &expanded);
                     if self.abort {
                         self.abort = false;
@@ -1253,12 +1310,12 @@ impl Engine {
             Action::Folder(paths) => {
                 let expanded: Vec<_> = paths
                     .iter()
-                    .map(|p| self.expand(&p.to_string_lossy()))
+                    .map(|p| self.expand(&p.to_string_lossy(), None))
                     .collect();
                 eprintln!("deliver: {}", expanded.join(" "));
             }
             Action::Pipe { cmd, capture } => {
-                let expanded = self.expand(cmd);
+                let expanded = self.expand(cmd, None);
                 if let Some(var) = capture {
                     eprintln!("capture: {}=| {}", var, expanded);
                 } else if recipe.flags.filter {
@@ -1269,7 +1326,7 @@ impl Engine {
             }
             Action::Forward(addrs) => {
                 let expanded: Vec<_> =
-                    addrs.iter().map(|a| self.expand(a)).collect();
+                    addrs.iter().map(|a| self.expand(a, None)).collect();
                 eprintln!("forward: {}", expanded.join(" "));
             }
             Action::Nested(_) => {}
@@ -1280,19 +1337,19 @@ impl Engine {
     fn log_header_op(&mut self, op: &HeaderOp) {
         match op {
             HeaderOp::DeleteInsert { field, value } => {
-                let val = self.expand(value);
+                let val = self.expand(value, None);
                 eprintln!("header: @I {}: {}", field, val);
             }
             HeaderOp::RenameInsert { field, value } => {
-                let val = self.expand(value);
+                let val = self.expand(value, None);
                 eprintln!("header: @i {}: {}", field, val);
             }
             HeaderOp::AddIfNot { field, value } => {
-                let val = self.expand(value);
+                let val = self.expand(value, None);
                 eprintln!("header: @a {}: {}", field, val);
             }
             HeaderOp::AddAlways { field, value } => {
-                let val = self.expand(value);
+                let val = self.expand(value, None);
                 eprintln!("header: @A {}: {}", field, val);
             }
             HeaderOp::Delete { field } => {
@@ -1350,7 +1407,7 @@ impl Engine {
         if !user_set {
             self.set_var(VAR_EXITCODE, "0");
         }
-        let cmd = self.expand(&trap);
+        let cmd = self.expand(&trap, Some(msg));
         let shell = self.env.get_or_default(&SHELL).to_owned();
         let child = self
             .spawn(&shell)
