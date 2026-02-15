@@ -9,6 +9,7 @@
 #![cfg(feature = "gold")]
 
 use std::fs;
+use std::path::Path;
 
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -804,6 +805,215 @@ daemon
         b"From: MAILER-DAEMON@host\nSubject: bounce\n\nBody\n",
         b"From: x@host\nPrecedence: bulk\nSubject: list\n\nBody\n",
         b"From: user@host\nSubject: hello\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+fn write_rc(dir: &Path, name: &str, content: &str) {
+    fs::write(dir.join(name), content).unwrap();
+}
+
+#[test]
+fn includerc_delivers() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+INCLUDERC=$MAILDIR/inc.rc
+";
+    let inc = "\
+:0
+* ^Subject:.*match
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: match me\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs)
+        .pre(|d| write_rc(d, "inc.rc", inc))
+        .run();
+}
+
+#[test]
+fn includerc_continues() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+INCLUDERC=$MAILDIR/inc.rc
+
+:0
+* ^Subject:.*parent
+matched
+";
+    let inc = "\
+:0
+* ^Subject:.*nope
+nope
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: parent\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs)
+        .pre(|d| write_rc(d, "inc.rc", inc))
+        .run();
+}
+
+#[test]
+fn includerc_missing_skipped() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+INCLUDERC=$MAILDIR/noexist.rc
+
+:0
+* ^Subject:.*here
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: here\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn includerc_var_in_path() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+RCDIR=$MAILDIR
+INCLUDERC=$RCDIR/inc.rc
+";
+    let inc = "\
+:0
+* ^Subject:.*match
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: match\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs)
+        .pre(|d| write_rc(d, "inc.rc", inc))
+        .run();
+}
+
+#[test]
+fn includerc_nested() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+INCLUDERC=$MAILDIR/level1.rc
+";
+    let l1 = "\
+INCLUDERC=$MAILDIR/level2.rc
+";
+    let l2 = "\
+:0
+* ^Subject:.*deep
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: deep\n\nBody\n",
+        b"From: b@host\nSubject: shallow\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs)
+        .pre(|d| {
+            write_rc(d, "level1.rc", l1);
+            write_rc(d, "level2.rc", l2);
+        })
+        .run();
+}
+
+#[test]
+fn includerc_conditions() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+INCLUDERC=$MAILDIR/inc.rc
+";
+    let inc = "\
+:0
+* ^Subject:.*alpha
+alpha
+
+:0
+* ^Subject:.*beta
+beta
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: alpha\n\nBody\n",
+        b"From: b@host\nSubject: beta\n\nBody\n",
+        b"From: c@host\nSubject: gamma\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs)
+        .pre(|d| write_rc(d, "inc.rc", inc))
+        .run();
+}
+
+#[test]
+fn switchrc_delivers() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SWITCHRC=$MAILDIR/sw.rc
+";
+    let sw = "\
+:0
+* ^Subject:.*match
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: match\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs)
+        .pre(|d| write_rc(d, "sw.rc", sw))
+        .run();
+}
+
+#[test]
+fn switchrc_stops_parent() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SWITCHRC=$MAILDIR/sw.rc
+
+:0
+* ^Subject:.*parent
+parent
+";
+    let sw = "\
+:0
+* ^Subject:.*nope
+nope
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: parent\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .pre(|d| write_rc(d, "sw.rc", sw))
+        .run();
+}
+
+#[test]
+fn switchrc_bare_default() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^Subject:.*before
+before
+
+SWITCHRC
+
+:0
+* ^Subject:.*after
+after
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: before\n\nBody\n",
+        b"From: b@host\nSubject: after\n\nBody\n",
     ];
     GoldTest::new(rc, msgs).run();
 }
