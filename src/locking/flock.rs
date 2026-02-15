@@ -13,8 +13,7 @@ mod tests;
 
 /// An exclusive file lock backed by `flock(2)`, with optional cleanup on drop.
 pub struct FileLock {
-    #[allow(dead_code)]
-    lock: Flock<File>,
+    _lock: Flock<File>,
     cleanup: Option<PathBuf>,
 }
 
@@ -102,8 +101,8 @@ impl FileLock {
                 std::io::ErrorKind::NotFound => LockError::Unavailable,
                 _ => map_io_err(e),
             })?;
-        let lock = Flock::lock(file, arg).map_err(|_| LockError::Exists)?;
-        Ok(Self { lock, cleanup })
+        let _lock = Flock::lock(file, arg).map_err(|_| LockError::Exists)?;
+        Ok(Self { _lock, cleanup })
     }
 }
 
