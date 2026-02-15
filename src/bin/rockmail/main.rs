@@ -64,6 +64,10 @@ struct Args {
     #[arg(short = 'f', short_alias = 'r', value_name = "SENDER")]
     from: Option<String>,
 
+    /// Dry-run mode (no folder delivery or locking)
+    #[arg(short = 'n')]
+    dryrun: bool,
+
     /// Override From_ fakes
     #[arg(short = 'o')]
     override_from: bool,
@@ -96,6 +100,7 @@ Options:
   -h, -?      Display this help
   -p          Preserve old environment
   -t          Return EX_TEMPFAIL on error
+  -n          Dry-run: show what would be delivered without writing
   -f sender   Regenerate From_ line with sender
   -o          Override fake From_ lines
   -a arg      Set $1, $2, ... (can be repeated)
@@ -427,6 +432,9 @@ fn run(
     if engine.get_var(VAR_VERBOSE).is_some_and(value_is_true) {
         engine.set_verbose(true);
     }
+    if args.dryrun {
+        engine.set_dryrun(true);
+    }
 
     let rcfile = find_rcfile(rcfiles, &engine, Some(&args))?;
 
@@ -445,7 +453,15 @@ fn run(
         delivered = true;
     }
 
-    if !delivered {
+    if !delivered && engine.dryrun() {
+        for name in [VAR_DEFAULT, VAR_ORGMAIL] {
+            let path = engine.get_var(name).unwrap_or("").to_owned();
+            if !path.is_empty() {
+                eprintln!("deliver to default {}", path);
+                break;
+            }
+        }
+    } else if !delivered {
         let folder = deliver_default(&mut engine, &msg)?;
         engine.log_abstract(&folder, &msg);
     } else {

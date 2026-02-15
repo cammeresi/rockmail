@@ -453,3 +453,60 @@ fn maildir_execute_bit() {
         "inbox after re-delivery: expected o+x set, got {mode:03o}"
     );
 }
+
+#[test]
+fn dryrun_default_delivery() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n");
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        err.contains("deliver to default"),
+        "expected dryrun message: {err:?}"
+    );
+    assert!(!mbox.exists(), "mbox should not be created in dryrun mode");
+}
+
+#[test]
+fn dryrun_folder_delivery() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/default\n\n:0\n$DIR/inbox\n",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        err.contains("deliver to"),
+        "expected dryrun message: {err:?}"
+    );
+    assert!(
+        !d.join("inbox").exists(),
+        "folder should not be created in dryrun mode"
+    );
+}
+
+#[test]
+fn dryrun_forward() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/default\n\n:0\n! user@example.com\n",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        err.contains("forward"),
+        "expected forward dryrun message: {err:?}"
+    );
+}

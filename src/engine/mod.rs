@@ -165,6 +165,7 @@ pub struct Engine {
     env: Environment,
     ctx: SubstCtx,
     verbose: bool,
+    dryrun: bool,
     /// Kept alive so the fd backing stderr remains valid.
     logfile: Option<File>,
     namer: Namer,
@@ -186,6 +187,7 @@ impl Engine {
             env,
             ctx,
             verbose: false,
+            dryrun: false,
             logfile: None,
             namer: Namer::new(),
             exit_was_set: false,
@@ -208,6 +210,16 @@ impl Engine {
     /// Enable or disable verbose logging.
     pub fn set_verbose(&mut self, v: bool) {
         self.verbose = v;
+    }
+
+    /// Enable dry-run mode (no folder delivery or locking).
+    pub fn set_dryrun(&mut self, v: bool) {
+        self.dryrun = v;
+    }
+
+    /// Whether dry-run mode is active.
+    pub fn dryrun(&self) -> bool {
+        self.dryrun
     }
 
     /// Look up a variable by name.
@@ -271,7 +283,9 @@ impl Engine {
                 eprint!("{value}");
             }
             VAR_LOGFILE => {
-                self.open_logfile(value);
+                if !self.dryrun {
+                    self.open_logfile(value);
+                }
             }
             _ => {}
         }
@@ -298,7 +312,7 @@ impl Engine {
     /// Acquire or release the global lockfile.
     fn set_globlock(&mut self, path: &str) {
         self.globlock = None;
-        if path.is_empty() {
+        if path.is_empty() || self.dryrun {
             return;
         }
         let timeout =
@@ -738,6 +752,12 @@ impl Engine {
     fn deliver_to_folder(
         &mut self, paths: &[String], recipe: &Recipe, msg: &Message,
     ) -> EngineResult<Outcome> {
+        if self.dryrun {
+            let folder = paths.join(" ");
+            self.set_var("LASTFOLDER", &folder);
+            self.ctx.lastfolder = folder.clone();
+            return Ok(Outcome::Delivered(folder));
+        }
         let (ft, path) = FolderType::parse(&paths[0]);
         let msg = self.message_for_delivery(recipe, msg);
         let opts = DeliveryOpts {
@@ -838,6 +858,12 @@ impl Engine {
     fn forward(
         &mut self, recipe: &Recipe, msg: &Message, addrs: &[String],
     ) -> EngineResult<Outcome> {
+        if self.dryrun {
+            let dest = addrs.join(" ");
+            self.set_var("LASTFOLDER", &dest);
+            self.ctx.lastfolder = dest.clone();
+            return Ok(Outcome::Delivered(dest));
+        }
         let sendmail = self
             .get_var(VAR_SENDMAIL)
             .unwrap_or(DEF_SENDMAIL)
@@ -891,8 +917,9 @@ impl Engine {
     fn perform_action(
         &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
-        // Acquire lockfile if specified, unless it matches the global lock.
-        let _lock = if let Some(p) = self.resolve_lockfile(recipe) {
+        let _lock = if self.dryrun {
+            None
+        } else if let Some(p) = self.resolve_lockfile(recipe) {
             if self.env.get(VAR_LOCKFILE).is_some_and(|gl| gl == p) {
                 eprintln!("Deadlock attempted on \"{p}\"");
                 None
@@ -961,6 +988,10 @@ impl Engine {
 
         if !matched {
             return Ok(Outcome::Default);
+        }
+
+        if self.dryrun {
+            self.log_match(recipe);
         }
 
         let result = self.perform_action(recipe, msg, state)?;
@@ -1086,6 +1117,35 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         let mut state = State::default();
         self.process_items(items, msg, &mut state)
+    }
+
+    /// Log the matched recipe action in dryrun mode.
+    fn log_match(&mut self, recipe: &Recipe) {
+        match &recipe.action {
+            Action::Folder(paths) => {
+                let expanded: Vec<_> = paths
+                    .iter()
+                    .map(|p| self.expand(&p.to_string_lossy()))
+                    .collect();
+                eprintln!("deliver to {}", expanded.join(" "));
+            }
+            Action::Pipe { cmd, capture } => {
+                let expanded = self.expand(cmd);
+                if let Some(var) = capture {
+                    eprintln!("capture {}=| {}", var, expanded);
+                } else if recipe.flags.filter {
+                    eprintln!("filter | {}", expanded);
+                } else {
+                    eprintln!("pipe | {}", expanded);
+                }
+            }
+            Action::Forward(addrs) => {
+                let expanded: Vec<_> =
+                    addrs.iter().map(|a| self.expand(a)).collect();
+                eprintln!("forward ! {}", expanded.join(" "));
+            }
+            Action::Nested(_) => {}
+        }
     }
 
     pub fn log_abstract(&self, folder: &str, msg: &Message) {
