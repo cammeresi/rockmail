@@ -28,3 +28,36 @@ SUBJECT =~ s/^(\[[^]]*\] |Re: )*//
 ADDR =~ s/^<(.*)>$/$1/
 NAME =~ s|/|_|g
 ```
+
+## Native Header Manipulation (`@`)
+
+Modify headers on the in-flight message without forking formail or sed.
+The operation letter mirrors formail's flags.
+
+### Syntax
+
+```
+@X Header: value
+```
+
+The value undergoes `$VAR` expansion but never touches a shell.
+
+### Operations
+
+| Syntax | Formail equiv | Meaning |
+|--------|---------------|---------|
+| `@I Header: val` | `formail -I "Header: val"` | Delete all matching, then insert |
+| `@i Header: val` | `formail -i "Header: val"` | Rename existing to `Old-Header:`, insert new |
+| `@a Header: val` | `formail -a "Header: val"` | Add only if header not present |
+| `@A Header: val` | `formail -A "Header: val"` | Always add (append) |
+| `@D Header:` | `formail -I "Header:"` | Delete all matching |
+
+### Examples
+
+```
+@I Subject: $SUBJECT
+@a Lines: $LINES
+@A X-Processed: yes
+@D X-Mailer:
+@i Subject: [list] $SUBJECT
+```

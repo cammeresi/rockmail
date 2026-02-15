@@ -129,6 +129,22 @@ impl Recipe {
     }
 }
 
+/// Header manipulation operation (rockmail extension).
+#[derive(Debug, Clone)]
+#[allow(missing_docs)]
+pub enum HeaderOp {
+    /// `@I` — delete all matching, then insert.
+    DeleteInsert { field: String, value: String },
+    /// `@i` — rename existing to `Old-`, insert new.
+    RenameInsert { field: String, value: String },
+    /// `@a` — add only if header not present.
+    AddIfNot { field: String, value: String },
+    /// `@A` — always add (append).
+    AddAlways { field: String, value: String },
+    /// `@D` — delete all matching.
+    Delete { field: String },
+}
+
 /// An rcfile item: variable assignment, recipe, or include directive.
 #[derive(Debug, Clone)]
 pub enum Item {
@@ -148,6 +164,8 @@ pub enum Item {
         global: bool,
         case_insensitive: bool,
     },
+    /// Native header manipulation (`@X Header: value`).
+    HeaderOp(HeaderOp),
     /// A recipe block.
     Recipe(Recipe),
     /// Include an rcfile (INCLUDERC assignment).

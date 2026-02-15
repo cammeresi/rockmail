@@ -15,8 +15,9 @@ use nix::unistd::dup2;
 
 use regex::RegexBuilder;
 
-use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
+use crate::config::{Action, Condition, Flags, HeaderOp, Item, Recipe, Weight};
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
+use crate::field::{self, Field};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
@@ -1093,6 +1094,67 @@ impl Engine {
         self.set_var(name, &result);
     }
 
+    /// Apply `@X Header: value` manipulation on the in-flight message.
+    fn apply_header_op(&mut self, op: &HeaderOp, msg: &mut Message) {
+        let (field, value) = match op {
+            HeaderOp::DeleteInsert { field, value }
+            | HeaderOp::RenameInsert { field, value }
+            | HeaderOp::AddIfNot { field, value }
+            | HeaderOp::AddAlways { field, value } => {
+                (field.as_str(), Some(self.expand(value)))
+            }
+            HeaderOp::Delete { field } => (field.as_str(), None),
+        };
+        let pat = field.as_bytes();
+        let mut fields = field::parse_bytes(msg.header());
+        match op {
+            HeaderOp::DeleteInsert { .. } => {
+                fields.remove_all(pat);
+                if let Some(v) = value
+                    && !v.is_empty()
+                {
+                    fields.push(Field::from_parts(
+                        field.as_bytes(),
+                        v.as_bytes(),
+                    ));
+                }
+            }
+            HeaderOp::RenameInsert { .. } => {
+                fields.prepend_old(pat);
+                if let Some(v) = value {
+                    fields.push(Field::from_parts(
+                        field.as_bytes(),
+                        v.as_bytes(),
+                    ));
+                }
+            }
+            HeaderOp::AddIfNot { .. } => {
+                if fields.find(pat).is_none()
+                    && let Some(v) = value
+                {
+                    fields.push(Field::from_parts(
+                        field.as_bytes(),
+                        v.as_bytes(),
+                    ));
+                }
+            }
+            HeaderOp::AddAlways { .. } => {
+                if let Some(v) = value {
+                    fields.push(Field::from_parts(
+                        field.as_bytes(),
+                        v.as_bytes(),
+                    ));
+                }
+            }
+            HeaderOp::Delete { .. } => {
+                fields.remove_all(pat);
+            }
+        }
+        let mut header = Vec::new();
+        fields.write_to(&mut header).unwrap();
+        *msg = Message::from_parts(&header, msg.body());
+    }
+
     fn process_items(
         &mut self, items: &[Item], msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
@@ -1133,6 +1195,12 @@ impl Engine {
                             name, pattern, replace, flags, val
                         );
                     }
+                }
+                Item::HeaderOp(op) => {
+                    if self.dryrun {
+                        self.log_header_op(op);
+                    }
+                    self.apply_header_op(op, msg);
                 }
                 Item::Recipe(recipe) => {
                     let outcome = self.eval_recipe(recipe, msg, state)?;
@@ -1205,6 +1273,31 @@ impl Engine {
                 eprintln!("forward: {}", expanded.join(" "));
             }
             Action::Nested(_) => {}
+        }
+    }
+
+    /// Log a header operation in dryrun mode.
+    fn log_header_op(&mut self, op: &HeaderOp) {
+        match op {
+            HeaderOp::DeleteInsert { field, value } => {
+                let val = self.expand(value);
+                eprintln!("header: @I {}: {}", field, val);
+            }
+            HeaderOp::RenameInsert { field, value } => {
+                let val = self.expand(value);
+                eprintln!("header: @i {}: {}", field, val);
+            }
+            HeaderOp::AddIfNot { field, value } => {
+                let val = self.expand(value);
+                eprintln!("header: @a {}: {}", field, val);
+            }
+            HeaderOp::AddAlways { field, value } => {
+                let val = self.expand(value);
+                eprintln!("header: @A {}: {}", field, val);
+            }
+            HeaderOp::Delete { field } => {
+                eprintln!("header: @D {}:", field);
+            }
         }
     }
 

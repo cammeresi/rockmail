@@ -7,7 +7,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
 use std::mem;
 use std::ops::{Deref, DerefMut};
 
@@ -294,6 +294,12 @@ impl FieldList {
         }
         self.fields.retain(|f| !f.is_empty_value());
     }
+}
+
+/// Parse header fields from a byte slice.
+pub fn parse_bytes(header: &[u8]) -> FieldList {
+    let (fields, _) = read_headers(Cursor::new(header)).unwrap_or_default();
+    fields
 }
 
 /// Read header fields from a reader.

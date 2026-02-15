@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::HeaderOp;
 
 fn parse_rc(input: &str) -> Result<Vec<Item>, ParseError> {
     parse(input, "test")
@@ -722,4 +723,93 @@ fn warns_on_unknown_flag() {
     assert_eq!(w.len(), 2);
     assert!(matches!(w[0], ParseWarning::UnknownFlag { flag: 'X', .. }));
     assert!(matches!(w[1], ParseWarning::UnknownFlag { flag: 'z', .. }));
+}
+
+#[test]
+fn subst_basic() {
+    let items = parse_rc("VAR =~ s/foo/bar/").unwrap();
+    assert!(matches!(
+        &items[0],
+        Item::Subst { name, pattern, replace, global: false, case_insensitive: false }
+        if name == "VAR" && pattern == "foo" && replace == "bar"
+    ));
+}
+
+#[test]
+fn subst_global_icase() {
+    let items = parse_rc("X =~ s/a/b/gi").unwrap();
+    assert!(matches!(
+        &items[0],
+        Item::Subst {
+            global: true,
+            case_insensitive: true,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn subst_alternate_delimiter() {
+    let items = parse_rc("X =~ s|foo|bar|g").unwrap();
+    assert!(matches!(
+        &items[0],
+        Item::Subst { pattern, replace, .. }
+        if pattern == "foo" && replace == "bar"
+    ));
+}
+
+#[test]
+fn subst_empty_replace() {
+    let items = parse_rc("X =~ s/foo//").unwrap();
+    assert!(matches!(
+        &items[0],
+        Item::Subst { replace, .. } if replace.is_empty()
+    ));
+}
+
+#[test]
+fn header_op_delete_insert() {
+    let items = parse_rc("@I Subject: hello").unwrap();
+    assert!(matches!(
+        &items[0],
+        Item::HeaderOp(HeaderOp::DeleteInsert { field, value })
+        if field == "Subject" && value == "hello"
+    ));
+}
+
+#[test]
+fn header_op_add_if_not() {
+    let items = parse_rc("@a Lines: 42").unwrap();
+    assert!(matches!(
+        &items[0],
+        Item::HeaderOp(HeaderOp::AddIfNot { field, value })
+        if field == "Lines" && value == "42"
+    ));
+}
+
+#[test]
+fn header_op_delete() {
+    let items = parse_rc("@D X-Mailer:").unwrap();
+    assert!(matches!(
+        &items[0],
+        Item::HeaderOp(HeaderOp::Delete { field })
+        if field == "X-Mailer"
+    ));
+}
+
+#[test]
+fn header_op_in_block() {
+    let items = parse_rc(":0\n{\n@I Subject: test\n}").unwrap();
+    match &items[0] {
+        Item::Recipe(r) => match &r.action {
+            Action::Nested(inner) => {
+                assert!(matches!(
+                    &inner[0],
+                    Item::HeaderOp(HeaderOp::DeleteInsert { .. })
+                ));
+            }
+            _ => panic!("expected nested"),
+        },
+        _ => panic!("expected recipe"),
+    }
 }

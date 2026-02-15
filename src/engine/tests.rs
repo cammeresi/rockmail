@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
+use crate::config::{Action, Condition, Flags, HeaderOp, Item, Recipe, Weight};
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{Environment, SubstCtx};
@@ -599,4 +599,104 @@ fn score_line_count_empty() {
 #[test]
 fn score_line_count_only_newlines() {
     assert_eq!(score("^.*$", "\n\n\n", 1.0, 1.0), 4.0);
+}
+
+#[test]
+fn subst_replaces_variable() {
+    let mut t = Test::new();
+    t.engine.set_var("X", "hello world");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "world".into(),
+        replace: "rust".into(),
+        global: false,
+        case_insensitive: false,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("hello rust"));
+}
+
+#[test]
+fn subst_global() {
+    let mut t = Test::new();
+    t.engine.set_var("X", "aaa");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "a".into(),
+        replace: "b".into(),
+        global: true,
+        case_insensitive: false,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("bbb"));
+}
+
+#[test]
+fn subst_case_insensitive() {
+    let mut t = Test::new();
+    t.engine.set_var("X", "Hello");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "hello".into(),
+        replace: "bye".into(),
+        global: false,
+        case_insensitive: true,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("bye"));
+}
+
+#[test]
+fn header_op_delete_insert() {
+    let mut t = Test::with_msg("Subject: old\nX-Foo: bar\n\nbody");
+    let items = vec![Item::HeaderOp(HeaderOp::DeleteInsert {
+        field: "Subject".into(),
+        value: "new".into(),
+    })];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
+}
+
+#[test]
+fn header_op_add_if_not_absent() {
+    let mut t = Test::with_msg("Subject: test\n\nbody");
+    let items = vec![Item::HeaderOp(HeaderOp::AddIfNot {
+        field: "Lines".into(),
+        value: "5".into(),
+    })];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("Lines").as_deref(), Some("5"));
+}
+
+#[test]
+fn header_op_add_if_not_present() {
+    let mut t = Test::with_msg("Subject: test\nLines: 10\n\nbody");
+    let items = vec![Item::HeaderOp(HeaderOp::AddIfNot {
+        field: "Lines".into(),
+        value: "5".into(),
+    })];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("Lines").as_deref(), Some("10"));
+}
+
+#[test]
+fn header_op_delete() {
+    let mut t = Test::with_msg("Subject: test\nX-Spam: yes\n\nbody");
+    let items = vec![Item::HeaderOp(HeaderOp::Delete {
+        field: "X-Spam".into(),
+    })];
+    t.process(&items);
+    assert!(t.msg.get_header("X-Spam").is_none());
+}
+
+#[test]
+fn header_op_rename_insert() {
+    let mut t = Test::with_msg("Subject: old\n\nbody");
+    let items = vec![Item::HeaderOp(HeaderOp::RenameInsert {
+        field: "Subject".into(),
+        value: "new".into(),
+    })];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
+    assert_eq!(t.msg.get_header("Old-Subject").as_deref(), Some("old"));
 }

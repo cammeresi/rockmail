@@ -226,6 +226,9 @@ fn format_nested_item(item: &Item, num: usize, depth: usize) -> String {
                 indent, num, name, pattern, replace, flags
             )
         }
+        Item::HeaderOp(op) => {
+            format!("{}{:3}. [HEADEROP] {:?}\n", indent, num, op)
+        }
         Item::Include(path) => {
             format!("{}{:3}. [INCLUDERC] {:?}\n", indent, num, path)
         }
@@ -306,6 +309,9 @@ fn print_item(item: &Item, num: usize, depth: usize) {
                 "{}{:3}. [SUBST] {} =~ s/{}/{}/{}",
                 indent, num, name, pattern, replace, flags
             );
+        }
+        Item::HeaderOp(op) => {
+            println!("{}{:3}. [HEADEROP] {:?}", indent, num, op);
         }
         Item::Include(path) => {
             println!("{}{:3}. [INCLUDERC] {:?}", indent, num, path);
