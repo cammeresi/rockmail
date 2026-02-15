@@ -14,6 +14,7 @@ use clap::Parser;
 use nix::fcntl::{Flock, FlockArg};
 
 use rockmail::field::{Field, FieldList, read_headers};
+use rockmail::rfc2047::{self, Enc};
 use rockmail::util;
 use rockmail::variables::Environment;
 
@@ -671,20 +672,32 @@ fn generate_reply(args: &Args, orig: &FieldList) -> FieldList {
     reply
 }
 
+fn encode_value(val: &str, orig: Option<&[u8]>) -> String {
+    if val.is_ascii() {
+        return val.to_owned();
+    }
+    let enc = orig.and_then(Enc::detect).unwrap_or(Enc::B);
+    rfc2047::encode(val, enc)
+}
+
 fn process_headers(args: &Args, fields: &mut FieldList) -> io::Result<()> {
     for h in &args.delete_insert {
         let (name, value) = parse_header_arg(h);
+        let orig = fields.find(name.as_bytes()).map(|f| f.value().to_vec());
         fields.remove_all(name.as_bytes());
         if !value.is_empty() {
-            fields.push(Field::from_parts(name.as_bytes(), value.as_bytes()));
+            let v = encode_value(value, orig.as_deref());
+            fields.push(Field::from_parts(name.as_bytes(), v.as_bytes()));
         }
     }
 
     for h in &args.rename_insert {
         let (name, value) = parse_header_arg(h);
+        let orig = fields.find(name.as_bytes()).map(|f| f.value().to_vec());
         fields.prepend_old(name.as_bytes());
         if !value.is_empty() {
-            fields.push(Field::from_parts(name.as_bytes(), value.as_bytes()));
+            let v = encode_value(value, orig.as_deref());
+            fields.push(Field::from_parts(name.as_bytes(), v.as_bytes()));
         }
     }
 
@@ -721,15 +734,16 @@ fn process_headers(args: &Args, fields: &mut FieldList) -> io::Result<()> {
                 let id = generate_message_id();
                 fields.push(Field::from_parts(name.as_bytes(), id.as_bytes()));
             } else {
-                fields
-                    .push(Field::from_parts(name.as_bytes(), value.as_bytes()));
+                let v = encode_value(value, None);
+                fields.push(Field::from_parts(name.as_bytes(), v.as_bytes()));
             }
         }
     }
 
     for h in &args.add_always {
         let (name, value) = parse_header_arg(h);
-        fields.push(Field::from_parts(name.as_bytes(), value.as_bytes()));
+        let v = encode_value(value, None);
+        fields.push(Field::from_parts(name.as_bytes(), v.as_bytes()));
     }
 
     if args.concatenate {
@@ -755,7 +769,8 @@ fn output_extracted(
                 if args.zap {
                     val = val.trim_ascii();
                 }
-                out.write_all(val)?;
+                let decoded = rfc2047::decode(val);
+                out.write_all(decoded.as_bytes())?;
                 out.write_all(b"\n")?;
             }
         }

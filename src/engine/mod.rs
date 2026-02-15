@@ -22,6 +22,7 @@ use crate::field::{self, Field};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
+use crate::rfc2047;
 use crate::util::wait_timeout;
 use crate::variables::{
     BacktickFn, DEF_LINEBUF, DEV_NULL, Environment, HOST, LINEBUF, LOCKEXT,
@@ -183,6 +184,16 @@ fn skip_from_line(data: &[u8]) -> &[u8] {
         return &data[pos + 1..];
     }
     data
+}
+
+fn decode_header_and_body(msg: &Message) -> Cow<'_, str> {
+    let h = rfc2047::decode(msg.header());
+    if matches!(h, Cow::Borrowed(_)) {
+        // No encoded words — avoid copying the whole message.
+        return String::from_utf8_lossy(msg.as_bytes());
+    }
+    let b = String::from_utf8_lossy(msg.body());
+    Cow::Owned(format!("{h}{b}"))
 }
 
 /// Spawn `$SHELL $SHELLFLAGS cmd` with `input` on stdin, capture stdout,
@@ -471,14 +482,12 @@ impl Engine {
     }
 
     /// Get text to grep based on H/B flags.
-    fn grep_text<'a>(&self, msg: &'a Message, flags: &Flags) -> Cow<'a, str> {
-        let bytes = match (flags.head, flags.body) {
-            (true, true) => msg.as_bytes(),
-            (true, false) => msg.header(),
-            (false, true) => msg.body(),
-            (false, false) => msg.header(),
-        };
-        String::from_utf8_lossy(bytes)
+    fn grep_text<'a>(msg: &'a Message, flags: &Flags) -> Cow<'a, str> {
+        match (flags.head, flags.body) {
+            (true, true) => decode_header_and_body(msg),
+            (false, true) => String::from_utf8_lossy(msg.body()),
+            _ => rfc2047::decode(msg.header()),
+        }
     }
 
     /// Get text for variable condition (VAR ?? pattern).
@@ -486,9 +495,9 @@ impl Engine {
         &'a self, name: &str, msg: &'a Message,
     ) -> Cow<'a, str> {
         match name {
-            "H" => String::from_utf8_lossy(msg.header()),
+            "H" => rfc2047::decode(msg.header()),
             "B" => String::from_utf8_lossy(msg.body()),
-            "HB" | "BH" => String::from_utf8_lossy(msg.as_bytes()),
+            "HB" | "BH" => decode_header_and_body(msg),
             _ => Cow::Borrowed(self.get_var(name).unwrap_or("")),
         }
     }
@@ -578,7 +587,7 @@ impl Engine {
         &mut self, cmd: &str, negate: bool, weight: Option<Weight>,
         recipe: &Recipe, msg: &Message,
     ) -> EngineResult<ConditionResult> {
-        let text = self.grep_text(msg, &recipe.flags);
+        let text = Self::grep_text(msg, &recipe.flags);
         let exit = self.run_shell(cmd, text.as_bytes())?;
         self.ctx.last_exit = exit;
         let ok = (exit == 0) ^ negate;
@@ -651,7 +660,7 @@ impl Engine {
         &mut self, pattern: &str, negate: bool, weight: Option<Weight>,
         recipe: &Recipe, msg: &Message,
     ) -> EngineResult<ConditionResult> {
-        let text = self.grep_text(msg, &recipe.flags);
+        let text = Self::grep_text(msg, &recipe.flags);
         let label = format!("\"{}\"", pattern);
         self.eval_pattern(
             &text,

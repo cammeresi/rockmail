@@ -9,6 +9,8 @@ categories = ["email", "command-line-utilities"]
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
+encoding_rs = "0.8"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 filetime = "0.2"

@@ -18,6 +18,8 @@ pub mod locking;
 pub mod mail;
 /// Regex compiler/matcher with procmail extensions.
 pub(crate) mod re;
+/// RFC 2047 encoded-word decoding and encoding.
+pub mod rfc2047;
 /// Exit codes, error types, and signal handling.
 pub mod util;
 /// Builtin variables, environment, and substitution.
