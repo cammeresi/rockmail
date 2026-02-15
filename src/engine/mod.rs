@@ -1031,7 +1031,7 @@ impl Engine {
             }
         };
 
-        match crate::config::parse(&content) {
+        match crate::config::parse(&content, path) {
             Ok(items) => Some(items),
             Err(e) => {
                 eprintln!("failed to parse rcfile {}: {}", path, e);

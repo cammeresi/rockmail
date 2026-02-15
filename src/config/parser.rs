@@ -2,9 +2,11 @@ use std::borrow::Borrow;
 use std::iter::Peekable;
 use std::str::Lines;
 
+use miette::{NamedSource, Report, SourceOffset};
 use thiserror::Error;
 
 use super::{Action, Condition, Flags, Item, Recipe, is_var_name};
+pub use warnings::ParseWarning;
 
 #[cfg(test)]
 mod tests;
@@ -25,6 +27,80 @@ pub enum ParseError {
     TooDeep(usize),
 }
 
+mod warnings {
+    // false positive from thiserror/miette derives
+    #![allow(unused_assignments)]
+
+    use miette::{Diagnostic, NamedSource, SourceOffset};
+    use thiserror::Error;
+
+    /// Non-fatal issues found while parsing an rcfile.
+    #[derive(Error, Debug, Clone, Diagnostic)]
+    pub enum ParseWarning {
+        /// Unrecognized line that was skipped.
+        #[error("skipped unrecognized line")]
+        #[diagnostic(
+            code(rockmail::skipped_line),
+            help("expected recipe, assignment, or comment")
+        )]
+        SkippedLine {
+            /// Source text of the rcfile.
+            #[source_code]
+            src: NamedSource<String>,
+            /// Span of the offending line.
+            #[label("this line")]
+            span: SourceOffset,
+        },
+
+        /// Assignment with an invalid variable name.
+        #[error("invalid variable name in assignment")]
+        #[diagnostic(
+            code(rockmail::bad_var_name),
+            help("variable names must start with a letter or underscore")
+        )]
+        BadVarName {
+            /// Source text of the rcfile.
+            #[source_code]
+            src: NamedSource<String>,
+            /// Span of the offending line.
+            #[label("bad name")]
+            span: SourceOffset,
+        },
+
+        /// Condition that could not be parsed.
+        #[error("unparseable condition")]
+        #[diagnostic(
+            code(rockmail::bad_condition),
+            help("condition was ignored")
+        )]
+        BadCondition {
+            /// Source text of the rcfile.
+            #[source_code]
+            src: NamedSource<String>,
+            /// Span of the offending line.
+            #[label("here")]
+            span: SourceOffset,
+        },
+
+        /// Unrecognized recipe flag character.
+        #[error("unknown recipe flag: {flag}")]
+        #[diagnostic(
+            code(rockmail::unknown_flag),
+            help("valid flags: HBDaAeEhbfcwWir")
+        )]
+        UnknownFlag {
+            /// The flag character.
+            flag: char,
+            /// Source text of the rcfile.
+            #[source_code]
+            src: NamedSource<String>,
+            /// Span of the flag character.
+            #[label("this flag")]
+            span: SourceOffset,
+        },
+    }
+}
+
 /// Strip an inline comment: `value  # comment` → `value`.
 /// Matches procmail (`goodies.c:184`): `#` starts a comment only at a word
 /// boundary, i.e. when preceded by whitespace.  Mid-word `#` is literal.
@@ -40,9 +116,13 @@ fn strip_comment(s: &str) -> &str {
 
 /// Parser state
 pub struct Parser<'a> {
+    input: &'a str,
+    name: String,
     lines: Peekable<Lines<'a>>,
     pos: usize,
+    offset: usize,
     depth: usize,
+    warnings: Vec<ParseWarning>,
 }
 
 impl<'a> Parser<'a> {
@@ -51,9 +131,32 @@ impl<'a> Parser<'a> {
         T: Borrow<str> + ?Sized,
     {
         Self {
+            input: input.borrow(),
+            name: String::from("rcfile"),
             lines: input.borrow().lines().peekable(),
             pos: 0,
+            offset: 0,
             depth: 0,
+            warnings: Vec::new(),
+        }
+    }
+
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+
+    fn warn(&mut self, w: ParseWarning) {
+        self.warnings.push(w);
+    }
+
+    #[cfg(test)]
+    pub fn warnings(&self) -> &[ParseWarning] {
+        &self.warnings
+    }
+
+    pub fn emit_warnings(&self) {
+        for w in &self.warnings {
+            eprintln!("{:?}", Report::new(w.clone()));
         }
     }
 
@@ -67,10 +170,21 @@ impl<'a> Parser<'a> {
 
     fn advance(&mut self) -> Option<&'a str> {
         let line = self.lines.next();
-        if line.is_some() {
+        if let Some(l) = line {
             self.pos += 1;
+            // +1 for the newline (or end of input)
+            self.offset += l.len() + 1;
         }
         line
+    }
+
+    /// Byte offset of the line about to be consumed (the peeked line).
+    fn cur_offset(&self) -> usize {
+        self.offset
+    }
+
+    fn src(&self) -> NamedSource<String> {
+        NamedSource::new(&self.name, self.input.to_string())
     }
 
     fn skip_blank_and_comments(&mut self) {
@@ -137,9 +251,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_recipe_header(
-        &self, line: &str, line_num: usize,
+        &mut self, line: &str, line_num: usize, line_offset: usize,
     ) -> Result<(Flags, Option<String>), ParseError> {
         // Format: :0 [flags] [ : [lockfile] ]
+        let orig = line;
         let line = strip_comment(line.trim());
         let line = line
             .strip_prefix(':')
@@ -164,6 +279,16 @@ impl<'a> Parser<'a> {
         };
 
         let flags = Flags::parse(flags_part);
+        let src = self.src();
+        for &flag in &flags.unknown {
+            // Find the flag char's position within the original line
+            let fpos = orig.find(flag).unwrap_or(0);
+            self.warn(ParseWarning::UnknownFlag {
+                flag,
+                src: src.clone(),
+                span: SourceOffset::from(line_offset + fpos),
+            });
+        }
         Ok((flags, lockfile))
     }
 
@@ -224,8 +349,9 @@ impl<'a> Parser<'a> {
 
     fn parse_recipe(&mut self) -> Result<Recipe, ParseError> {
         let line = self.line_num();
+        let hoff = self.cur_offset();
         let header = self.advance().ok_or(ParseError::UnexpectedEof(line))?;
-        let (flags, lockfile) = self.parse_recipe_header(header, line)?;
+        let (flags, lockfile) = self.parse_recipe_header(header, line, hoff)?;
 
         let mut conds = Vec::new();
         self.skip_blank_and_comments();
@@ -234,11 +360,16 @@ impl<'a> Parser<'a> {
         while let Some(line) = self.peek() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix('*') {
+                let coff = self.cur_offset();
                 self.advance();
-                // Handle line continuation
                 let full = self.collect_continuation(rest);
                 if let Some(c) = Condition::parse(&full) {
                     conds.push(c);
+                } else if !full.trim().is_empty() {
+                    self.warn(ParseWarning::BadCondition {
+                        src: self.src(),
+                        span: SourceOffset::from(coff),
+                    });
                 }
             } else {
                 break;
@@ -276,12 +407,19 @@ impl<'a> Parser<'a> {
             }
 
             // Variable assignment: NAME=value or NAME (unset)
+            let off = self.cur_offset();
             self.advance();
             if let Some(item) = self.parse_assignment(trimmed) {
                 return Ok(Some(item));
             }
 
-            // Unrecognized line: skip and continue loop
+            let src = self.src();
+            let span = SourceOffset::from(off);
+            if trimmed.contains('=') {
+                self.warn(ParseWarning::BadVarName { src, span });
+            } else {
+                self.warn(ParseWarning::SkippedLine { src, span });
+            }
         }
     }
 
@@ -296,6 +434,10 @@ impl<'a> Parser<'a> {
 }
 
 /// Convenience function to parse an rcfile
-pub fn parse(input: &str) -> Result<Vec<Item>, ParseError> {
-    Parser::new(input).parse()
+pub fn parse(input: &str, name: &str) -> Result<Vec<Item>, ParseError> {
+    let mut p = Parser::new(input);
+    p.set_name(name);
+    let items = p.parse()?;
+    p.emit_warnings();
+    Ok(items)
 }

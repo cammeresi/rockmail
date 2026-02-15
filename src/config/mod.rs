@@ -5,7 +5,7 @@ mod recipe;
 
 pub use action::Action;
 pub use condition::{Condition, Weight};
-pub use parser::parse;
+pub use parser::{ParseWarning, parse};
 pub use recipe::{Flags, Item, Recipe};
 
 /// Check if a string is a valid variable name (letters, digits, underscore,

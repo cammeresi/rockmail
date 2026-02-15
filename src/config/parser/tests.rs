@@ -1,8 +1,12 @@
 use super::*;
 
+fn parse_rc(input: &str) -> Result<Vec<Item>, ParseError> {
+    parse(input, "test")
+}
+
 #[test]
 fn assignment() {
-    let items = parse("MAILDIR=/var/mail\nVERBOSE=yes").unwrap();
+    let items = parse_rc("MAILDIR=/var/mail\nVERBOSE=yes").unwrap();
     assert_eq!(items.len(), 2);
     match &items[0] {
         Item::Assign { name, value } => {
@@ -20,7 +24,7 @@ fn simple_recipe() {
 * ^From:.*spam
 /dev/null
 "#;
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 1);
     match &items[0] {
         Item::Recipe(r) => {
@@ -40,7 +44,7 @@ fn simple_recipe() {
 #[test]
 fn recipe_with_flags() {
     let rc = ":0 Bc:\n* ^Subject:.*test\nspam/";
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     match &items[0] {
         Item::Recipe(r) => {
             assert!(!r.flags.head);
@@ -65,7 +69,7 @@ fn nested_block() {
     | /usr/bin/notify
 }
 "#;
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 1);
     match &items[0] {
         Item::Recipe(r) => match &r.action {
@@ -81,7 +85,7 @@ fn nested_block() {
 #[test]
 fn forward() {
     let rc = ":0\n* ^To:.*admin\n! admin@example.com";
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     match &items[0] {
         Item::Recipe(r) => match &r.action {
             Action::Forward(addrs) => {
@@ -96,7 +100,7 @@ fn forward() {
 #[test]
 fn pipe_capture() {
     let rc = ":0\nRESULT=| /usr/bin/filter";
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     match &items[0] {
         Item::Recipe(r) => match &r.action {
             Action::Pipe { cmd, capture } => {
@@ -119,7 +123,7 @@ MAILDIR=/var/mail  # inline comment
 * ^From:.*test
 /dev/null
 "#;
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 2);
     assert!(
         matches!(&items[0], Item::Assign { value, .. } if value == "/var/mail")
@@ -129,25 +133,25 @@ MAILDIR=/var/mail  # inline comment
 #[test]
 fn inline_comment_edge_cases() {
     // Mid-word # is literal
-    let items = parse("PATH=/tmp/#nasty").unwrap();
+    let items = parse_rc("PATH=/tmp/#nasty").unwrap();
     assert!(
         matches!(&items[0], Item::Assign { value, .. } if value == "/tmp/#nasty")
     );
 
     // No space before # is literal
-    let items = parse("VAR=hello#world").unwrap();
+    let items = parse_rc("VAR=hello#world").unwrap();
     assert!(
         matches!(&items[0], Item::Assign { value, .. } if value == "hello#world")
     );
 
     // First whitespace-# wins
-    let items = parse("VAR=hello # world # more").unwrap();
+    let items = parse_rc("VAR=hello # world # more").unwrap();
     assert!(
         matches!(&items[0], Item::Assign { value, .. } if value == "hello")
     );
 
     // Tab before # also starts a comment
-    let items = parse("VAR=value\t# tab comment").unwrap();
+    let items = parse_rc("VAR=value\t# tab comment").unwrap();
     assert!(
         matches!(&items[0], Item::Assign { value, .. } if value == "value")
     );
@@ -168,26 +172,26 @@ more garbage
 
 VERBOSE=yes
 "#;
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 3); // MAILDIR, recipe, VERBOSE
 }
 
 #[test]
 fn missing_action() {
     let rc = ":0\n* ^From:.*spam\n";
-    assert!(matches!(parse(rc), Err(ParseError::MissingAction(_))));
+    assert!(matches!(parse_rc(rc), Err(ParseError::MissingAction(_))));
 }
 
 #[test]
 fn unclosed_block() {
     let rc = ":0\n{\n:0\nspam/\n";
-    assert!(matches!(parse(rc), Err(ParseError::UnclosedBlock(_))));
+    assert!(matches!(parse_rc(rc), Err(ParseError::UnclosedBlock(_))));
 }
 
 #[test]
 fn line_continuation() {
     let rc = ":0\n* ^From:.*\\\ncontinued\nspam/";
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     match &items[0] {
         Item::Recipe(r) => {
             assert_eq!(r.conds.len(), 1);
@@ -205,7 +209,7 @@ fn line_continuation() {
 #[test]
 fn explicit_lockfile() {
     let rc = ":0 HB:mylock\n* ^Subject:.*\nspam/";
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     match &items[0] {
         Item::Recipe(r) => {
             assert!(r.flags.head);
@@ -218,7 +222,7 @@ fn explicit_lockfile() {
 
 #[test]
 fn variable_unset() {
-    let items = parse("VERBOSE").unwrap();
+    let items = parse_rc("VERBOSE").unwrap();
     match &items[0] {
         Item::Assign { name, value } => {
             assert_eq!(name, "VERBOSE");
@@ -231,7 +235,7 @@ fn variable_unset() {
 #[test]
 fn inline_empty_block() {
     let rc = ":0\n{ }";
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     match &items[0] {
         Item::Recipe(r) => match &r.action {
             Action::Nested(inner) => assert!(inner.is_empty()),
@@ -244,7 +248,7 @@ fn inline_empty_block() {
 #[test]
 fn inline_block_with_assign() {
     let rc = ":0\n{ VAR=value }";
-    let items = parse(rc).unwrap();
+    let items = parse_rc(rc).unwrap();
     match &items[0] {
         Item::Recipe(r) => match &r.action {
             Action::Nested(inner) => {
@@ -434,8 +438,8 @@ fn assign_value_with_equals() {
 
 #[test]
 fn header_minimal() {
-    let p = Parser::new("");
-    let (flags, lock) = p.parse_recipe_header(":0", 1).unwrap();
+    let mut p = Parser::new("");
+    let (flags, lock) = p.parse_recipe_header(":0", 1, 0).unwrap();
     assert!(flags.head);
     assert!(!flags.body);
     assert!(lock.is_none());
@@ -443,8 +447,8 @@ fn header_minimal() {
 
 #[test]
 fn header_with_flags() {
-    let p = Parser::new("");
-    let (flags, lock) = p.parse_recipe_header(":0 Bc", 1).unwrap();
+    let mut p = Parser::new("");
+    let (flags, lock) = p.parse_recipe_header(":0 Bc", 1, 0).unwrap();
     assert!(!flags.head);
     assert!(flags.body);
     assert!(flags.copy);
@@ -453,22 +457,22 @@ fn header_with_flags() {
 
 #[test]
 fn header_auto_lockfile() {
-    let p = Parser::new("");
-    let (_, lock) = p.parse_recipe_header(":0:", 1).unwrap();
+    let mut p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0:", 1, 0).unwrap();
     assert_eq!(lock.as_deref(), Some(""));
 }
 
 #[test]
 fn header_explicit_lockfile() {
-    let p = Parser::new("");
-    let (_, lock) = p.parse_recipe_header(":0:mylock", 1).unwrap();
+    let mut p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0:mylock", 1, 0).unwrap();
     assert_eq!(lock.as_deref(), Some("mylock"));
 }
 
 #[test]
 fn header_flags_and_lockfile() {
-    let p = Parser::new("");
-    let (flags, lock) = p.parse_recipe_header(":0 HBc:mylock", 1).unwrap();
+    let mut p = Parser::new("");
+    let (flags, lock) = p.parse_recipe_header(":0 HBc:mylock", 1, 0).unwrap();
     assert!(flags.head);
     assert!(flags.body);
     assert!(flags.copy);
@@ -477,8 +481,8 @@ fn header_flags_and_lockfile() {
 
 #[test]
 fn header_flags_and_auto_lockfile() {
-    let p = Parser::new("");
-    let (flags, lock) = p.parse_recipe_header(":0 fw:", 1).unwrap();
+    let mut p = Parser::new("");
+    let (flags, lock) = p.parse_recipe_header(":0 fw:", 1, 0).unwrap();
     assert!(flags.filter);
     assert!(flags.wait);
     assert_eq!(lock.as_deref(), Some(""));
@@ -486,15 +490,15 @@ fn header_flags_and_auto_lockfile() {
 
 #[test]
 fn header_leading_whitespace() {
-    let p = Parser::new("");
-    let (flags, _) = p.parse_recipe_header("  :0 B", 1).unwrap();
+    let mut p = Parser::new("");
+    let (flags, _) = p.parse_recipe_header("  :0 B", 1, 0).unwrap();
     assert!(flags.body);
 }
 
 #[test]
 fn header_legacy_number() {
-    let p = Parser::new("");
-    let (flags, lock) = p.parse_recipe_header(":27 Bc:", 1).unwrap();
+    let mut p = Parser::new("");
+    let (flags, lock) = p.parse_recipe_header(":27 Bc:", 1, 0).unwrap();
     assert!(flags.body);
     assert!(flags.copy);
     assert_eq!(lock.as_deref(), Some(""));
@@ -502,36 +506,36 @@ fn header_legacy_number() {
 
 #[test]
 fn header_no_colon_prefix() {
-    let p = Parser::new("");
-    assert!(p.parse_recipe_header("0 Bc", 1).is_err());
+    let mut p = Parser::new("");
+    assert!(p.parse_recipe_header("0 Bc", 1, 0).is_err());
 }
 
 #[test]
 fn header_lockfile_with_spaces() {
-    let p = Parser::new("");
-    let (_, lock) = p.parse_recipe_header(":0 : mylock ", 1).unwrap();
+    let mut p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0 : mylock ", 1, 0).unwrap();
     assert_eq!(lock.as_deref(), Some("mylock"));
 }
 
 #[test]
 fn header_lockfile_with_variable() {
-    let p = Parser::new("");
-    let (_, lock) = p.parse_recipe_header(":0:/tmp/lock-$USER", 1).unwrap();
+    let mut p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0:/tmp/lock-$USER", 1, 0).unwrap();
     assert_eq!(lock.as_deref(), Some("/tmp/lock-$USER"));
 }
 
 #[test]
 fn header_lockfile_special_chars() {
-    let p = Parser::new("");
-    let (_, lock) = p.parse_recipe_header(":0:my.lock_file-1", 1).unwrap();
+    let mut p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0:my.lock_file-1", 1, 0).unwrap();
     assert_eq!(lock.as_deref(), Some("my.lock_file-1"));
 }
 
 #[test]
 fn header_multiple_colons() {
     // rfind(':') finds the last colon, so everything before it is flags
-    let p = Parser::new("");
-    let (_, lock) = p.parse_recipe_header(":0::extra", 1).unwrap();
+    let mut p = Parser::new("");
+    let (_, lock) = p.parse_recipe_header(":0::extra", 1, 0).unwrap();
     assert_eq!(lock.as_deref(), Some("extra"));
 }
 
@@ -683,4 +687,39 @@ fn recipe_with_block_action() {
     let mut p = Parser::new(":0\n{\nVAR=x\n}");
     let r = p.parse_recipe().unwrap();
     assert!(matches!(r.action, Action::Nested(_)));
+}
+
+#[test]
+fn warns_on_garbage() {
+    let mut p = Parser::new("garbage line here\nVAR=x");
+    let items = p.parse().unwrap();
+    assert_eq!(items.len(), 1);
+    assert!(matches!(p.warnings(), [ParseWarning::SkippedLine { .. }]));
+}
+
+#[test]
+fn warns_on_bad_var_name() {
+    let mut p = Parser::new("123=value\nVAR=x");
+    let items = p.parse().unwrap();
+    assert_eq!(items.len(), 1);
+    assert!(matches!(p.warnings(), [ParseWarning::BadVarName { .. }]));
+}
+
+#[test]
+fn warns_on_bad_condition() {
+    let mut p = Parser::new(":0\n* < notanumber\n/dev/null");
+    let items = p.parse().unwrap();
+    assert_eq!(items.len(), 1);
+    assert!(matches!(p.warnings(), [ParseWarning::BadCondition { .. }]));
+}
+
+#[test]
+fn warns_on_unknown_flag() {
+    let mut p = Parser::new(":0 Xz\n/dev/null");
+    let items = p.parse().unwrap();
+    assert_eq!(items.len(), 1);
+    let w = p.warnings();
+    assert_eq!(w.len(), 2);
+    assert!(matches!(w[0], ParseWarning::UnknownFlag { flag: 'X', .. }));
+    assert!(matches!(w[1], ParseWarning::UnknownFlag { flag: 'z', .. }));
 }

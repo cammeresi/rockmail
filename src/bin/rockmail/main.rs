@@ -3,12 +3,13 @@
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
-use std::io::{self, ErrorKind, Read};
+use std::io::{self, ErrorKind, IsTerminal, Read, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
+use miette::{GraphicalTheme, MietteHandlerOpts};
 use nix::unistd::{ROOT, Uid, User};
 use rockmail::config::{self, is_var_name};
 use rockmail::delivery::{DeliveryOpts, FolderType};
@@ -426,8 +427,9 @@ fn run(
 
     if let Some(rc) = rcfile {
         let content = read_file(rc.file)?;
-        let items = config::parse(&content)?;
-        engine.set_var("_", &rc.path.display().to_string());
+        let name = rc.path.display().to_string();
+        let items = config::parse(&content, &name)?;
+        engine.set_var("_", &name);
 
         match engine.process(&items, &mut msg)? {
             Outcome::Delivered(_) => delivered = true,
@@ -447,6 +449,11 @@ fn run(
                 break;
             }
         }
+    }
+
+    if engine.dryrun() {
+        eprintln!("-----");
+        io::stdout().write_all(msg.as_bytes())?;
     } else if !delivered {
         let folder = deliver_default(&mut engine, &msg)?;
         engine.log_abstract(&folder, &msg);
@@ -476,6 +483,17 @@ fn main() -> ExitCode {
         print_help();
         return ExitCode::SUCCESS;
     }
+
+    // miette's own supports-color detection is unreliable, so we do it ourselves
+    miette::set_hook(Box::new(|_| {
+        let theme = if std::io::stderr().is_terminal() {
+            GraphicalTheme::unicode()
+        } else {
+            GraphicalTheme::unicode_nocolor()
+        };
+        Box::new(MietteHandlerOpts::new().graphical_theme(theme).build())
+    }))
+    .ok();
 
     signals::setup();
     init_umask();

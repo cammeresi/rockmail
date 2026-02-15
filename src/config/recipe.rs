@@ -36,6 +36,8 @@ pub struct Flags {
     pub ignore: bool,
     /// `r` — raw mode.
     pub raw: bool,
+    /// Unrecognized flag characters.
+    pub unknown: Vec<char>,
 }
 
 impl Flags {
@@ -78,7 +80,7 @@ impl Flags {
                 'i' => f.ignore = true,
                 'r' => f.raw = true,
                 ' ' | '\t' => {}
-                _ => eprintln!("unknown recipe flag: {c}"),
+                _ => f.unknown.push(c),
             }
         }
         f

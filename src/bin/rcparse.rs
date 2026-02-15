@@ -301,7 +301,7 @@ fn main() {
         }
     };
 
-    match parse(&content) {
+    match parse(&content, path) {
         Ok(items) => {
             println!("Parsed {} items from {}\n", items.len(), path);
             for (i, item) in items.iter().enumerate() {
