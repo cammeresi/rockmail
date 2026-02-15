@@ -17,12 +17,19 @@ mod tests;
 
 pub use error::*;
 
+/// sysexits.h exit codes.
 pub const EX_OK: u8 = 0;
+/// Bad usage (command-line error).
 pub const EX_USAGE: u8 = 64;
+/// Temporary failure (retry later).
 pub const EX_TEMPFAIL: u8 = 75;
+/// Service unavailable.
 pub const EX_UNAVAILABLE: u8 = 69;
+/// OS error.
 pub const EX_OSERR: u8 = 71;
+/// Cannot create output file.
 pub const EX_CANTCREAT: u8 = 73;
+/// Input file not found.
 pub const EX_NOINPUT: u8 = 66;
 
 /// Set the default umask to 077, matching procmail's INIT_UMASK.
@@ -30,6 +37,7 @@ pub fn init_umask() {
     stat::umask(Mode::from_bits_truncate(DEF_UMASK));
 }
 
+/// Convert a `u8` exit code to an `ExitCode`.
 pub fn exit(code: u8) -> ExitCode {
     ExitCode::from(code)
 }
@@ -78,6 +86,7 @@ pub fn wait_timeout(
     }
 }
 
+/// Current time as seconds since the Unix epoch.
 pub fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -1,4 +1,5 @@
-/// Magic/pseudo variable names that have special meaning in procmail
+//! Procmail builtin variable names and their defaults.
+#![allow(missing_docs)]
 pub const VAR_HOME: &str = "HOME";
 pub const VAR_LOGNAME: &str = "LOGNAME";
 pub const VAR_LASTFOLDER: &str = "LASTFOLDER";

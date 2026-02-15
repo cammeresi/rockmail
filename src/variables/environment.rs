@@ -12,6 +12,7 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Create an empty environment.
     pub fn new() -> Self {
         Self::default()
     }
@@ -23,6 +24,7 @@ impl Environment {
         }
     }
 
+    /// Look up a variable by name.
     pub fn get<T>(&self, name: &T) -> Option<&str>
     where
         T: Borrow<str> + ?Sized,
@@ -30,6 +32,7 @@ impl Environment {
         self.vars.get(name.borrow()).map(|s| s.as_str())
     }
 
+    /// Set a variable, overwriting any previous value.
     pub fn set<T, U>(&mut self, name: T, value: U)
     where
         T: Into<String>,
@@ -38,10 +41,12 @@ impl Environment {
         self.vars.insert(name.into(), value.into());
     }
 
+    /// Remove a variable.
     pub fn remove(&mut self, name: &str) {
         self.vars.remove(name);
     }
 
+    /// Iterate over all variable name-value pairs.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.vars.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }

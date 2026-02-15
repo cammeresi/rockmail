@@ -6,14 +6,20 @@ use super::Environment;
 #[cfg(test)]
 mod tests;
 
-/// Holds context for variable substitution (positional args, special vars)
+/// Holds context for variable substitution (positional args, special vars).
 pub struct SubstCtx {
-    pub argv: Vec<String>,
-    pub pid: u32,
-    pub last_exit: i32,
-    pub last_score: i64,
-    pub rcfile: String,
-    pub lastfolder: String,
+    /// Positional arguments (`$1`, `$2`, ...).
+    pub(crate) argv: Vec<String>,
+    /// Process ID (`$$`).
+    pub(crate) pid: u32,
+    /// Last command exit code (`$?`).
+    pub(crate) last_exit: i32,
+    /// Last scoring result (`$=`).
+    pub(crate) last_score: i64,
+    /// Current rcfile path (`$_`).
+    pub(crate) rcfile: String,
+    /// Last folder delivered to (`$-`).
+    pub(crate) lastfolder: String,
 }
 
 impl Default for SubstCtx {
@@ -30,6 +36,7 @@ impl Default for SubstCtx {
 }
 
 impl SubstCtx {
+    /// Create a context with positional arguments.
     pub fn new(argv: Vec<String>) -> Self {
         Self {
             argv,
@@ -236,6 +243,7 @@ fn expand_var(
     }
 }
 
+/// Expand all `$variable` references in `s`.
 pub fn subst(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
     subst_limited(env, ctx, s, usize::MAX).0
 }

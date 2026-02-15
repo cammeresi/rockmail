@@ -11,6 +11,7 @@ use crate::util::{LockError, signals};
 #[cfg(test)]
 mod tests;
 
+/// An exclusive file lock backed by `flock(2)`, with optional cleanup on drop.
 pub struct FileLock {
     #[allow(dead_code)]
     lock: Flock<File>,

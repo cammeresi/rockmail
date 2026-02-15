@@ -207,6 +207,7 @@ impl DerefMut for FieldList {
 }
 
 impl FieldList {
+    /// Create an empty field list.
     pub fn new() -> Self {
         Self::default()
     }

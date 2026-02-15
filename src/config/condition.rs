@@ -6,7 +6,9 @@ mod tests;
 /// Weight and exponent for scored conditions (w^x syntax).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Weight {
+    /// Base weight per match.
     pub w: f64,
+    /// Decay exponent (weight for match N is w * x^N).
     pub x: f64,
 }
 
@@ -126,35 +128,53 @@ fn parse_inner(
 /// A condition line in a recipe (starts with *)
 #[derive(Debug, Clone)]
 pub enum Condition {
-    /// Regular expression match (possibly negated with !)
+    /// Regular expression match (possibly negated with `!`).
     Regex {
+        /// Regex pattern string.
         pattern: String,
+        /// `!` prefix inverts the match.
         negate: bool,
+        /// Scoring weight (`w^x`).
         weight: Option<Weight>,
     },
-    /// Size comparison: < or > bytes
+    /// Size comparison (`<` or `>` bytes).
     Size {
+        /// `Less` for `<`, `Greater` for `>`.
         op: Ordering,
+        /// Threshold in bytes.
         bytes: u64,
+        /// `!` prefix inverts the test.
         negate: bool,
+        /// Scoring weight (`w^x`).
         weight: Option<Weight>,
     },
-    /// Shell command exit code (? prefix)
+    /// Shell command exit code (`?` prefix).
     Shell {
+        /// Shell command to execute.
         cmd: String,
+        /// `!` prefix inverts the exit code test.
         negate: bool,
+        /// Scoring weight (`w^x`).
         weight: Option<Weight>,
     },
-    /// Variable match: VAR ?? pattern
+    /// Variable match (`VAR ?? pattern`).
     Variable {
+        /// Variable name.
         name: String,
+        /// Regex pattern to match against the variable value.
         pattern: String,
+        /// Scoring weight (`w^x`).
         weight: Option<Weight>,
     },
-    /// Substitution prefix ($): expand then reparse, may be negated.
+    /// Substitution prefix (`$`): expand then reparse, may be negated.
     /// Weight applies to inner condition; negation inverts boolean but not
     /// score.
-    Subst { inner: Box<Condition>, negate: bool },
+    Subst {
+        /// Inner condition after substitution.
+        inner: Box<Condition>,
+        /// `!` prefix inverts the result.
+        negate: bool,
+    },
 }
 
 impl Condition {

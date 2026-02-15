@@ -53,10 +53,13 @@ r(esponse|oot)|(bbs\\.)?smtp(error)?|s(erv(ices?|er)|ystem)|A(dmin(istrator)?|\
 MMGR)\
 )(([^).!:a-z0-9][-_a-z0-9]*)?[%@>\t ][^<)]*(\\(.*\\).*)?)?$([^>]|$))";
 
+/// Error from compiling a procmail regex pattern.
 #[derive(Error, Debug)]
 pub enum PatternError {
+    /// Pattern exceeds the maximum length.
     #[error("pattern too long: {0} bytes (max {MAX_PATTERN_LEN})")]
     TooLong(usize),
+    /// Underlying regex compilation error.
     #[error("regex compilation failed: {0}")]
     Regex(#[from] regex::Error),
 }

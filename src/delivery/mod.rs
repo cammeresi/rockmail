@@ -41,8 +41,11 @@ pub enum DeliveryError {
     /// I/O error during delivery.
     #[error("failed to {op} \"{}\": {source}", path.display())]
     Io {
+        /// Underlying I/O error.
         source: io::Error,
+        /// Path that caused the error.
         path: PathBuf,
+        /// Operation that failed (e.g. "open", "write").
         op: &'static str,
     },
 

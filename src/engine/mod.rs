@@ -1170,6 +1170,7 @@ impl Engine {
         }
     }
 
+    /// Log delivery abstract (From_ line, Subject, Folder, size).
     pub fn log_abstract(&self, folder: &str, msg: &Message) {
         let la = self.get_var_as_num(VAR_LOGABSTRACT, DEF_LOGABSTRACT);
         if !(la > 0 || (self.logfile.is_some() || self.verbose) && la != 0) {

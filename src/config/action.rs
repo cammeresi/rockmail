@@ -10,9 +10,11 @@ mod tests;
 pub enum Action {
     /// Deliver to one or more folders.
     Folder(Vec<PathBuf>),
-    /// Pipe to program (optionally capture to variable)
+    /// Pipe to program (optionally capture to variable).
     Pipe {
+        /// Shell command to execute.
         cmd: String,
+        /// Variable name for captured output (`VAR=|cmd`).
         capture: Option<String>,
     },
     /// Forward to addresses
