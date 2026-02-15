@@ -257,16 +257,14 @@ fn open_and_check(
         Err(e) if is_default && e.kind() == ErrorKind::NotFound => {
             return Ok(None);
         }
-        Err(e) => {
-            return Err(format!("{}: {}", path.display(), e).into())
-        }
+        Err(e) => return Err(format!("{}: {}", path.display(), e).into()),
     };
     if link_meta.file_type().is_symlink() {
         return Err(format!("rcfile is a symlink: {}", path.display()).into());
     }
 
-    let file = File::open(path)
-        .map_err(|e| format!("{}: {}", path.display(), e))?;
+    let file =
+        File::open(path).map_err(|e| format!("{}: {}", path.display(), e))?;
     if is_global {
         check_etcrc_security(&file, path)?;
     } else {
@@ -468,7 +466,7 @@ fn run(
         let folder = deliver_default(&mut engine, &msg)?;
         engine.log_abstract(&folder, &msg);
     } else {
-        let folder = engine.get_var("LASTFOLDER").unwrap_or("").to_owned();
+        let folder = engine.get_var(VAR_LASTFOLDER).unwrap_or("").to_owned();
         engine.log_abstract(&folder, &msg);
     }
 

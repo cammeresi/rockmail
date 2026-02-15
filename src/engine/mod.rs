@@ -19,13 +19,13 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    DEF_LINEBUF, DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_LOGABSTRACT,
+    DEF_LINEBUF, DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_LOGABSTRACT, MIN_LINEBUF,
     DEF_SENDMAIL, DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL,
-    Environment, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_LINEBUF, VAR_LOCKEXT,
-    VAR_LOCKFILE, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG, VAR_LOGABSTRACT,
-    VAR_LOGFILE, VAR_MAILDIR, VAR_PROCMAIL_OVERFLOW, VAR_SENDMAIL,
-    VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_TRAP,
-    VAR_UMASK, VAR_VERBOSE, subst_limited, value_as_int,
+    Environment, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC, VAR_LASTFOLDER,
+    VAR_LINEBUF, VAR_LOCKEXT, VAR_LOCKFILE, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG,
+    VAR_LOGABSTRACT, VAR_LOGFILE, VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW,
+    VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_SWITCHRC,
+    VAR_TRAP, VAR_UMASK, VAR_VERBOSE, subst_limited, value_as_int,
 };
 
 #[cfg(test)]
@@ -299,6 +299,12 @@ impl Engine {
                 }
                 self.env.set(VAR_HOST, self.real_host.clone());
             }
+            VAR_LINEBUF => {
+                let n = value_as_int(value, DEF_LINEBUF as i64);
+                if (n as usize) < MIN_LINEBUF {
+                    self.env.set(name, MIN_LINEBUF.to_string());
+                }
+            }
             VAR_LOCKFILE => self.set_globlock(value),
             VAR_LOG => {
                 eprint!("{value}");
@@ -556,7 +562,7 @@ impl Engine {
         if result.matched
             && let Some(cap) = result.capture
         {
-            self.set_var("MATCH", cap);
+            self.set_var(VAR_MATCH, cap);
         }
 
         let Some(wt) = weight else {
@@ -775,7 +781,7 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         if self.dryrun {
             let folder = paths.join(" ");
-            self.set_var("LASTFOLDER", &folder);
+            self.set_var(VAR_LASTFOLDER, &folder);
             self.ctx.lastfolder = folder.clone();
             return Ok(Outcome::Delivered(folder));
         }
@@ -803,7 +809,7 @@ impl Engine {
         let mut folder = result.path.clone();
         self.deliver_secondaries(&paths[1..], &result.path, ft, &mut folder);
 
-        self.set_var("LASTFOLDER", &folder);
+        self.set_var(VAR_LASTFOLDER, &folder);
         self.ctx.lastfolder = folder.clone();
 
         if self.verbose {
@@ -866,7 +872,7 @@ impl Engine {
             }
         }
 
-        self.set_var("LASTFOLDER", cmd);
+        self.set_var(VAR_LASTFOLDER, cmd);
         self.ctx.lastfolder = cmd.to_string();
 
         if self.verbose {
@@ -882,7 +888,7 @@ impl Engine {
     ) -> EngineResult<Outcome> {
         if self.dryrun {
             let dest = addrs.join(" ");
-            self.set_var("LASTFOLDER", &dest);
+            self.set_var(VAR_LASTFOLDER, &dest);
             self.ctx.lastfolder = dest.clone();
             return Ok(Outcome::Delivered(dest));
         }
@@ -925,7 +931,7 @@ impl Engine {
         }
 
         let dest = addrs.join(" ");
-        self.set_var("LASTFOLDER", &dest);
+        self.set_var(VAR_LASTFOLDER, &dest);
         self.ctx.lastfolder = dest.clone();
 
         if self.verbose {
@@ -1110,7 +1116,7 @@ impl Engine {
                 Item::Include(path) => {
                     if let Some(o) = self.process_rcfile(
                         path,
-                        "INCLUDERC",
+                        VAR_INCLUDERC,
                         false,
                         msg,
                         state,
@@ -1123,7 +1129,7 @@ impl Engine {
                         return Ok(Outcome::Default);
                     }
                     if let Some(o) =
-                        self.process_rcfile(path, "SWITCHRC", true, msg, state)?
+                        self.process_rcfile(path, VAR_SWITCHRC, true, msg, state)?
                     {
                         return Ok(o);
                     }

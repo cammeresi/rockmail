@@ -475,10 +475,8 @@ fn dryrun_default_delivery() {
 fn dryrun_folder_delivery() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
-    let rc = write_rc(
-        d,
-        "MAILDIR=$DIR\nDEFAULT=$DIR/default\n\n:0\n$DIR/inbox\n",
-    );
+    let rc =
+        write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/default\n\n:0\n$DIR/inbox\n");
     let input = b"From: user@host\nSubject: Test\n\nBody\n";
     let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
     assert_eq!(code, 0);

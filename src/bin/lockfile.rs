@@ -11,6 +11,7 @@ use rockmail::locking::{
     MAX_LOCK_SIZE, create_lock, lock_mtime, remove_lock, truncate_lock_path,
 };
 use rockmail::util::{LockError, exit, now_secs, signals, *};
+use rockmail::variables::VAR_LOGNAME;
 
 const DEF_LOCKSLEEP: u64 = 8;
 const DEF_SUSPEND: u64 = 16;
@@ -63,7 +64,7 @@ struct Args {
 }
 
 fn mailbox_lock() -> Option<PathBuf> {
-    let user = env::var("LOGNAME").or_else(|_| env::var("USER")).ok()?;
+    let user = env::var(VAR_LOGNAME).or_else(|_| env::var("USER")).ok()?;
     let path = format!("/var/mail/{}.lock", user);
     Some(PathBuf::from(path))
 }
