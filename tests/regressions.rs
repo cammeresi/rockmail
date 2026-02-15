@@ -13,7 +13,7 @@ use tar::Archive;
 
 #[cfg(feature = "gold")]
 use common::procmail;
-use common::{diff_dirs, rockmail, run, setup};
+use common::{bin_dir, diff_dirs, rockmail, run, setup};
 
 #[allow(unused)]
 mod common;
@@ -51,7 +51,7 @@ fn compare(
     ra: &[&str],
 ) -> Result<(), Failed> {
     let pdir = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
-    setup(pdir.path(), rc_tmpl);
+    setup(pdir.path(), rc_tmpl, None);
     let prc = pdir.path().join("rcfile");
     let pa = vec!["-f", "sender@test", prc.to_str().unwrap()];
     for (name, data) in msgs {
@@ -85,7 +85,7 @@ fn replay(tarball: &Path) -> Result<(), Failed> {
     let msgs = collect_msgs(root)?;
 
     let rdir = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
-    setup(rdir.path(), &rc_tmpl);
+    setup(rdir.path(), &rc_tmpl, Some(bin_dir()));
     let rrc = rdir.path().join("rcfile");
     let ra: Vec<&str> = vec!["-f", "sender@test", rrc.to_str().unwrap()];
 

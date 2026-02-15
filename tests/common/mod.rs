@@ -19,6 +19,18 @@ pub fn rockmail() -> &'static str {
     env!("CARGO_BIN_EXE_rockmail")
 }
 
+pub fn bin_dir() -> &'static str {
+    static DIR: OnceLock<String> = OnceLock::new();
+    DIR.get_or_init(|| {
+        Path::new(rockmail())
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+    })
+}
+
 /// Check that a binary is the original procmail, not our replacement.
 fn is_original(path: &str) -> bool {
     let Ok(out) = Command::new(path)
@@ -84,12 +96,16 @@ pub fn run(
 }
 
 /// Set up a directory with a maildir and an rcfile expanded from a template.
-pub fn setup(dir: &Path, tmpl: &str) {
+/// When `path_prefix` is `Some`, prepend `PATH=<prefix>:$PATH` to the rcfile.
+pub fn setup(dir: &Path, tmpl: &str, path_prefix: Option<&str>) {
     let maildir = dir.join("maildir");
     fs::create_dir(&maildir).unwrap();
-    let rc = tmpl
+    let mut rc = tmpl
         .replace("$MAILDIR", maildir.to_str().unwrap())
         .replace("$DEFAULT", maildir.join("default").to_str().unwrap());
+    if let Some(prefix) = path_prefix {
+        rc = format!("PATH={prefix}:$PATH\n{rc}");
+    }
     let p = dir.join("rcfile");
     fs::write(&p, &rc).unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();

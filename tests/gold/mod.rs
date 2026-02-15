@@ -7,7 +7,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::{fs, panic, process};
 
-use crate::common::{Gold, diff_dirs, procmail, rockmail, run, setup};
+use crate::common::{Gold, bin_dir, diff_dirs, procmail, rockmail, run, setup};
 
 pub const MSGS: &[&[u8]] = &[
     b"From: a@host\nSubject: one\n\nBody one\n",
@@ -118,8 +118,8 @@ impl<'a> GoldTest<'a> {
 
     pub fn run(self) {
         let g = Gold::new();
-        setup(g.rust_dir.path(), self.rc);
-        setup(g.proc_dir.path(), self.rc);
+        setup(g.rust_dir.path(), self.rc, Some(bin_dir()));
+        setup(g.proc_dir.path(), self.rc, None);
         if let Some(ref pre) = self.pre {
             pre(&g.rust_dir.path().join("maildir"));
             pre(&g.proc_dir.path().join("maildir"));
