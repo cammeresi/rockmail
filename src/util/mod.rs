@@ -17,7 +17,7 @@ mod tests;
 
 pub use error::*;
 
-/// sysexits.h exit codes.
+/// Light is green; trap is clean.
 pub const EX_OK: u8 = 0;
 /// Bad usage (command-line error).
 pub const EX_USAGE: u8 = 64;

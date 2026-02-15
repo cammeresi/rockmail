@@ -269,27 +269,6 @@ fn expand_var(
     }
 }
 
-/// Internal: expand with optional backtick runner.
-fn subst_with(
-    env: &Environment, ctx: &SubstCtx, s: &str, run: Option<BacktickFn>,
-) -> String {
-    subst_limited_with(env, ctx, s, usize::MAX, run).0
-}
-
-/// Expand all `$variable` references in `s`.
-pub fn subst(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
-    subst_limited_with(env, ctx, s, usize::MAX, None).0
-}
-
-/// Like `subst`, but truncates output at `limit` bytes.
-/// Returns `(result, overflowed)`.
-pub fn subst_limited(
-    env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
-    run: Option<BacktickFn>,
-) -> (String, bool) {
-    subst_limited_with(env, ctx, s, limit, run)
-}
-
 fn subst_limited_with(
     env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
     run: Option<BacktickFn>,
@@ -328,4 +307,25 @@ fn subst_limited_with(
         }
     }
     (out, false)
+}
+
+/// Internal: expand with optional backtick runner.
+fn subst_with(
+    env: &Environment, ctx: &SubstCtx, s: &str, run: Option<BacktickFn>,
+) -> String {
+    subst_limited_with(env, ctx, s, usize::MAX, run).0
+}
+
+/// Expand all `$variable` references in `s`.
+pub fn subst(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
+    subst_limited_with(env, ctx, s, usize::MAX, None).0
+}
+
+/// Like `subst`, but truncates output at `limit` bytes.
+/// Returns `(result, overflowed)`.
+pub fn subst_limited(
+    env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
+    run: Option<BacktickFn>,
+) -> (String, bool) {
+    subst_limited_with(env, ctx, s, limit, run)
 }

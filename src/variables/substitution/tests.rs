@@ -314,3 +314,199 @@ fn backtick_in_default() {
     let r = subst_limited(&env, &ctx, "${X:-`cmd`}", usize::MAX, Some(&run));
     assert_eq!(r.0, "val");
 }
+
+fn esc(s: &str) -> String {
+    let mut out = String::new();
+    regex_escape_into(s, &mut out);
+    out
+}
+
+#[test]
+fn regex_escape_into_empty() {
+    assert_eq!(esc(""), "");
+}
+
+#[test]
+fn regex_escape_into_single_plain() {
+    assert_eq!(esc("a"), "(a)");
+}
+
+#[test]
+fn regex_escape_into_single_meta() {
+    assert_eq!(esc("."), "(\\.)");
+    assert_eq!(esc("^"), "(\\^)");
+    assert_eq!(esc("$"), "(\\$)");
+    assert_eq!(esc("*"), "(\\*)");
+    assert_eq!(esc("?"), "(\\?)");
+    assert_eq!(esc("+"), "(\\+)");
+    assert_eq!(esc("("), "(\\()");
+    assert_eq!(esc(")"), "(\\))");
+    assert_eq!(esc("|"), "(\\|)");
+    assert_eq!(esc("["), "(\\[)");
+    assert_eq!(esc("\\"), "(\\\\)");
+}
+
+#[test]
+fn regex_escape_into_plain() {
+    assert_eq!(esc("abc"), "(a)bc");
+    assert_eq!(esc("hello world"), "(h)ello world");
+}
+
+#[test]
+fn regex_escape_into_meta_inside() {
+    assert_eq!(esc("a.b"), "(a)\\.b");
+    assert_eq!(esc("a(b|c)"), "(a)\\(b\\|c\\)");
+}
+
+#[test]
+fn regex_escape_into_all_meta() {
+    assert_eq!(esc(".*"), "(\\.)\\*");
+    assert_eq!(esc("^$"), "(\\^)\\$");
+}
+
+#[test]
+fn regex_escape_into_leading_meta() {
+    assert_eq!(esc("^foo$"), "(\\^)foo\\$");
+    assert_eq!(esc("[abc]"), "(\\[)abc]");
+}
+
+#[test]
+fn regex_escape_into_non_meta_special() {
+    // ] { } are NOT in RE_META, should pass through unescaped
+    assert_eq!(esc("a]b"), "(a)]b");
+    assert_eq!(esc("a{b}"), "(a){b}");
+}
+
+fn ctb(s: &str) -> String {
+    let mut chars = s.chars().peekable();
+    collect_to_brace(&mut chars)
+}
+
+#[test]
+fn collect_to_brace_simple() {
+    assert_eq!(ctb("hello}"), "hello");
+}
+
+#[test]
+fn collect_to_brace_empty() {
+    assert_eq!(ctb("}"), "");
+}
+
+#[test]
+fn collect_to_brace_nested() {
+    assert_eq!(ctb("a{b}c}"), "a{b}c");
+    assert_eq!(ctb("{{}}}"), "{{}}");
+}
+
+#[test]
+fn collect_to_brace_deep() {
+    assert_eq!(ctb("a{b{c}d}e}"), "a{b{c}d}e");
+}
+
+#[test]
+fn collect_to_brace_no_closing() {
+    // Iterator exhausted without closing brace — collects everything
+    assert_eq!(ctb("abc"), "abc");
+    assert_eq!(ctb("a{b"), "a{b");
+}
+
+fn stb(s: &str) -> String {
+    let mut chars = s.chars().peekable();
+    skip_to_brace(&mut chars);
+    chars.collect()
+}
+
+#[test]
+fn skip_to_brace_simple() {
+    assert_eq!(stb("hello}rest"), "rest");
+}
+
+#[test]
+fn skip_to_brace_empty() {
+    assert_eq!(stb("}rest"), "rest");
+}
+
+#[test]
+fn skip_to_brace_nested() {
+    assert_eq!(stb("a{b}c}rest"), "rest");
+}
+
+#[test]
+fn skip_to_brace_deep() {
+    assert_eq!(stb("a{b{c}d}e}rest"), "rest");
+}
+
+#[test]
+fn skip_to_brace_no_closing() {
+    assert_eq!(stb("abc"), "");
+    assert_eq!(stb("a{b"), "");
+}
+
+#[test]
+fn braced_invalid_operator_after_colon() {
+    let mut env = Environment::new();
+    env.set("V", "val");
+    let ctx = SubstCtx::default();
+    // :! is not a valid operator — should skip to closing brace, produce nothing
+    assert_eq!(subst(&env, &ctx, "${V:!foo}"), "");
+    assert_eq!(subst(&env, &ctx, "${V:}"), "");
+}
+
+#[test]
+fn braced_invalid_operator() {
+    let mut env = Environment::new();
+    env.set("V", "val");
+    let ctx = SubstCtx::default();
+    // ! is not a valid operator — should skip to closing brace, produce nothing
+    assert_eq!(subst(&env, &ctx, "${V!foo}"), "");
+    assert_eq!(subst(&env, &ctx, "${V=foo}"), "");
+}
+
+#[test]
+fn backtick_escape_backslash_and_dollar() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |cmd: &str| cmd.to_owned();
+    // \\ inside backticks → literal backslash
+    let r = subst_limited(&env, &ctx, "`a\\\\b`", usize::MAX, Some(&run));
+    assert_eq!(r.0, "a\\b");
+    // \$ inside backticks → literal dollar
+    let r = subst_limited(&env, &ctx, "`a\\$b`", usize::MAX, Some(&run));
+    assert_eq!(r.0, "a$b");
+}
+
+#[test]
+fn multiple_backticks() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |cmd: &str| cmd.to_uppercase();
+    let r = subst_limited(&env, &ctx, "`aa`+`bb`", usize::MAX, Some(&run));
+    assert_eq!(r.0, "AA+BB");
+}
+
+#[test]
+fn regex_escape_in_default() {
+    let mut env = Environment::new();
+    env.set("V", "a.b");
+    let ctx = SubstCtx::default();
+    assert_eq!(subst(&env, &ctx, "${X:-$\\V}"), "(a)\\.b");
+}
+
+#[test]
+fn overflow_during_backtick() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |_: &str| "abcdefghij".to_owned();
+    let (r, over) = subst_limited(&env, &ctx, "xx`cmd`", 5, Some(&run));
+    assert_eq!(r, "xxabc");
+    assert!(over);
+}
+
+#[test]
+fn overflow_during_literal() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let (r, over) = subst_limited(&env, &ctx, "abcdefghij", 5, None);
+    assert_eq!(r, "abcde");
+    assert!(over);
+}
