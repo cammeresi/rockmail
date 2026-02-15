@@ -365,6 +365,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "linker-set"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89d2232a181c4ecbc6a96685c602bf93a5b1f1ee702d2665fa0140610be22108"
+dependencies = [
+ "linker-set-proc",
+ "pastey",
+]
+
+[[package]]
+name = "linker-set-proc"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e826237b9005f776baa6710efe24750771fc74c1e6af2474db4cf05b82a1f898"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -424,6 +444,12 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "pastey"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b867cad97c0791bbd3aaa6472142568c6c9e8f71937e98379f584cfb0cf35bec"
 
 [[package]]
 name = "ppv-lite86"
@@ -599,7 +625,9 @@ dependencies = [
  "filetime",
  "flate2",
  "libtest-mimic",
+ "linker-set",
  "nix",
+ "pastey",
  "proptest",
  "rand 0.8.5",
  "regex",

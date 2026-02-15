@@ -1,60 +1,78 @@
 //! Procmail builtin variable names and their defaults.
 #![allow(missing_docs)]
-pub const VAR_HOME: &str = "HOME";
-pub const VAR_LOGNAME: &str = "LOGNAME";
-pub const VAR_LASTFOLDER: &str = "LASTFOLDER";
-pub const VAR_MATCH: &str = "MATCH";
-pub const VAR_MAILDIR: &str = "MAILDIR";
-pub const VAR_DEFAULT: &str = "DEFAULT";
-pub const VAR_LOGFILE: &str = "LOGFILE";
-pub const VAR_LOCKFILE: &str = "LOCKFILE";
-pub const VAR_LOCKEXT: &str = "LOCKEXT";
-pub const VAR_LOCKSLEEP: &str = "LOCKSLEEP";
-pub const VAR_LOCKTIMEOUT: &str = "LOCKTIMEOUT";
-pub const VAR_TIMEOUT: &str = "TIMEOUT";
-pub const VAR_VERBOSE: &str = "VERBOSE";
-pub const VAR_SHELL: &str = "SHELL";
-pub const VAR_SHELLMETAS: &str = "SHELLMETAS";
-pub const VAR_SHELLFLAGS: &str = "SHELLFLAGS";
-pub const VAR_SENDMAIL: &str = "SENDMAIL";
-pub const VAR_HOST: &str = "HOST";
-pub const VAR_ORGMAIL: &str = "ORGMAIL";
-pub const VAR_LINEBUF: &str = "LINEBUF";
-pub const VAR_DELIVERED: &str = "DELIVERED";
-pub const VAR_EXITCODE: &str = "EXITCODE";
-pub const VAR_MSGPREFIX: &str = "MSGPREFIX";
-pub const VAR_INCLUDERC: &str = "INCLUDERC";
-pub const VAR_SWITCHRC: &str = "SWITCHRC";
-pub const VAR_UMASK: &str = "UMASK";
-pub const VAR_LOG: &str = "LOG";
-pub const VAR_LOGABSTRACT: &str = "LOGABSTRACT";
-pub const VAR_TRAP: &str = "TRAP";
-pub const VAR_NORESRETRY: &str = "NORESRETRY";
-pub const VAR_SUSPEND: &str = "SUSPEND";
-pub const VAR_PROCMAIL_VERSION: &str = "PROCMAIL_VERSION";
-pub const VAR_SHIFT: &str = "SHIFT";
-pub const VAR_PROCMAIL_OVERFLOW: &str = "PROCMAIL_OVERFLOW";
-pub const VAR_SENDMAILFLAGS: &str = "SENDMAILFLAGS";
-pub const VAR_USER_SHELL: &str = "USER_SHELL";
-pub const VAR_PATH: &str = "PATH";
-pub const VAR_TZ: &str = "TZ";
 
-pub const DEF_MAILDIR: &str = "Mail";
-pub const DEF_SHELLMETAS: &str = "&|<>~;?*[";
-pub const DEF_LOCKEXT: &str = ".lock";
-pub const DEF_MSGPREFIX: &str = "msg.";
-pub const DEF_SHELL: &str = "/bin/sh";
-pub const DEF_SHELLFLAGS: &str = "-c";
-pub const DEF_SENDMAIL: &str = "/usr/sbin/sendmail";
-pub const DEF_LOCKSLEEP: i64 = 8;
-pub const DEF_LOCKTIMEOUT: i64 = 1024;
-pub const DEF_TIMEOUT: i64 = 960;
-pub const DEF_NORESRETRY: i64 = 4;
-pub const DEF_SUSPEND: i64 = 16;
+use linker_set::*;
+use pastey::paste;
+
+/// A named variable with an optional default value.
+pub struct Variable {
+    pub name: &'static str,
+    pub def: Option<&'static str>,
+}
+
+set_declare!(defaults, Variable);
+
+macro_rules! var {
+    ($id:ident) => {
+        var!(@inner $id, None,);
+    };
+    ($id:ident, $def:expr) => {
+        var!(@inner $id, Some($def), #[set_entry(defaults)]);
+    };
+    (@inner $id:ident, $def:expr, $(#[$attr:meta])*) => {
+        $(#[$attr])*
+        pub static $id: Variable = Variable {
+            name: stringify!($id),
+            def: $def,
+        };
+        paste! {
+            pub const [<VAR_ $id>]: &str = stringify!($id);
+        }
+    };
+}
+
+var!(SHELL, "/bin/sh");
+var!(SHELLFLAGS, "-c");
+var!(SHELLMETAS, "&|<>~;?*[");
+var!(LOCKEXT, ".lock");
+var!(MSGPREFIX, "msg.");
+var!(MAILDIR, "Mail");
+var!(SENDMAIL, "/usr/sbin/sendmail");
+var!(SENDMAILFLAGS, "-oi");
+var!(PATH, "/usr/local/bin:/usr/bin:/bin");
+var!(LOCKSLEEP, "8");
+var!(LOCKTIMEOUT, "1024");
+var!(TIMEOUT, "960");
+var!(NORESRETRY, "4");
+var!(SUSPEND, "16");
+var!(LOGABSTRACT, "-1");
+var!(LINEBUF, "2048");
+var!(VERBOSE, "no");
+var!(UMASK, "077");
+
+var!(HOME);
+var!(LOGNAME);
+var!(LASTFOLDER);
+var!(MATCH);
+var!(DEFAULT);
+var!(LOGFILE);
+var!(LOCKFILE);
+var!(HOST);
+var!(ORGMAIL);
+var!(DELIVERED);
+var!(EXITCODE);
+var!(INCLUDERC);
+var!(SWITCHRC);
+var!(LOG);
+var!(TRAP);
+var!(PROCMAIL_VERSION);
+var!(SHIFT);
+var!(PROCMAIL_OVERFLOW);
+var!(USER_SHELL);
+var!(TZ);
+
+// Standalone constants (non-string types or not variable names)
 pub const DEF_LINEBUF: usize = 2048;
 pub const MIN_LINEBUF: usize = 128;
-pub const DEF_LOGABSTRACT: i64 = -1;
 pub const DEF_UMASK: u32 = 0o077;
-pub const DEF_SENDMAILFLAGS: &str = "-oi";
-pub const DEF_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 pub const DEV_NULL: &str = "/dev/null";

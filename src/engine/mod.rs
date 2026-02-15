@@ -19,12 +19,11 @@ use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{
-    DEF_LINEBUF, DEF_LOCKEXT, DEF_LOCKSLEEP, DEF_LOCKTIMEOUT, DEF_LOGABSTRACT, MIN_LINEBUF,
-    DEF_SENDMAIL, DEF_SENDMAILFLAGS, DEF_SHELL, DEF_SHELLFLAGS, DEV_NULL,
-    Environment, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC, VAR_LASTFOLDER,
-    VAR_LINEBUF, VAR_LOCKEXT, VAR_LOCKFILE, VAR_LOCKSLEEP, VAR_LOCKTIMEOUT, VAR_LOG,
-    VAR_LOGABSTRACT, VAR_LOGFILE, VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW,
-    VAR_SENDMAIL, VAR_SENDMAILFLAGS, VAR_SHELL, VAR_SHELLFLAGS, VAR_SHIFT, VAR_SWITCHRC,
+    DEF_LINEBUF, DEV_NULL, Environment, HOST, LINEBUF, LOCKEXT, LOCKSLEEP,
+    LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, SENDMAIL, SENDMAILFLAGS, SHELL,
+    SHELLFLAGS, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC,
+    VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE, VAR_LOG, VAR_LOGFILE,
+    VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW, VAR_SHIFT, VAR_SWITCHRC,
     VAR_TRAP, VAR_UMASK, VAR_VERBOSE, subst_limited, value_as_int,
 };
 
@@ -203,7 +202,7 @@ pub struct Engine {
 impl Engine {
     /// Create an engine with the given environment and substitution context.
     pub fn new(env: Environment, ctx: SubstCtx) -> Self {
-        let real_host = env.get(VAR_HOST).unwrap_or("").to_owned();
+        let real_host = env.get_or_default(&HOST).to_owned();
         Self {
             env,
             ctx,
@@ -246,14 +245,6 @@ impl Engine {
     /// Look up a variable by name.
     pub fn get_var(&self, name: &str) -> Option<&str> {
         self.env.get(name)
-    }
-
-    /// Look up a numeric variable, parsing via `value_as_int`.
-    pub fn get_var_as_num(&self, name: &str, def: i64) -> i64 {
-        match self.env.get(name) {
-            Some(v) => crate::variables::value_as_int(v, def),
-            None => def,
-        }
     }
 
     /// Set a variable and apply any side effects.
@@ -342,9 +333,8 @@ impl Engine {
         if path.is_empty() || self.dryrun {
             return;
         }
-        let timeout =
-            self.get_var_as_num(VAR_LOCKTIMEOUT, DEF_LOCKTIMEOUT) as u64;
-        let sleep = self.get_var_as_num(VAR_LOCKSLEEP, DEF_LOCKSLEEP) as u64;
+        let timeout = self.env.get_num(&LOCKTIMEOUT) as u64;
+        let sleep = self.env.get_num(&LOCKSLEEP) as u64;
         match FileLock::acquire_temp_retry(Path::new(path), timeout, sleep) {
             Ok(lock) => self.globlock = Some(lock),
             Err(e) => {
@@ -356,8 +346,7 @@ impl Engine {
 
     /// Expand variables in a string.
     fn expand(&mut self, s: &str) -> String {
-        let limit =
-            self.get_var_as_num(VAR_LINEBUF, DEF_LINEBUF as i64) as usize;
+        let limit = self.env.get_num(&LINEBUF) as usize;
         let (r, overflow) = subst_limited(&self.env, &self.ctx, s, limit);
         if overflow {
             self.env.set(VAR_PROCMAIL_OVERFLOW, "yes");
@@ -447,11 +436,8 @@ impl Engine {
 
     /// Run a shell command with message as stdin. Returns exit code.
     fn run_shell(&mut self, cmd: &str, input: &[u8]) -> EngineResult<i32> {
-        let shell = self.get_var(VAR_SHELL).unwrap_or(DEF_SHELL).to_owned();
-        let flags = self
-            .get_var(VAR_SHELLFLAGS)
-            .unwrap_or(DEF_SHELLFLAGS)
-            .to_owned();
+        let shell = self.env.get_or_default(&SHELL).to_owned();
+        let flags = self.env.get_or_default(&SHELLFLAGS).to_owned();
         let mut child = self
             .spawn(&shell)
             .arg(&flags)
@@ -724,7 +710,7 @@ impl Engine {
                     if !ft.needs_lock() {
                         return None;
                     }
-                    let ext = self.get_var(VAR_LOCKEXT).unwrap_or(DEF_LOCKEXT);
+                    let ext = self.env.get_or_default(&LOCKEXT);
                     Some(expanded + ext)
                 }
                 _ => None,
@@ -892,14 +878,8 @@ impl Engine {
             self.ctx.lastfolder = dest.clone();
             return Ok(Outcome::Delivered(dest));
         }
-        let sendmail = self
-            .get_var(VAR_SENDMAIL)
-            .unwrap_or(DEF_SENDMAIL)
-            .to_owned();
-        let flags = self
-            .get_var(VAR_SENDMAILFLAGS)
-            .unwrap_or(DEF_SENDMAILFLAGS)
-            .to_owned();
+        let sendmail = self.env.get_or_default(&SENDMAIL).to_owned();
+        let flags = self.env.get_or_default(&SENDMAILFLAGS).to_owned();
         let msg = self.message_for_delivery(recipe, msg);
 
         // Skip From_ line for forwarding
@@ -952,11 +932,8 @@ impl Engine {
                 eprintln!("Deadlock attempted on \"{p}\"");
                 None
             } else {
-                let timeout = self
-                    .get_var_as_num(VAR_LOCKTIMEOUT, DEF_LOCKTIMEOUT)
-                    as u64;
-                let sleep =
-                    self.get_var_as_num(VAR_LOCKSLEEP, DEF_LOCKSLEEP) as u64;
+                let timeout = self.env.get_num(&LOCKTIMEOUT) as u64;
+                let sleep = self.env.get_num(&LOCKSLEEP) as u64;
                 Some(
                     FileLock::acquire_temp_retry(Path::new(&p), timeout, sleep)
                         .map_err(|e| {
@@ -1031,9 +1008,7 @@ impl Engine {
         if let Outcome::Delivered(ref f) = result
             && recipe.flags.copy
         {
-            if self.get_var_as_num(VAR_LOGABSTRACT, DEF_LOGABSTRACT)
-                == LOGABSTRACT_ALL
-            {
+            if self.env.get_num(&LOGABSTRACT) == LOGABSTRACT_ALL {
                 let f = f.clone();
                 self.log_abstract(&f, msg);
             }
@@ -1128,9 +1103,13 @@ impl Engine {
                     if path.is_empty() {
                         return Ok(Outcome::Default);
                     }
-                    if let Some(o) =
-                        self.process_rcfile(path, VAR_SWITCHRC, true, msg, state)?
-                    {
+                    if let Some(o) = self.process_rcfile(
+                        path,
+                        VAR_SWITCHRC,
+                        true,
+                        msg,
+                        state,
+                    )? {
                         return Ok(o);
                     }
                 }
@@ -1178,7 +1157,7 @@ impl Engine {
 
     /// Log delivery abstract (From_ line, Subject, Folder, size).
     pub fn log_abstract(&self, folder: &str, msg: &Message) {
-        let la = self.get_var_as_num(VAR_LOGABSTRACT, DEF_LOGABSTRACT);
+        let la = self.env.get_num(&LOGABSTRACT);
         if !(la > 0 || (self.logfile.is_some() || self.verbose) && la != 0) {
             return;
         }
@@ -1226,10 +1205,10 @@ impl Engine {
             self.set_var(VAR_EXITCODE, "0");
         }
         let cmd = self.expand(&trap);
-        let shell = self.get_var(VAR_SHELL).unwrap_or(DEF_SHELL).to_owned();
+        let shell = self.env.get_or_default(&SHELL).to_owned();
         let child = self
             .spawn(&shell)
-            .arg(DEF_SHELLFLAGS)
+            .arg(SHELLFLAGS.def.unwrap())
             .arg(&cmd)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
