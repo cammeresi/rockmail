@@ -4,9 +4,10 @@ use tempfile::TempDir;
 
 use crate::config::{Action, Condition, Flags, Item, Recipe, Weight};
 use crate::mail::Message;
+use crate::re::Matcher;
 use crate::variables::{Environment, SubstCtx};
 
-use super::{Engine, EngineError, Outcome};
+use super::{Engine, EngineError, Outcome, score_regex};
 
 struct Test {
     tmp: TempDir,
@@ -563,4 +564,39 @@ fn no_short_circuit_weighted_after_fail() {
         action: Action::Folder(vec![PathBuf::from(t.maildir("nope"))]),
     })];
     assert_eq!(t.process(&items), Outcome::Default);
+}
+
+fn score(pat: &str, text: &str, w: f64, x: f64) -> f64 {
+    let m = Matcher::new(pat, false).unwrap();
+    score_regex(&m, text, Weight { w, x })
+}
+
+#[test]
+fn score_line_count_simple() {
+    assert_eq!(score("^.*$", "One\nTwo\nThree\n", 1.0, 1.0), 4.0);
+}
+
+#[test]
+fn score_line_count_single() {
+    assert_eq!(score("^.*$", "Single line\n", 1.0, 1.0), 2.0);
+}
+
+#[test]
+fn score_line_count_blank_lines() {
+    assert_eq!(score("^.*$", "a\n\nb\n\n", 1.0, 1.0), 5.0);
+}
+
+#[test]
+fn score_line_count_no_trailing_newline() {
+    assert_eq!(score("^.*$", "a\nb", 1.0, 1.0), 2.0);
+}
+
+#[test]
+fn score_line_count_empty() {
+    assert_eq!(score("^.*$", "", 1.0, 1.0), 0.0);
+}
+
+#[test]
+fn score_line_count_only_newlines() {
+    assert_eq!(score("^.*$", "\n\n\n", 1.0, 1.0), 4.0);
 }

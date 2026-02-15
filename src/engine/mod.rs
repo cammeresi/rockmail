@@ -122,30 +122,51 @@ fn score_regex(m: &Matcher, text: &str, wt: Weight) -> f64 {
     let mut ow = w * w;
     let mut pos = 0;
 
-    while w != 0.0 && score > MIN32 && score < MAX32 {
+    let bytes = text.as_bytes();
+    while w != 0.0 && score > MIN32 && score < MAX32 && pos < text.len() {
         let Some((start, end)) = m.find_from(text, pos) else {
             break;
         };
-        score += w;
-        w *= wt.x;
         if end == start {
-            // Zero-width match
+            // Our regex engine doesn't consume \n with the match like
+            // procmail's does.  A zero-width match at \n means the
+            // regex stopped at a line boundary.  Skip past consecutive
+            // \n bytes, counting each as a blank line except the first
+            // (which is the line terminator for the preceding match).
+            if bytes[pos] == b'\n' {
+                let skip = if start > 0 { 1 } else { 0 };
+                while pos < text.len() && bytes[pos] == b'\n' {
+                    if pos >= start + skip {
+                        score += w;
+                        w *= wt.x;
+                    }
+                    pos += 1;
+                }
+                if pos == text.len() {
+                    score += w;
+                    w *= wt.x;
+                }
+                continue;
+            }
             if wt.x > 0.0 && wt.x < 1.0 {
+                score += w;
+                w *= wt.x;
                 score += w / (1.0 - wt.x);
             } else if wt.x >= 1.0 && w != 0.0 {
+                score += w;
+                w *= wt.x;
                 score += if w < 0.0 { MIN32 } else { MAX32 };
             }
             break;
         }
+        score += w;
+        w *= wt.x;
         let nw = w * w;
         if nw < ow && ow < 1.0 {
             break;
         }
         ow = nw;
         pos = end;
-        if pos > text.len() {
-            break;
-        }
     }
     score.clamp(MIN32, MAX32)
 }

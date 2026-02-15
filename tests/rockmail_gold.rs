@@ -717,6 +717,47 @@ matched
 }
 
 #[test]
+fn weighted_line_count() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0B
+* 1^1 ^.*$
+{ }
+LINES = $=
+
+:0 fhw
+| formail -a \"Lines: $LINES\"
+
+:0 hw
+| /bin/echo $LINES
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: test\n\nOne\nTwo\nThree\n",
+        b"From: b@host\nSubject: test\n\nSingle line\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn filter_pipe_continues() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 fw
+| /bin/sed 's/old/new/'
+
+:0
+* ^Subject:.*new
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: old stuff\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
 fn macro_from_daemon() {
     let rc = "\
 MAILDIR=$MAILDIR
