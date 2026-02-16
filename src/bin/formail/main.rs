@@ -3,16 +3,15 @@
 //! Converts mail to mailbox format, performs From_ escaping, generates
 //! auto-reply headers, header manipulation, and mailbox/digest splitting.
 
-use std::fs::OpenOptions;
-use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::mem;
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::str;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
-use nix::fcntl::{Flock, FlockArg};
 
+use rockmail::dedup;
 use rockmail::field::{Field, FieldList, read_headers};
 use rockmail::rfc2047::{self, Enc};
 use rockmail::util;
@@ -872,10 +871,6 @@ fn output_log_summary(
 
 /// Check if message is a duplicate using ID cache.
 /// Returns true if duplicate found.
-///
-/// Cache format: null-terminated strings in a circular buffer.
-/// When adding a new entry would exceed maxlen, wrap to start.
-/// An empty entry (just \0) marks the end of valid data.
 fn check_duplicate(
     args: &Args, fields: &FieldList, cache: &str, maxlen: usize,
 ) -> io::Result<bool> {
@@ -894,70 +889,7 @@ fn check_duplicate(
             .unwrap_or_default()
     };
 
-    let key = key.trim_start();
-    if key.is_empty() {
-        return Ok(false);
-    }
-
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(cache)?;
-
-    // Lock file to prevent concurrent access corruption
-    let mut file = Flock::lock(file, FlockArg::LockExclusive)
-        .map_err(|(_, e)| io::Error::other(e))?;
-
-    let mut contents = vec![0u8; maxlen];
-    let n = file.read(&mut contents)?;
-    contents.truncate(n);
-
-    let mut dup = false;
-    let mut insert: Option<usize> = None;
-
-    let mut pos = 0;
-    while pos < contents.len() {
-        let start = pos;
-        while pos < contents.len() && contents[pos] != 0 {
-            pos += 1;
-        }
-        let entry = &contents[start..pos];
-
-        if entry.is_empty() {
-            if insert.is_none() {
-                insert = Some(start);
-            }
-        } else if entry == key.as_bytes() {
-            dup = true;
-            break;
-        }
-
-        if pos < contents.len() {
-            pos += 1;
-        }
-    }
-
-    if !dup {
-        let offset = if let Some(off) = insert {
-            off
-        } else if n >= maxlen {
-            0
-        } else {
-            n
-        };
-
-        let needed = key.len() + 2;
-        let offset = if offset + needed > maxlen { 0 } else { offset };
-
-        file.seek(SeekFrom::Start(offset as u64))?;
-        file.write_all(key.as_bytes())?;
-        file.write_all(b"\0\0")?;
-        file.set_len((offset + needed) as u64)?;
-    }
-
-    Ok(dup)
+    dedup::check_cache(&key, cache, maxlen)
 }
 
 fn output_message(

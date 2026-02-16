@@ -6,6 +6,8 @@ pub const VERSION: &str = env!("VERSION");
 
 /// Rcfile parsing: recipes, conditions, actions, and variable assignments.
 pub mod config;
+/// Duplicate detection via Message-ID cache.
+pub mod dedup;
 /// Mail delivery to folders and pipes.
 pub mod delivery;
 /// Recipe evaluation loop and condition matching.
