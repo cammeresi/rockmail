@@ -74,21 +74,32 @@ pub struct MatchResult<'a> {
 }
 
 fn expand_macros(pat: &str) -> String {
-    // Order matters: ^TO_ must be checked before ^TO
+    // Longest key first so ^FROM_DAEMON matches before ^FROM_MAILER, etc.
     let macros = [
-        (TO_KEY, TO_SUBSTITUTE),
-        (TO2_KEY, TO2_SUBSTITUTE),
         (FROMD_KEY, FROMD_SUBSTITUTE),
         (FROMM_KEY, FROMM_SUBSTITUTE),
+        (TO_KEY, TO_SUBSTITUTE),
+        (TO2_KEY, TO2_SUBSTITUTE),
     ];
 
-    let mut result = pat.to_string();
-    for (key, sub) in macros {
-        while let Some(pos) = result.find(key) {
-            result.replace_range(pos..pos + key.len(), sub);
+    let mut out = String::with_capacity(pat.len());
+    let bytes = pat.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'^' {
+            if let Some((key, sub)) = macros
+                .iter()
+                .find(|(key, _)| bytes[i..].starts_with(key.as_bytes()))
+            {
+                out.push_str(sub);
+                i += key.len();
+                continue;
+            }
         }
+        out.push(bytes[i] as char);
+        i += 1;
     }
-    result
+    out
 }
 
 /// Process a single char inside a `\/` capture region.
