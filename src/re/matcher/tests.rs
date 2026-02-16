@@ -383,3 +383,69 @@ fn pattern_too_long_after_expansion() {
     let err = Matcher::new(&pat, false).unwrap_err();
     assert!(matches!(err, PatternError::TooLong(_)));
 }
+
+#[test]
+fn invalid_regex() {
+    let err = Matcher::new("[invalid", false).unwrap_err();
+    assert!(matches!(err, PatternError::Regex(_)));
+}
+
+#[test]
+fn word_start_with_anchor_start() {
+    let m = Matcher::new(r"^^\<word", false).unwrap();
+    assert!(m.exec("word here").matched);
+    assert!(!m.exec("a word here").matched);
+}
+
+#[test]
+fn word_end_with_anchor_end() {
+    let m = Matcher::new(r"word\>^^", false).unwrap();
+    assert!(m.exec("a word").matched);
+    assert!(!m.exec("word stuff").matched);
+}
+
+#[test]
+fn macro_to_with_capture() {
+    // ^TO_ expansion consumes up to the last non-address char, so
+    // \/ captures from the address onward.
+    let m = Matcher::new(r"^TO_\/.*", true).unwrap();
+    let r = m.exec("To: user@example.com");
+    assert!(r.matched);
+    assert!(r.capture.is_some());
+    assert!(!m.exec("From: user@example.com").matched);
+}
+
+#[test]
+fn macro_from_daemon_with_capture() {
+    // \/ before the macro captures what the macro matches.
+    let m = Matcher::new(r"\/^FROM_DAEMON", true).unwrap();
+    let r = m.exec("From: MAILER-DAEMON@host\n");
+    assert!(r.matched);
+    assert!(r.capture.is_some());
+    assert!(r.capture.unwrap().contains("MAILER-DAEMON"));
+}
+
+#[test]
+fn macro_to_with_anchor_start() {
+    let m = Matcher::new("^^^TO_user", true).unwrap();
+    assert!(m.exec("To: user").matched);
+    assert!(!m.exec("Subject: hi\nTo: user").matched);
+}
+
+#[test]
+fn multiple_capture_markers() {
+    // Only the first \/ captures; the second is literal
+    let m = Matcher::new(r"foo\/bar\/baz", false).unwrap();
+    let r = m.exec("foobar/baz");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("bar/baz"));
+}
+
+#[test]
+fn word_boundaries_with_capture() {
+    let m = Matcher::new(r"\/\<hello\>", false).unwrap();
+    let r = m.exec("say hello there");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("hello"));
+    assert!(!m.exec("sayhellothere").matched);
+}
