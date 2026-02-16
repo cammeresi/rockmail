@@ -301,3 +301,55 @@ fn double_caret_ignores_after_newline() {
     assert!(!m.exec("first\nsecond").matched);
     assert!(m.exec("second line").matched);
 }
+
+// The next four tests exercise push_char branches, which handle special
+// characters inside a \/ capture region.  Some differ from procmail's
+// consuming word boundaries; see COMPATIBILITY.md "Regex Word Boundaries".
+
+#[test]
+fn capture_word_boundary() {
+    // \< and \> inside \/ become \b (zero-width); procmail would consume
+    // the boundary character, so the captured text differs.
+    let m = Matcher::new(r"\/\<word\>", false).unwrap();
+    let r = m.exec("a word here");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("word"));
+}
+
+#[test]
+fn capture_backslash_escape() {
+    // Regular \. escape inside \/ capture
+    let m = Matcher::new(r"\/foo\.bar", false).unwrap();
+    let r = m.exec("foo.bar");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("foo.bar"));
+    assert!(!m.exec("fooxbar").matched);
+}
+
+#[test]
+fn capture_trailing_backslash() {
+    // Trailing \ inside \/ becomes literal backslash
+    let m = Matcher::new("foo\\/\\", false).unwrap();
+    let r = m.exec("foo\\");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("\\"));
+}
+
+#[test]
+fn capture_group_inside_capture() {
+    // ( inside \/ increments group count so capture index stays correct
+    let m = Matcher::new(r"\/(a|b)+x", false).unwrap();
+    let r = m.exec("abax");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("abax"));
+}
+
+#[test]
+fn capture_double_caret_mid() {
+    // ^^ in the middle of \/ region is silently dropped (not at end,
+    // so no anchor_end)
+    let m = Matcher::new(r"\/foo^^bar", false).unwrap();
+    let r = m.exec("foobar");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("foobar"));
+}

@@ -11,7 +11,13 @@ use tempfile::TempDir;
 #[allow(unused)]
 mod common;
 
-fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
+struct Output {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    code: i32,
+}
+
+fn run_full(dir: &Path, args: &[&str], input: &[u8]) -> Output {
     let mut child = Command::new(common::rockmail())
         .args(args)
         .current_dir(dir)
@@ -27,7 +33,16 @@ fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
         panic!("write stdin: {e}");
     }
     let out = child.wait_with_output().expect("wait");
-    (out.stderr, out.status.code().unwrap_or(-1))
+    Output {
+        stdout: out.stdout,
+        stderr: out.stderr,
+        code: out.status.code().unwrap_or(-1),
+    }
+}
+
+fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
+    let o = run_full(dir, args, input);
+    (o.stderr, o.code)
 }
 
 fn write_rc(dir: &Path, rc: &str) -> String {
@@ -619,4 +634,108 @@ DEFAULT=$DIR/inbox
     assert!(content.contains("X-Tag: existing"), "original header lost");
     assert!(content.contains("X-Tag: first"), "first @A not added");
     assert!(content.contains("X-Tag: second"), "second @A not added");
+}
+
+#[test]
+fn dryrun_show_msg() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n");
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let o = run_full(d, &["-n", "-M", "-f", "sender@test", &rc], input);
+    assert_eq!(o.code, 0);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        out.contains("Body"),
+        "stdout should contain message: {out:?}"
+    );
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        err.contains("-----"),
+        "stderr should contain separator: {err:?}"
+    );
+}
+
+#[test]
+fn dryrun_no_lockfile() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\nLOCKFILE=$DIR/global.lock\n",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(
+        !d.join("global.lock").exists(),
+        "lockfile should not be created in dryrun"
+    );
+}
+
+#[test]
+fn dryrun_condition_match() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/default\n\n:0\n* ^Subject: Match\n$DIR/matched\n",
+    );
+    let input = b"From: user@host\nSubject: Match\n\nBody\n";
+    let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        err.contains("deliver:"),
+        "matched recipe should log delivery: {err:?}"
+    );
+    assert!(
+        !d.join("matched").exists(),
+        "folder should not be created in dryrun"
+    );
+}
+
+#[test]
+fn dryrun_condition_no_match() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/default\n\n:0\n* ^Subject: NoMatch\n$DIR/matched\n",
+    );
+    let input = b"From: user@host\nSubject: Other\n\nBody\n";
+    let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        !err.contains("deliver: ") || err.contains("deliver to default"),
+        "non-matching recipe should not log folder delivery: {err:?}"
+    );
+}
+
+#[test]
+fn dryrun_no_logfile() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc =
+        write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\nLOGFILE=$DIR/log\n");
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(
+        !d.join("log").exists(),
+        "logfile should not be created in dryrun"
+    );
+}
+
+#[test]
+fn dryrun_filter() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n:0 fhb\n| cat\n");
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(err.contains("filter:"), "expected filter log: {err:?}");
 }

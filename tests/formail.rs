@@ -1,6 +1,8 @@
 //! Integration tests for formail binary.
 
+use std::fs::{self, Permissions};
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
 fn formail() -> Command {
@@ -272,4 +274,39 @@ fn duplicate_cache_circular() {
     // First message should no longer be detected as duplicate
     let (_, code4) = run(&["-D", "50", path], input1);
     assert_eq!(code4, 1); // not duplicate (was overwritten)
+}
+
+#[test]
+fn split_nowait_pool() {
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("msg");
+
+    // Write a helper script; formail's `-c` flag collides with `sh -c`.
+    let script = dir.path().join("save.sh");
+    fs::write(
+        &script,
+        format!("#!/bin/sh\ncat > {}.\"$FILENO\"\n", dest.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&script, Permissions::from_mode(0o755)).unwrap();
+
+    let input = "From a@a Mon Jan 1 00:00:00 2024\n\
+                 From: a@a\nSubject: First\n\nBody1\n\n\
+                 From b@b Mon Jan 1 00:00:00 2024\n\
+                 From: b@b\nSubject: Second\n\nBody2\n\n\
+                 From c@c Mon Jan 1 00:00:00 2024\n\
+                 From: c@c\nSubject: Third\n\nBody3\n";
+    let s = script.to_str().unwrap();
+    let (_, code) = run(&["-n", "2", "-s", s], input);
+    assert_eq!(code, 0);
+
+    for (i, subj) in ["First", "Second", "Third"].iter().enumerate() {
+        let path = format!("{}.{}", dest.display(), i);
+        let content =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        assert!(
+            content.contains(&format!("Subject: {subj}")),
+            "msg {i} missing Subject: {subj}\n{content}"
+        );
+    }
 }

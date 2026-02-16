@@ -22,7 +22,7 @@ static MAILDIR_RE: LazyLock<Regex> =
 
 static DATE_FMT: &str = "%e %b, %H:%M";
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Stats {
     msgs: u64,
     bytes: u64,
@@ -75,9 +75,13 @@ enum Format {
 }
 
 impl Format {
-    fn header(&self, w: &Widths) {
+    fn header<W>(&self, out: &mut W, w: &Widths)
+    where
+        W: Write,
+    {
         match self {
-            Self::Long => println!(
+            Self::Long => writeln!(
+                out,
                 "  {:>b$}  {:>a$}  {:>m$}  Folder",
                 "Total",
                 "Average",
@@ -86,7 +90,8 @@ impl Format {
                 a = w.avg,
                 m = w.msgs
             ),
-            Self::Short => println!(
+            Self::Short => writeln!(
+                out,
                 "  {:>b$}  {:>m$}  Folder",
                 "Total",
                 "Number",
@@ -94,11 +99,16 @@ impl Format {
                 m = w.msgs
             ),
         }
+        .unwrap();
     }
 
-    fn sep(&self, w: &Widths) {
+    fn sep<W>(&self, out: &mut W, w: &Widths)
+    where
+        W: Write,
+    {
         match self {
-            Self::Long => println!(
+            Self::Long => writeln!(
+                out,
                 "  {:->b$}  {:->a$}  {:->m$}  {:->f$}",
                 "",
                 "",
@@ -109,7 +119,8 @@ impl Format {
                 m = w.msgs,
                 f = w.folder
             ),
-            Self::Short => println!(
+            Self::Short => writeln!(
+                out,
                 "  {:->b$}  {:->m$}  {:->f$}",
                 "",
                 "",
@@ -119,12 +130,18 @@ impl Format {
                 f = w.folder
             ),
         }
+        .unwrap();
     }
 
-    fn row(&self, w: &Widths, prefix: &str, s: &Stats, name: &str) {
+    fn row<W>(
+        &self, out: &mut W, w: &Widths, prefix: &str, s: &Stats, name: &str,
+    ) where
+        W: Write,
+    {
         let avg = if s.msgs > 0 { s.bytes / s.msgs } else { 0 };
         match self {
-            Self::Long => println!(
+            Self::Long => writeln!(
+                out,
                 "{}{:>b$}  {:>a$}  {:>m$}  {}",
                 prefix,
                 s.bytes,
@@ -135,7 +152,8 @@ impl Format {
                 a = w.avg,
                 m = w.msgs
             ),
-            Self::Short => println!(
+            Self::Short => writeln!(
+                out,
                 "{}{:>b$}  {:>m$}  {}",
                 prefix,
                 s.bytes,
@@ -145,12 +163,17 @@ impl Format {
                 m = w.msgs
             ),
         }
+        .unwrap();
     }
 
-    fn footer(&self, w: &Widths, msgs: u64, bytes: u64) {
+    fn footer<W>(&self, out: &mut W, w: &Widths, msgs: u64, bytes: u64)
+    where
+        W: Write,
+    {
         let avg = if msgs > 0 { bytes / msgs } else { 0 };
         match self {
-            Self::Long => println!(
+            Self::Long => writeln!(
+                out,
                 "  {:>b$}  {:>a$}  {:>m$}  ",
                 bytes,
                 avg,
@@ -159,7 +182,8 @@ impl Format {
                 a = w.avg,
                 m = w.msgs
             ),
-            Self::Short => println!(
+            Self::Short => writeln!(
+                out,
                 "  {:>b$}  {:>m$}  ",
                 bytes,
                 msgs,
@@ -167,6 +191,7 @@ impl Format {
                 m = w.msgs
             ),
         }
+        .unwrap();
     }
 }
 
@@ -227,18 +252,13 @@ fn digits(n: u64) -> usize {
     }
 }
 
-fn load_rc() -> RcConfig {
-    let Some(home) = std::env::var_os("HOME") else {
-        return RcConfig::default();
-    };
-    let rc = Path::new(&home).join(".mailstatrc");
-    let Ok(f) = File::open(rc) else {
-        return RcConfig::default();
-    };
-
+fn parse_rc<R>(reader: R) -> RcConfig
+where
+    R: BufRead,
+{
     let mut ignores = HashSet::new();
     let mut date_fmt = None;
-    for (lineno, line) in BufReader::new(f).lines().enumerate() {
+    for (lineno, line) in reader.lines().enumerate() {
         let Ok(line) = line else { continue };
         let line = line.trim();
         if line.is_empty() {
@@ -256,6 +276,17 @@ fn load_rc() -> RcConfig {
         }
     }
     RcConfig { ignores, date_fmt }
+}
+
+fn load_rc() -> RcConfig {
+    let Some(home) = std::env::var_os("HOME") else {
+        return RcConfig::default();
+    };
+    let rc = Path::new(&home).join(".mailstatrc");
+    let Ok(f) = File::open(rc) else {
+        return RcConfig::default();
+    };
+    parse_rc(BufReader::new(f))
 }
 
 fn normalize_folder(name: &str) -> String {
@@ -290,9 +321,12 @@ fn input_path(base: &Path, old: bool) -> PathBuf {
     }
 }
 
-fn print_no_mail(
-    meta: &Metadata, date_fmt: &Option<String>, silent: bool,
-) -> u8 {
+fn print_no_mail<W>(
+    out: &mut W, meta: &Metadata, date_fmt: &Option<String>, silent: bool,
+) -> u8
+where
+    W: Write,
+{
     if silent {
         return EX_OK;
     }
@@ -310,7 +344,7 @@ fn print_no_mail(
     let fmt = date_fmt.as_deref().unwrap_or(DATE_FMT);
     let when = local.format(fmt);
 
-    println!("No mail arrived since {}", when);
+    writeln!(out, "No mail arrived since {}", when).unwrap();
     EX_OK
 }
 
@@ -434,31 +468,36 @@ fn process_log(
     }
 }
 
-fn print_stats(
-    totals: &BTreeMap<String, Stats>, msgs: u64, bytes: u64, long: bool,
-    terse: bool,
-) {
+fn write_stats<W>(
+    out: &mut W, totals: &BTreeMap<String, Stats>, msgs: u64, bytes: u64,
+    long: bool, terse: bool,
+) where
+    W: Write,
+{
     let w = Widths::compute(totals, msgs, bytes);
     let fmt = if long { Format::Long } else { Format::Short };
 
     if !terse {
-        println!();
-        fmt.header(&w);
-        fmt.sep(&w);
+        writeln!(out).unwrap();
+        fmt.header(out, &w);
+        fmt.sep(out, &w);
     }
 
     let prefix = if terse { "" } else { "  " };
     for (name, s) in totals {
-        fmt.row(&w, prefix, s, name);
+        fmt.row(out, &w, prefix, s, name);
     }
 
     if !terse {
-        fmt.sep(&w);
-        fmt.footer(&w, msgs, bytes);
+        fmt.sep(out, &w);
+        fmt.footer(out, &w, msgs, bytes);
     }
 }
 
-fn run(args: &Args, keep: bool) -> u8 {
+fn run<W>(out: &mut W, args: &Args, keep: bool) -> u8
+where
+    W: Write,
+{
     let rc = if args.old {
         RcConfig::default()
     } else {
@@ -472,7 +511,7 @@ fn run(args: &Args, keep: bool) -> u8 {
     };
 
     if meta.len() == 0 {
-        return print_no_mail(&meta, &rc.date_fmt, args.silent);
+        return print_no_mail(out, &meta, &rc.date_fmt, args.silent);
     }
 
     let mtime = FileTime::from_last_modification_time(&meta);
@@ -496,10 +535,10 @@ fn run(args: &Args, keep: bool) -> u8 {
     let bytes: u64 = filtered.values().map(|s| s.bytes).sum();
 
     if msgs == 0 {
-        return print_no_mail(&meta, &rc.date_fmt, args.silent);
+        return print_no_mail(out, &meta, &rc.date_fmt, args.silent);
     }
 
-    print_stats(&filtered, msgs, bytes, args.long, args.terse);
+    write_stats(out, &filtered, msgs, bytes, args.long, args.terse);
     EX_OK
 }
 
@@ -516,5 +555,5 @@ fn main() -> ExitCode {
         }
     };
 
-    exit(run(&args, keep))
+    exit(run(&mut io::stdout(), &args, keep))
 }

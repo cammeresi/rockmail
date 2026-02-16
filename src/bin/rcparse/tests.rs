@@ -1,8 +1,8 @@
-use super::*;
+use rockmail::config::dump;
 
 #[test]
 fn parse_basic_rcfile() {
-    let items = run(
+    let items = dump::run(
         "\
 MAILDIR=/tmp
 DEFAULT=/tmp/inbox
@@ -16,6 +16,7 @@ matched
 | cat > /dev/null
 ",
         "<test>",
-    );
+    )
+    .unwrap();
     assert_eq!(items.len(), 4);
 }

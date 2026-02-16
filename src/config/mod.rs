@@ -1,5 +1,6 @@
 mod action;
 mod condition;
+pub mod dump;
 mod parser;
 mod recipe;
 

@@ -117,6 +117,8 @@ impl<'a> GoldTest<'a> {
     }
 
     pub fn run(self) {
+        rockmail::config::dump::run(self.rc, "<gold>")
+            .expect("rcparse failed on gold test rcfile");
         let g = Gold::new();
         setup(g.rust_dir.path(), self.rc, Some(bin_dir()));
         setup(g.proc_dir.path(), self.rc, None);

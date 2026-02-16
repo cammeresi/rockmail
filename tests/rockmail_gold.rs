@@ -1079,3 +1079,14 @@ matched/
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
     GoldTest::new(rc, msgs).run();
 }
+
+#[test]
+fn subst_item_in_rcfile() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SCRATCH=hello-world
+SCRATCH =~ s/-/_/
+";
+    GoldTest::new(rc, MSGS).run();
+}
