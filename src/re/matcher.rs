@@ -86,15 +86,14 @@ fn expand_macros(pat: &str) -> String {
     let bytes = pat.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'^' {
-            if let Some((key, sub)) = macros
+        if bytes[i] == b'^'
+            && let Some((key, sub)) = macros
                 .iter()
                 .find(|(key, _)| bytes[i..].starts_with(key.as_bytes()))
-            {
-                out.push_str(sub);
-                i += key.len();
-                continue;
-            }
+        {
+            out.push_str(sub);
+            i += key.len();
+            continue;
         }
         out.push(bytes[i] as char);
         i += 1;
@@ -235,11 +234,10 @@ impl Matcher {
     pub fn new(
         pattern: &str, case_insensitive: bool,
     ) -> Result<Self, PatternError> {
-        if pattern.len() > MAX_PATTERN_LEN {
-            return Err(PatternError::TooLong(pattern.len()));
-        }
-
         let expanded = expand_macros(pattern);
+        if expanded.len() > MAX_PATTERN_LEN {
+            return Err(PatternError::TooLong(expanded.len()));
+        }
         let (compiled, capture) = compile(&expanded);
 
         let regex = RegexBuilder::new(&compiled)
@@ -247,7 +245,10 @@ impl Matcher {
             .multi_line(true)
             .build()?;
 
-        Ok(Self { regex, capture_group: capture })
+        Ok(Self {
+            regex,
+            capture_group: capture,
+        })
     }
 
     /// Match against text.

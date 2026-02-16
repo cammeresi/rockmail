@@ -373,3 +373,13 @@ fn find_from_past_end() {
     let m = Matcher::new("foo", false).unwrap();
     assert_eq!(m.find_from("foo", 99), None);
 }
+
+#[test]
+fn pattern_too_long_after_expansion() {
+    // Short pattern that expands past MAX_PATTERN_LEN via ^FROM_DAEMON
+    let n = MAX_PATTERN_LEN / FROMD_SUBSTITUTE.len() + 1;
+    let pat = "^FROM_DAEMON".repeat(n);
+    assert!(pat.len() < MAX_PATTERN_LEN);
+    let err = Matcher::new(&pat, false).unwrap_err();
+    assert!(matches!(err, PatternError::TooLong(_)));
+}
