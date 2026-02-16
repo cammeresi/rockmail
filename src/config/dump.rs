@@ -224,6 +224,11 @@ fn fmt_item_str(item: &Item, num: usize, depth: usize) -> String {
                 out.push_str(&format!("{ind}{num:3}. [SWITCHRC] {path:?}\n"));
             }
         }
+        Item::DupeCheck { maxlen, cache, .. } => {
+            out.push_str(&format!(
+                "{ind}{num:3}. [DEDUP] @D {maxlen} {cache}\n"
+            ));
+        }
     }
     out
 }

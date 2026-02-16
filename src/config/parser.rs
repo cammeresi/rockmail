@@ -246,12 +246,22 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse `@X Header: value`.
+    /// Parse `@X Header: value` or `@D maxlen cache`.
     fn parse_header_op(line: &str, line_num: usize) -> Option<Item> {
         let rest = line.strip_prefix('@')?;
         let mut chars = rest.chars();
         let op = chars.next()?;
         let rest = chars.as_str().trim_start();
+
+        if op == 'D' {
+            let (maxlen, cache) = rest.split_once(char::is_whitespace)?;
+            return Some(Item::DupeCheck {
+                maxlen: maxlen.trim().into(),
+                cache: cache.trim().into(),
+                line: line_num,
+            });
+        }
+
         let colon = rest.find(':')?;
         let field = rest[..colon].trim().to_string();
         if field.is_empty() {

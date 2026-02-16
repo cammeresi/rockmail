@@ -19,6 +19,7 @@ use regex::RegexBuilder;
 use crate::config::{
     self, Action, Condition, Flags, HeaderOp, Item, Recipe, Weight,
 };
+use crate::dedup;
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
 use crate::field::{self, Field};
 use crate::locking::FileLock;
@@ -1193,6 +1194,39 @@ impl Engine {
         self.set_var(name, &result);
     }
 
+    /// Handle `@D maxlen cache` — check Message-ID against cache.
+    fn handle_dupecheck(
+        &mut self, maxlen: &str, cache: &str, line: usize, msg: &Message,
+    ) {
+        let maxlen = self.expand(maxlen, Some(msg));
+        let cache = self.expand(cache, Some(msg));
+
+        if self.dryrun {
+            self.drylog(line, &format!("dedup: @D {maxlen} {cache}"));
+            return;
+        }
+
+        let Ok(maxlen) = maxlen.parse::<usize>() else {
+            eprintln!("@D: bad maxlen: {maxlen}");
+            self.set_var("DUPLICATE", "");
+            return;
+        };
+
+        let key = msg
+            .get_header("Message-ID")
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+
+        match dedup::check_cache(&key, &cache, maxlen) {
+            Ok(true) => self.set_var("DUPLICATE", "yes"),
+            Ok(false) => self.set_var("DUPLICATE", ""),
+            Err(e) => {
+                eprintln!("@D: cache error: {e}");
+                self.set_var("DUPLICATE", "");
+            }
+        }
+    }
+
     /// Apply `@X Header: value` manipulation on the in-flight message.
     fn apply_header_op(&mut self, op: &HeaderOp, msg: &mut Message) {
         let (field, value) = match op {
@@ -1333,6 +1367,13 @@ impl Engine {
                     )? {
                         return Ok(o);
                     }
+                }
+                Item::DupeCheck {
+                    maxlen,
+                    cache,
+                    line,
+                } => {
+                    self.handle_dupecheck(maxlen, cache, *line, msg);
                 }
             }
         }

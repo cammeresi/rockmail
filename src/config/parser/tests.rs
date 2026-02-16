@@ -811,6 +811,19 @@ fn header_op_add_if_not() {
 }
 
 #[test]
+fn dupecheck() {
+    let items = parse_rc("@D 8192 $HOME/.msgid-cache").unwrap();
+    assert_eq!(
+        items[0],
+        Item::DupeCheck {
+            maxlen: "8192".into(),
+            cache: "$HOME/.msgid-cache".into(),
+            line: 1,
+        },
+    );
+}
+
+#[test]
 fn header_op_in_block() {
     let items = parse_rc(":0\n{\n@I Subject: test\n}").unwrap();
     assert_eq!(

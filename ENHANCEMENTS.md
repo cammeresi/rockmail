@@ -66,6 +66,35 @@ The value undergoes `$VAR` expansion but never touches a shell.
 @i Subject: [list] $SUBJECT
 ```
 
+## Native Duplicate Detection (`@D`)
+
+Check the Message-ID against a cache file and set `DUPLICATE=yes` if the
+message has been seen before.  This replaces the common procmail idiom of
+piping through `formail -D` without forking a subprocess.
+
+### Syntax
+
+```
+@D <maxlen> <cachefile>
+```
+
+Both arguments undergo `$VAR` expansion.  `maxlen` is the maximum cache
+size in bytes; `cachefile` is the path to the circular cache.
+
+### Example
+
+```
+# Check for duplicates (sets DUPLICATE variable)
+@D 8192 $HOME/.msgid-cache
+
+# Discard duplicates
+:0:
+* DUPLICATE ?? yes
+/dev/null
+```
+
+There is no sender-based (`-r`) equivalent — only Message-ID detection.
+
 ## Non-ASCII Header Decoding During Matching
 
 Rockmail decodes RFC 2047 encoded words (`=?charset?B?...?=` and

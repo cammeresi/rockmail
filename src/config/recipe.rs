@@ -176,4 +176,9 @@ pub enum Item {
         path: String,
         line: usize,
     },
+    DupeCheck {
+        maxlen: String,
+        cache: String,
+        line: usize,
+    },
 }
