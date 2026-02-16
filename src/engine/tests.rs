@@ -788,19 +788,6 @@ fn header_op_add_if_not_present() {
 }
 
 #[test]
-fn header_op_delete() {
-    let mut t = Test::with_msg("Subject: test\nX-Spam: yes\n\nbody");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::Delete {
-            field: "X-Spam".into(),
-        },
-        line: 0,
-    }];
-    t.process(&items);
-    assert!(t.msg.get_header("X-Spam").is_none());
-}
-
-#[test]
 fn header_op_rename_insert() {
     let mut t = Test::with_msg("Subject: old\n\nbody");
     let items = vec![Item::HeaderOp {

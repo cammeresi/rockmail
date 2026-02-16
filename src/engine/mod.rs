@@ -1200,53 +1200,41 @@ impl Engine {
             | HeaderOp::RenameInsert { field, value }
             | HeaderOp::AddIfNot { field, value }
             | HeaderOp::AddAlways { field, value } => {
-                (field.as_str(), Some(self.expand(value, None)))
+                (field.as_str(), self.expand(value, None))
             }
-            HeaderOp::Delete { field } => (field.as_str(), None),
         };
         let pat = field.as_bytes();
         let mut fields = field::parse_bytes(msg.header());
         match op {
             HeaderOp::DeleteInsert { .. } => {
                 fields.remove_all(pat);
-                if let Some(v) = value
-                    && !v.is_empty()
-                {
+                if !value.is_empty() {
                     fields.push(Field::from_parts(
                         field.as_bytes(),
-                        v.as_bytes(),
+                        value.as_bytes(),
                     ));
                 }
             }
             HeaderOp::RenameInsert { .. } => {
                 fields.prepend_old(pat);
-                if let Some(v) = value {
-                    fields.push(Field::from_parts(
-                        field.as_bytes(),
-                        v.as_bytes(),
-                    ));
-                }
+                fields.push(Field::from_parts(
+                    field.as_bytes(),
+                    value.as_bytes(),
+                ));
             }
             HeaderOp::AddIfNot { .. } => {
-                if fields.find(pat).is_none()
-                    && let Some(v) = value
-                {
+                if fields.find(pat).is_none() {
                     fields.push(Field::from_parts(
                         field.as_bytes(),
-                        v.as_bytes(),
+                        value.as_bytes(),
                     ));
                 }
             }
             HeaderOp::AddAlways { .. } => {
-                if let Some(v) = value {
-                    fields.push(Field::from_parts(
-                        field.as_bytes(),
-                        v.as_bytes(),
-                    ));
-                }
-            }
-            HeaderOp::Delete { .. } => {
-                fields.remove_all(pat);
+                fields.push(Field::from_parts(
+                    field.as_bytes(),
+                    value.as_bytes(),
+                ));
             }
         }
         let mut header = Vec::new();
@@ -1407,9 +1395,6 @@ impl Engine {
             HeaderOp::AddAlways { field, value } => {
                 let val = self.expand(value, None);
                 format!("header: @A {}: {}", field, val)
-            }
-            HeaderOp::Delete { field } => {
-                format!("header: @D {}:", field)
             }
         };
         self.drylog(line, &msg);

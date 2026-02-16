@@ -141,8 +141,6 @@ pub enum HeaderOp {
     AddIfNot { field: String, value: String },
     /// `@A` — always add (append).
     AddAlways { field: String, value: String },
-    /// `@D` — delete all matching.
-    Delete { field: String },
 }
 
 /// An rcfile item: variable assignment, recipe, or include directive.

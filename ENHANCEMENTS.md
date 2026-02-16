@@ -56,7 +56,6 @@ The value undergoes `$VAR` expansion but never touches a shell.
 | `@i Header: val` | `formail -i "Header: val"` | Rename existing to `Old-Header:`, insert new |
 | `@a Header: val` | `formail -a "Header: val"` | Add only if header not present |
 | `@A Header: val` | `formail -A "Header: val"` | Always add (append) |
-| `@D Header:` | `formail -I "Header:"` | Delete all matching |
 
 ### Examples
 
@@ -64,7 +63,6 @@ The value undergoes `$VAR` expansion but never touches a shell.
 @I Subject: $SUBJECT
 @a Lines: $LINES
 @A X-Processed: yes
-@D X-Mailer:
 @i Subject: [list] $SUBJECT
 ```
 

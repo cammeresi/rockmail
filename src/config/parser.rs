@@ -263,7 +263,6 @@ impl<'a> Parser<'a> {
             'i' => HeaderOp::RenameInsert { field, value },
             'a' => HeaderOp::AddIfNot { field, value },
             'A' => HeaderOp::AddAlways { field, value },
-            'D' => HeaderOp::Delete { field },
             _ => return None,
         };
         Some(Item::HeaderOp { op, line: line_num })

@@ -811,20 +811,6 @@ fn header_op_add_if_not() {
 }
 
 #[test]
-fn header_op_delete() {
-    let items = parse_rc("@D X-Mailer:").unwrap();
-    assert_eq!(
-        items[0],
-        Item::HeaderOp {
-            op: HeaderOp::Delete {
-                field: "X-Mailer".into(),
-            },
-            line: 1,
-        },
-    );
-}
-
-#[test]
 fn header_op_in_block() {
     let items = parse_rc(":0\n{\n@I Subject: test\n}").unwrap();
     assert_eq!(
