@@ -96,20 +96,32 @@ fn parse_subst(
     s: &str, negate: bool, weight: Option<Weight>,
 ) -> Option<Condition> {
     let rest = s.strip_prefix('$')?;
-    let inner = parse_inner(rest.trim_start(), false, weight)?;
+    let inner = parse_inner_subst(rest.trim_start(), weight)?;
     Some(Condition::Subst {
         inner: Box::new(inner),
         negate,
     })
 }
 
-fn parse_inner(
+/// Parse the body of a `$`-substituted condition.  After the outer
+/// `$` flag is stripped, a `$` followed by an identifier like
+/// `$WHICH` is a variable reference for expansion at eval time, not
+/// another substitution flag.  A `$` followed by a non-identifier
+/// (e.g. `$$ regex`) is harmless and consumed as a nested Subst.
+fn parse_inner_subst(s: &str, weight: Option<Weight>) -> Option<Condition> {
+    if let Some(rest) = s.strip_prefix('$') {
+        let is_var =
+            rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_');
+        if !is_var {
+            return parse_subst(s, false, weight);
+        }
+    }
+    parse_inner_common(s, false, weight)
+}
+
+fn parse_inner_common(
     s: &str, negate: bool, weight: Option<Weight>,
 ) -> Option<Condition> {
-    // These prefixes commit: if present but malformed, return None
-    if s.starts_with('$') {
-        return parse_subst(s, negate, weight);
-    }
     if s.starts_with('?') {
         return parse_shell(s, negate, weight);
     }
@@ -123,6 +135,15 @@ fn parse_inner(
         return parse_variable(s, weight);
     }
     Some(parse_regex(s, negate, weight))
+}
+
+fn parse_inner(
+    s: &str, negate: bool, weight: Option<Weight>,
+) -> Option<Condition> {
+    if s.starts_with('$') {
+        return parse_subst(s, negate, weight);
+    }
+    parse_inner_common(s, negate, weight)
 }
 
 /// A condition line in a recipe (starts with *)
