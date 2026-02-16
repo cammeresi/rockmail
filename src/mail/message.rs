@@ -6,16 +6,18 @@ mod tests;
 
 /// Normalize CRLF to LF, borrowing when no CRs are present.
 fn normalize_crlf(data: &[u8]) -> Cow<'_, [u8]> {
-    if !data.contains(&b'\r') {
-        return Cow::Borrowed(data);
+    match strip_cr(data) {
+        Some(v) => Cow::Owned(v),
+        None => Cow::Borrowed(data),
     }
-    Cow::Owned(strip_cr(data))
 }
 
-/// Replace CRLF pairs with LF. Caller must ensure `data` contains `\r`.
-fn strip_cr(data: &[u8]) -> Vec<u8> {
+/// Replace CRLF pairs with LF. Returns `None` if no `\r\n` is found.
+fn strip_cr(data: &[u8]) -> Option<Vec<u8>> {
+    let pos = data.iter().position(|&b| b == b'\r')?;
     let mut out = Vec::with_capacity(data.len());
-    let mut i = 0;
+    out.extend_from_slice(&data[..pos]);
+    let mut i = pos;
     while i < data.len() {
         if data[i] == b'\r' && i + 1 < data.len() && data[i + 1] == b'\n' {
             out.push(b'\n');
@@ -25,7 +27,7 @@ fn strip_cr(data: &[u8]) -> Vec<u8> {
             i += 1;
         }
     }
-    out
+    Some(out)
 }
 
 /// Skip leading blank lines.
@@ -55,19 +57,16 @@ fn find_boundary(data: &[u8]) -> (usize, usize) {
 }
 
 fn unfold_header(data: &[u8]) -> Cow<'_, str> {
-    // Fast path: no newlines means no unfolding needed
-    if !data.contains(&b'\n') {
+    let Some(pos) = data.iter().position(|&b| b == b'\n') else {
         return String::from_utf8_lossy(data);
-    }
-
+    };
     let mut result = Vec::with_capacity(data.len());
-    let mut i = 0;
+    result.extend_from_slice(&data[..pos]);
+    let mut i = pos;
     while i < data.len() {
         if data[i] == b'\n' && i + 1 < data.len() {
-            // Replace newline + whitespace with single space
             result.push(b' ');
             i += 1;
-            // Skip leading whitespace on continuation line
             while i < data.len() && (data[i] == b' ' || data[i] == b'\t') {
                 i += 1;
             }
@@ -76,7 +75,6 @@ fn unfold_header(data: &[u8]) -> Cow<'_, str> {
             i += 1;
         }
     }
-
     Cow::Owned(String::from_utf8_lossy(&result).into_owned())
 }
 
@@ -183,12 +181,11 @@ impl Message {
     }
 
     /// Parse a message from owned bytes, avoiding a copy when possible.
-    pub fn parse_owned(input: Vec<u8>) -> Self {
-        if input.contains(&b'\r') {
-            Self::from_cow(Cow::Owned(strip_cr(&input)))
-        } else {
-            Self::from_cow(Cow::Owned(input))
+    pub fn parse_owned(mut input: Vec<u8>) -> Self {
+        if let Some(v) = strip_cr(&input) {
+            input = v;
         }
+        Self::from_cow(Cow::Owned(input))
     }
 
     fn from_cow(norm: Cow<'_, [u8]>) -> Self {
@@ -313,14 +310,10 @@ impl Message {
         buf.extend_from_slice(&self.data[old..self.header_end]);
         buf.extend_from_slice(&self.data[self.header_end..]);
         let delta = from.len() as isize - old as isize;
-        self.header_end = self
-            .header_end
-            .saturating_add_signed(delta)
-            .min(buf.len());
-        self.body_start = self
-            .body_start
-            .saturating_add_signed(delta)
-            .min(buf.len());
+        self.header_end =
+            self.header_end.saturating_add_signed(delta).min(buf.len());
+        self.body_start =
+            self.body_start.saturating_add_signed(delta).min(buf.len());
         self.data = buf;
     }
 
