@@ -80,3 +80,14 @@ See the `issues/` directory for the full list.
 When writing or reviewing Rust code, load skills related to writing
 Rust code.  Also read skills related to organizing Rust code for context.
 
+## Test style
+
+Prefer `assert_eq!` over `match`/`panic!` in tests.  Construct expected
+values by hand and compare with `assert_eq!`.  Add `PartialEq` (and
+`Debug`) derives to types as needed to support this.
+
+When tests need to destructure a specific enum variant, write a helper
+that extracts it (panicking with a debug message on mismatch) and add a
+`#[should_panic]` test for the helper.  See `recipe()` and `nested()` in
+`src/config/parser/tests.rs` for examples.
+

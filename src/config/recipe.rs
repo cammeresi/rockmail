@@ -4,7 +4,7 @@ use super::{Action, Condition};
 mod tests;
 
 /// All 15 procmail recipe flags.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Flags {
     /// `H` — grep header (default true).
     pub head: bool,
@@ -88,7 +88,7 @@ impl Flags {
 }
 
 /// A single procmail recipe.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Recipe {
     /// Recipe flags from the `:0` line.
     pub flags: Flags,
@@ -130,7 +130,7 @@ impl Recipe {
 }
 
 /// Header manipulation operation (rockmail extension).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]
 pub enum HeaderOp {
     /// `@I` — delete all matching, then insert.
@@ -146,7 +146,7 @@ pub enum HeaderOp {
 }
 
 /// An rcfile item: variable assignment, recipe, or include directive.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]
 pub enum Item {
     Assign {

@@ -2,134 +2,118 @@ use super::*;
 
 #[test]
 fn regex() {
-    let c = Condition::parse("^From:.*spam").unwrap();
-    let Condition::Regex {
-        pattern,
-        negate,
-        weight,
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert_eq!(pattern, "^From:.*spam");
-    assert!(!negate);
-    assert!(weight.is_none());
+    assert_eq!(
+        Condition::parse("^From:.*spam").unwrap(),
+        Condition::Regex {
+            pattern: "^From:.*spam".into(),
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn negated() {
-    let c = Condition::parse("! ^From:.*friend").unwrap();
-    let Condition::Regex {
-        pattern, negate, ..
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert_eq!(pattern, "^From:.*friend");
-    assert!(negate);
+    assert_eq!(
+        Condition::parse("! ^From:.*friend").unwrap(),
+        Condition::Regex {
+            pattern: "^From:.*friend".into(),
+            negate: true,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn size() {
-    let c = Condition::parse("< 10000").unwrap();
-    let Condition::Size {
-        op,
-        bytes,
-        negate,
-        weight,
-    } = c
-    else {
-        panic!("expected size");
-    };
-    assert_eq!(op, Ordering::Less);
-    assert_eq!(bytes, 10000);
-    assert!(!negate);
-    assert!(weight.is_none());
+    assert_eq!(
+        Condition::parse("< 10000").unwrap(),
+        Condition::Size {
+            op: Ordering::Less,
+            bytes: 10000,
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn shell() {
-    let c = Condition::parse("? test -f /tmp/flag").unwrap();
-    let Condition::Shell {
-        cmd,
-        negate,
-        weight,
-    } = c
-    else {
-        panic!("expected shell");
-    };
-    assert_eq!(cmd, "test -f /tmp/flag");
-    assert!(!negate);
-    assert!(weight.is_none());
+    assert_eq!(
+        Condition::parse("? test -f /tmp/flag").unwrap(),
+        Condition::Shell {
+            cmd: "test -f /tmp/flag".into(),
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn variable() {
-    let c = Condition::parse("SENDER ?? ^admin").unwrap();
-    let Condition::Variable {
-        name,
-        pattern,
-        weight,
-    } = c
-    else {
-        panic!("expected variable");
-    };
-    assert_eq!(name, "SENDER");
-    assert_eq!(pattern, "^admin");
-    assert!(weight.is_none());
+    assert_eq!(
+        Condition::parse("SENDER ?? ^admin").unwrap(),
+        Condition::Variable {
+            name: "SENDER".into(),
+            pattern: "^admin".into(),
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn subst() {
-    let c = Condition::parse("$ ^From:.*${SENDER}").unwrap();
-    let Condition::Subst { inner, negate } = c else {
-        panic!("expected subst");
-    };
-    assert!(!negate);
-    let Condition::Regex { pattern, .. } = *inner else {
-        panic!("expected inner regex");
-    };
-    assert_eq!(pattern, "^From:.*${SENDER}");
+    assert_eq!(
+        Condition::parse("$ ^From:.*${SENDER}").unwrap(),
+        Condition::Subst {
+            inner: Box::new(Condition::Regex {
+                pattern: "^From:.*${SENDER}".into(),
+                negate: false,
+                weight: None,
+            }),
+            negate: false,
+        },
+    );
 }
 
 #[test]
 fn negated_subst() {
-    let c = Condition::parse("! $ ^From:.*${SENDER}").unwrap();
-    let Condition::Subst { inner, negate } = c else {
-        panic!("expected subst");
-    };
-    assert!(negate);
-    let Condition::Regex {
-        pattern, negate, ..
-    } = *inner
-    else {
-        panic!("expected inner regex");
-    };
-    assert_eq!(pattern, "^From:.*${SENDER}");
-    assert!(!negate);
+    assert_eq!(
+        Condition::parse("! $ ^From:.*${SENDER}").unwrap(),
+        Condition::Subst {
+            inner: Box::new(Condition::Regex {
+                pattern: "^From:.*${SENDER}".into(),
+                negate: false,
+                weight: None,
+            }),
+            negate: true,
+        },
+    );
 }
 
 #[test]
 fn escape() {
-    let c = Condition::parse("\\!literal").unwrap();
-    let Condition::Regex {
-        pattern, negate, ..
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert_eq!(pattern, "!literal");
-    assert!(!negate);
+    assert_eq!(
+        Condition::parse("\\!literal").unwrap(),
+        Condition::Regex {
+            pattern: "!literal".into(),
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn size_greater() {
-    let c = Condition::parse("> 50000").unwrap();
-    let Condition::Size { op, bytes, .. } = c else {
-        panic!("expected size");
-    };
-    assert_eq!(op, Ordering::Greater);
-    assert_eq!(bytes, 50000);
+    assert_eq!(
+        Condition::parse("> 50000").unwrap(),
+        Condition::Size {
+            op: Ordering::Greater,
+            bytes: 50000,
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
@@ -145,133 +129,110 @@ fn invalid_size_returns_none() {
 
 #[test]
 fn weighted_regex() {
-    let c = Condition::parse("2000^0 ^From:.*john").unwrap();
-    let Condition::Regex {
-        pattern,
-        negate,
-        weight,
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert_eq!(pattern, "^From:.*john");
-    assert!(!negate);
-    let w = weight.unwrap();
-    assert!((w.w - 2000.0).abs() < 0.001);
-    assert!((w.x - 0.0).abs() < 0.001);
+    assert_eq!(
+        Condition::parse("2000^0 ^From:.*john").unwrap(),
+        Condition::Regex {
+            pattern: "^From:.*john".into(),
+            negate: false,
+            weight: Some(Weight { w: 2000.0, x: 0.0 }),
+        },
+    );
 }
 
 #[test]
 fn weighted_negative() {
-    let c = Condition::parse("-100^1 ^>").unwrap();
-    let Condition::Regex {
-        pattern, weight, ..
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert_eq!(pattern, "^>");
-    let w = weight.unwrap();
-    assert!((w.w - -100.0).abs() < 0.001);
-    assert!((w.x - 1.0).abs() < 0.001);
+    assert_eq!(
+        Condition::parse("-100^1 ^>").unwrap(),
+        Condition::Regex {
+            pattern: "^>".into(),
+            negate: false,
+            weight: Some(Weight { w: -100.0, x: 1.0 }),
+        },
+    );
 }
 
 #[test]
 fn weighted_decimal() {
-    let c = Condition::parse("350^.9 :-\\)").unwrap();
-    let Condition::Regex {
-        pattern, weight, ..
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert_eq!(pattern, ":-\\)");
-    let w = weight.unwrap();
-    assert!((w.w - 350.0).abs() < 0.001);
-    assert!((w.x - 0.9).abs() < 0.001);
+    assert_eq!(
+        Condition::parse("350^.9 :-\\)").unwrap(),
+        Condition::Regex {
+            pattern: ":-\\)".into(),
+            negate: false,
+            weight: Some(Weight { w: 350.0, x: 0.9 }),
+        },
+    );
 }
 
 #[test]
 fn weighted_size() {
-    let c = Condition::parse("-100^3 > 2000").unwrap();
-    let Condition::Size {
-        op,
-        bytes,
-        negate,
-        weight,
-    } = c
-    else {
-        panic!("expected size");
-    };
-    assert_eq!(op, Ordering::Greater);
-    assert_eq!(bytes, 2000);
-    assert!(!negate);
-    let w = weight.unwrap();
-    assert!((w.w - -100.0).abs() < 0.001);
-    assert!((w.x - 3.0).abs() < 0.001);
+    assert_eq!(
+        Condition::parse("-100^3 > 2000").unwrap(),
+        Condition::Size {
+            op: Ordering::Greater,
+            bytes: 2000,
+            negate: false,
+            weight: Some(Weight { w: -100.0, x: 3.0 }),
+        },
+    );
 }
 
 #[test]
 fn weighted_shell() {
-    let c = Condition::parse("100^0 ? test -f /flag").unwrap();
-    let Condition::Shell {
-        cmd,
-        negate,
-        weight,
-    } = c
-    else {
-        panic!("expected shell");
-    };
-    assert_eq!(cmd, "test -f /flag");
-    assert!(!negate);
-    let w = weight.unwrap();
-    assert!((w.w - 100.0).abs() < 0.001);
+    assert_eq!(
+        Condition::parse("100^0 ? test -f /flag").unwrap(),
+        Condition::Shell {
+            cmd: "test -f /flag".into(),
+            negate: false,
+            weight: Some(Weight { w: 100.0, x: 0.0 }),
+        },
+    );
 }
 
 #[test]
 fn malformed_weight_double_dot() {
     // 1..2^3 should be treated as regex, not weight
-    let c = Condition::parse("1..2^3 pattern").unwrap();
-    let Condition::Regex {
-        pattern, weight, ..
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert!(weight.is_none());
-    assert_eq!(pattern, "1..2^3 pattern");
+    assert_eq!(
+        Condition::parse("1..2^3 pattern").unwrap(),
+        Condition::Regex {
+            pattern: "1..2^3 pattern".into(),
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn malformed_weight_multiple_dots() {
-    let c = Condition::parse("1.2.3^4.5.6 pattern").unwrap();
-    let Condition::Regex {
-        pattern, weight, ..
-    } = c
-    else {
-        panic!("expected regex");
-    };
-    assert!(weight.is_none());
-    assert_eq!(pattern, "1.2.3^4.5.6 pattern");
+    assert_eq!(
+        Condition::parse("1.2.3^4.5.6 pattern").unwrap(),
+        Condition::Regex {
+            pattern: "1.2.3^4.5.6 pattern".into(),
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn weight_x_equals_one() {
-    let c = Condition::parse("5^1 pattern").unwrap();
-    let Condition::Regex { weight, .. } = c else {
-        panic!("expected regex");
-    };
-    let w = weight.unwrap();
-    assert!((w.x - 1.0).abs() < 0.001);
+    assert_eq!(
+        Condition::parse("5^1 pattern").unwrap(),
+        Condition::Regex {
+            pattern: "pattern".into(),
+            negate: false,
+            weight: Some(Weight { w: 5.0, x: 1.0 }),
+        },
+    );
 }
 
 #[test]
 fn weight_negative_exponent() {
-    let c = Condition::parse("10^-2 pattern").unwrap();
-    let Condition::Regex { weight, .. } = c else {
-        panic!("expected regex");
-    };
-    let w = weight.unwrap();
-    assert!((w.w - 10.0).abs() < 0.001);
-    assert!((w.x - -2.0).abs() < 0.001);
+    assert_eq!(
+        Condition::parse("10^-2 pattern").unwrap(),
+        Condition::Regex {
+            pattern: "pattern".into(),
+            negate: false,
+            weight: Some(Weight { w: 10.0, x: -2.0 }),
+        },
+    );
 }

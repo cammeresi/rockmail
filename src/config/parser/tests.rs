@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use super::*;
 use crate::config::HeaderOp;
 
@@ -5,17 +7,40 @@ fn parse_rc(input: &str) -> Result<Vec<Item>, ParseError> {
     parse(input, "test")
 }
 
+fn recipe(item: &Item) -> &Recipe {
+    let Item::Recipe { recipe, .. } = item else {
+        panic!("expected Recipe, got {item:?}");
+    };
+    recipe
+}
+
+fn nested(item: &Item) -> &[Item] {
+    let Action::Nested(inner) = &recipe(item).action else {
+        panic!("expected Nested, got {:?}", recipe(item).action);
+    };
+    inner
+}
+
+fn assign(name: &str, val: &str) -> Item {
+    Item::Assign {
+        name: name.into(),
+        value: val.into(),
+        line: 1,
+    }
+}
+
 #[test]
 fn assignment() {
     let items = parse_rc("MAILDIR=/var/mail\nVERBOSE=yes").unwrap();
     assert_eq!(items.len(), 2);
-    match &items[0] {
-        Item::Assign { name, value, .. } => {
-            assert_eq!(name, "MAILDIR");
-            assert_eq!(value, "/var/mail");
-        }
-        _ => panic!("expected assign"),
-    }
+    assert_eq!(
+        items[0],
+        Item::Assign {
+            name: "MAILDIR".into(),
+            value: "/var/mail".into(),
+            line: 1,
+        },
+    );
 }
 
 #[test]
@@ -27,34 +52,21 @@ fn simple_recipe() {
 "#;
     let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 1);
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => {
-            assert!(r.flags.head);
-            assert_eq!(r.conds.len(), 1);
-            match &r.action {
-                Action::Folder(p) => {
-                    assert_eq!(p[0].to_str().unwrap(), "/dev/null")
-                }
-                _ => panic!("expected folder"),
-            }
-        }
-        _ => panic!("expected recipe"),
-    }
+    let r = recipe(&items[0]);
+    assert!(r.flags.head);
+    assert_eq!(r.conds.len(), 1);
+    assert_eq!(r.action, Action::Folder(vec![PathBuf::from("/dev/null")]));
 }
 
 #[test]
 fn recipe_with_flags() {
     let rc = ":0 Bc:\n* ^Subject:.*test\nspam/";
     let items = parse_rc(rc).unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => {
-            assert!(!r.flags.head);
-            assert!(r.flags.body);
-            assert!(r.flags.copy);
-            assert!(r.lockfile.is_some());
-        }
-        _ => panic!("expected recipe"),
-    }
+    let r = recipe(&items[0]);
+    assert!(!r.flags.head);
+    assert!(r.flags.body);
+    assert!(r.flags.copy);
+    assert!(r.lockfile.is_some());
 }
 
 #[test]
@@ -72,46 +84,30 @@ fn nested_block() {
 "#;
     let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 1);
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => match &r.action {
-            Action::Nested(inner) => {
-                assert_eq!(inner.len(), 2);
-            }
-            _ => panic!("expected nested"),
-        },
-        _ => panic!("expected recipe"),
-    }
+    assert_eq!(nested(&items[0]).len(), 2);
 }
 
 #[test]
 fn forward() {
     let rc = ":0\n* ^To:.*admin\n! admin@example.com";
     let items = parse_rc(rc).unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => match &r.action {
-            Action::Forward(addrs) => {
-                assert_eq!(addrs[0], "admin@example.com");
-            }
-            _ => panic!("expected forward"),
-        },
-        _ => panic!("expected recipe"),
-    }
+    assert_eq!(
+        recipe(&items[0]).action,
+        Action::Forward(vec!["admin@example.com".into()]),
+    );
 }
 
 #[test]
 fn pipe_capture() {
     let rc = ":0\nRESULT=| /usr/bin/filter";
     let items = parse_rc(rc).unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => match &r.action {
-            Action::Pipe { cmd, capture } => {
-                assert_eq!(cmd, "/usr/bin/filter");
-                assert_eq!(capture.as_deref(), Some("RESULT"));
-            }
-            _ => panic!("expected pipe"),
+    assert_eq!(
+        recipe(&items[0]).action,
+        Action::Pipe {
+            cmd: "/usr/bin/filter".into(),
+            capture: Some("RESULT".into()),
         },
-        _ => panic!("expected recipe"),
-    }
+    );
 }
 
 #[test]
@@ -126,35 +122,33 @@ MAILDIR=/var/mail  # inline comment
 "#;
     let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 2);
-    assert!(
-        matches!(&items[0], Item::Assign { value, .. } if value == "/var/mail")
+    assert_eq!(
+        items[0],
+        Item::Assign {
+            name: "MAILDIR".into(),
+            value: "/var/mail".into(),
+            line: 3,
+        },
     );
 }
 
 #[test]
 fn inline_comment_edge_cases() {
-    // Mid-word # is literal
-    let items = parse_rc("PATH=/tmp/#nasty").unwrap();
-    assert!(
-        matches!(&items[0], Item::Assign { value, .. } if value == "/tmp/#nasty")
+    assert_eq!(
+        parse_rc("PATH=/tmp/#nasty").unwrap()[0],
+        assign("PATH", "/tmp/#nasty")
     );
-
-    // No space before # is literal
-    let items = parse_rc("VAR=hello#world").unwrap();
-    assert!(
-        matches!(&items[0], Item::Assign { value, .. } if value == "hello#world")
+    assert_eq!(
+        parse_rc("VAR=hello#world").unwrap()[0],
+        assign("VAR", "hello#world")
     );
-
-    // First whitespace-# wins
-    let items = parse_rc("VAR=hello # world # more").unwrap();
-    assert!(
-        matches!(&items[0], Item::Assign { value, .. } if value == "hello")
+    assert_eq!(
+        parse_rc("VAR=hello # world # more").unwrap()[0],
+        assign("VAR", "hello")
     );
-
-    // Tab before # also starts a comment
-    let items = parse_rc("VAR=value\t# tab comment").unwrap();
-    assert!(
-        matches!(&items[0], Item::Assign { value, .. } if value == "value")
+    assert_eq!(
+        parse_rc("VAR=value\t# tab comment").unwrap()[0],
+        assign("VAR", "value")
     );
 }
 
@@ -193,79 +187,50 @@ fn unclosed_block() {
 fn line_continuation() {
     let rc = ":0\n* ^From:.*\\\ncontinued\nspam/";
     let items = parse_rc(rc).unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => {
-            assert_eq!(r.conds.len(), 1);
-            match &r.conds[0] {
-                Condition::Regex { pattern, .. } => {
-                    assert_eq!(pattern, "^From:.*continued");
-                }
-                _ => panic!("expected regex"),
-            }
-        }
-        _ => panic!("expected recipe"),
-    }
+    assert_eq!(
+        recipe(&items[0]).conds[0],
+        Condition::Regex {
+            pattern: "^From:.*continued".into(),
+            negate: false,
+            weight: None,
+        },
+    );
 }
 
 #[test]
 fn explicit_lockfile() {
     let rc = ":0 HB:mylock\n* ^Subject:.*\nspam/";
     let items = parse_rc(rc).unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => {
-            assert!(r.flags.head);
-            assert!(r.flags.body);
-            assert_eq!(r.lockfile.as_deref(), Some("mylock"));
-        }
-        _ => panic!("expected recipe"),
-    }
+    let r = recipe(&items[0]);
+    assert!(r.flags.head);
+    assert!(r.flags.body);
+    assert_eq!(r.lockfile.as_deref(), Some("mylock"));
 }
 
 #[test]
 fn variable_unset() {
-    let items = parse_rc("VERBOSE").unwrap();
-    match &items[0] {
-        Item::Assign { name, value, .. } => {
-            assert_eq!(name, "VERBOSE");
-            assert!(value.is_empty());
-        }
-        _ => panic!("expected assign"),
-    }
+    assert_eq!(parse_rc("VERBOSE").unwrap()[0], assign("VERBOSE", ""));
 }
 
 #[test]
 fn inline_empty_block() {
     let rc = ":0\n{ }";
     let items = parse_rc(rc).unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => match &r.action {
-            Action::Nested(inner) => assert!(inner.is_empty()),
-            _ => panic!("expected nested"),
-        },
-        _ => panic!("expected recipe"),
-    }
+    assert_eq!(recipe(&items[0]).action, Action::Nested(vec![]));
 }
 
 #[test]
 fn inline_block_with_assign() {
     let rc = ":0\n{ VAR=value }";
     let items = parse_rc(rc).unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => match &r.action {
-            Action::Nested(inner) => {
-                assert_eq!(inner.len(), 1);
-                match &inner[0] {
-                    Item::Assign { name, value, .. } => {
-                        assert_eq!(name, "VAR");
-                        assert_eq!(value, "value");
-                    }
-                    _ => panic!("expected assign"),
-                }
-            }
-            _ => panic!("expected nested"),
-        },
-        _ => panic!("expected recipe"),
-    }
+    assert_eq!(
+        recipe(&items[0]).action,
+        Action::Nested(vec![Item::Assign {
+            name: "VAR".into(),
+            value: "value".into(),
+            line: 1,
+        }]),
+    );
 }
 
 #[test]
@@ -360,65 +325,79 @@ fn continuation_backslash_not_at_end() {
 #[test]
 fn assign_simple() {
     let p = Parser::new("");
-    let item = p.parse_assignment("VAR=value", 1).unwrap();
-    assert!(matches!(item, Item::Assign { ref name, ref value, .. }
-        if name == "VAR" && value == "value"));
+    assert_eq!(
+        p.parse_assignment("VAR=value", 1).unwrap(),
+        assign("VAR", "value")
+    );
 }
 
 #[test]
 fn assign_empty_value() {
     let p = Parser::new("");
-    let item = p.parse_assignment("VAR=", 1).unwrap();
-    assert!(matches!(item, Item::Assign { ref name, ref value, .. }
-        if name == "VAR" && value.is_empty()));
+    assert_eq!(p.parse_assignment("VAR=", 1).unwrap(), assign("VAR", ""));
 }
 
 #[test]
 fn assign_with_spaces_around_name() {
     let p = Parser::new("");
-    let item = p.parse_assignment("  VAR  = value ", 1).unwrap();
-    assert!(matches!(item, Item::Assign { ref name, ref value, .. }
-        if name == "VAR" && value == "value"));
+    assert_eq!(
+        p.parse_assignment("  VAR  = value ", 1).unwrap(),
+        assign("VAR", "value")
+    );
 }
 
 #[test]
 fn assign_underscore_name() {
     let p = Parser::new("");
-    let item = p.parse_assignment("_FOO_2=bar", 1).unwrap();
-    assert!(matches!(item, Item::Assign { ref name, .. } if name == "_FOO_2"));
+    assert_eq!(
+        p.parse_assignment("_FOO_2=bar", 1).unwrap(),
+        assign("_FOO_2", "bar")
+    );
 }
 
 #[test]
 fn assign_unset() {
     let p = Parser::new("");
-    let item = p.parse_assignment("VERBOSE", 1).unwrap();
-    assert!(matches!(item, Item::Assign { ref name, ref value, .. }
-        if name == "VERBOSE" && value.is_empty()));
+    assert_eq!(
+        p.parse_assignment("VERBOSE", 1).unwrap(),
+        assign("VERBOSE", "")
+    );
 }
 
 #[test]
 fn assign_includerc() {
     let p = Parser::new("");
-    let item = p.parse_assignment("INCLUDERC=other.rc", 1).unwrap();
-    assert!(
-        matches!(item, Item::Include { ref path, .. } if path == "other.rc")
+    assert_eq!(
+        p.parse_assignment("INCLUDERC=other.rc", 1).unwrap(),
+        Item::Include {
+            path: "other.rc".into(),
+            line: 1,
+        },
     );
 }
 
 #[test]
 fn assign_switchrc() {
     let p = Parser::new("");
-    let item = p.parse_assignment("SWITCHRC=other.rc", 1).unwrap();
-    assert!(
-        matches!(item, Item::Switch { ref path, .. } if path == "other.rc")
+    assert_eq!(
+        p.parse_assignment("SWITCHRC=other.rc", 1).unwrap(),
+        Item::Switch {
+            path: "other.rc".into(),
+            line: 1,
+        },
     );
 }
 
 #[test]
 fn assign_switchrc_unset() {
     let p = Parser::new("");
-    let item = p.parse_assignment("SWITCHRC", 1).unwrap();
-    assert!(matches!(item, Item::Switch { ref path, .. } if path.is_empty()));
+    assert_eq!(
+        p.parse_assignment("SWITCHRC", 1).unwrap(),
+        Item::Switch {
+            path: "".into(),
+            line: 1,
+        },
+    );
 }
 
 #[test]
@@ -436,9 +415,10 @@ fn assign_garbage() {
 #[test]
 fn assign_value_with_equals() {
     let p = Parser::new("");
-    let item = p.parse_assignment("VAR=a=b=c", 1).unwrap();
-    assert!(matches!(item, Item::Assign { ref value, .. }
-        if value == "a=b=c"));
+    assert_eq!(
+        p.parse_assignment("VAR=a=b=c", 1).unwrap(),
+        assign("VAR", "a=b=c")
+    );
 }
 
 #[test]
@@ -538,7 +518,6 @@ fn header_lockfile_special_chars() {
 
 #[test]
 fn header_multiple_colons() {
-    // rfind(':') finds the last colon, so everything before it is flags
     let mut p = Parser::new("");
     let (_, lock) = p.parse_recipe_header(":0::extra", 1, 0).unwrap();
     assert_eq!(lock.as_deref(), Some("extra"));
@@ -555,9 +534,7 @@ fn block_empty() {
 fn block_one_assign() {
     let mut p = Parser::new("VAR=x\n}");
     let items = p.parse_block(1).unwrap();
-    assert_eq!(items.len(), 1);
-    assert!(matches!(&items[0], Item::Assign { name, .. }
-        if name == "VAR"));
+    assert_eq!(items, [assign("VAR", "x")]);
 }
 
 #[test]
@@ -572,7 +549,7 @@ fn block_with_recipe() {
     let mut p = Parser::new(":0\n* ^From:.*spam\n/dev/null\n}");
     let items = p.parse_block(1).unwrap();
     assert_eq!(items.len(), 1);
-    assert!(matches!(&items[0], Item::Recipe { .. }));
+    recipe(&items[0]);
 }
 
 #[test]
@@ -605,13 +582,7 @@ fn block_nested() {
     let mut p = Parser::new(":0\n{\nVAR=x\n}\n}");
     let items = p.parse_block(1).unwrap();
     assert_eq!(items.len(), 1);
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => match &r.action {
-            Action::Nested(inner) => assert_eq!(inner.len(), 1),
-            _ => panic!("expected nested"),
-        },
-        _ => panic!("expected recipe"),
-    }
+    assert_eq!(nested(&items[0]).len(), 1);
 }
 
 #[test]
@@ -635,7 +606,7 @@ fn recipe_no_conditions() {
     let mut p = Parser::new(":0\n/dev/null");
     let r = p.parse_recipe().unwrap();
     assert!(r.conds.is_empty());
-    assert!(matches!(r.action, Action::Folder(_)));
+    assert_eq!(r.action, Action::Folder(vec![PathBuf::from("/dev/null")]));
 }
 
 #[test]
@@ -657,7 +628,7 @@ fn recipe_blanks_between_conds_and_action() {
     let mut p = Parser::new(":0\n* ^From:.*x\n\n/dev/null");
     let r = p.parse_recipe().unwrap();
     assert_eq!(r.conds.len(), 1);
-    assert!(matches!(r.action, Action::Folder(_)));
+    assert_eq!(r.action, Action::Folder(vec![PathBuf::from("/dev/null")]));
 }
 
 #[test]
@@ -692,6 +663,27 @@ fn recipe_with_block_action() {
     let mut p = Parser::new(":0\n{\nVAR=x\n}");
     let r = p.parse_recipe().unwrap();
     assert!(matches!(r.action, Action::Nested(_)));
+}
+
+#[test]
+#[should_panic(expected = "expected Recipe")]
+fn recipe_helper_panics_on_non_recipe() {
+    recipe(&assign("X", "y"));
+}
+
+#[test]
+#[should_panic(expected = "expected Nested")]
+fn nested_helper_panics_on_non_nested() {
+    let item = Item::Recipe {
+        recipe: Recipe::new(
+            Flags::new(),
+            None,
+            vec![],
+            Action::Folder(vec![]),
+        ),
+        line: 0,
+    };
+    nested(&item);
 }
 
 #[test]
@@ -732,91 +724,122 @@ fn warns_on_unknown_flag() {
 #[test]
 fn subst_basic() {
     let items = parse_rc("VAR =~ s/foo/bar/").unwrap();
-    assert!(matches!(
-        &items[0],
-        Item::Subst { name, pattern, replace, global: false, case_insensitive: false, .. }
-        if name == "VAR" && pattern == "foo" && replace == "bar"
-    ));
+    assert_eq!(
+        items[0],
+        Item::Subst {
+            name: "VAR".into(),
+            pattern: "foo".into(),
+            replace: "bar".into(),
+            global: false,
+            case_insensitive: false,
+            line: 1,
+        },
+    );
 }
 
 #[test]
 fn subst_global_icase() {
     let items = parse_rc("X =~ s/a/b/gi").unwrap();
-    assert!(matches!(
-        &items[0],
+    assert_eq!(
+        items[0],
         Item::Subst {
+            name: "X".into(),
+            pattern: "a".into(),
+            replace: "b".into(),
             global: true,
             case_insensitive: true,
-            ..
-        }
-    ));
+            line: 1,
+        },
+    );
 }
 
 #[test]
 fn subst_alternate_delimiter() {
     let items = parse_rc("X =~ s|foo|bar|g").unwrap();
-    assert!(matches!(
-        &items[0],
-        Item::Subst { pattern, replace, .. }
-        if pattern == "foo" && replace == "bar"
-    ));
+    assert_eq!(
+        items[0],
+        Item::Subst {
+            name: "X".into(),
+            pattern: "foo".into(),
+            replace: "bar".into(),
+            global: true,
+            case_insensitive: false,
+            line: 1,
+        },
+    );
 }
 
 #[test]
 fn subst_empty_replace() {
     let items = parse_rc("X =~ s/foo//").unwrap();
-    assert!(matches!(
-        &items[0],
-        Item::Subst { replace, .. } if replace.is_empty()
-    ));
+    assert_eq!(
+        items[0],
+        Item::Subst {
+            name: "X".into(),
+            pattern: "foo".into(),
+            replace: "".into(),
+            global: false,
+            case_insensitive: false,
+            line: 1,
+        },
+    );
 }
 
 #[test]
 fn header_op_delete_insert() {
     let items = parse_rc("@I Subject: hello").unwrap();
-    assert!(matches!(
-        &items[0],
-        Item::HeaderOp { op: HeaderOp::DeleteInsert { field, value }, .. }
-        if field == "Subject" && value == "hello"
-    ));
+    assert_eq!(
+        items[0],
+        Item::HeaderOp {
+            op: HeaderOp::DeleteInsert {
+                field: "Subject".into(),
+                value: "hello".into(),
+            },
+            line: 1,
+        },
+    );
 }
 
 #[test]
 fn header_op_add_if_not() {
     let items = parse_rc("@a Lines: 42").unwrap();
-    assert!(matches!(
-        &items[0],
-        Item::HeaderOp { op: HeaderOp::AddIfNot { field, value }, .. }
-        if field == "Lines" && value == "42"
-    ));
+    assert_eq!(
+        items[0],
+        Item::HeaderOp {
+            op: HeaderOp::AddIfNot {
+                field: "Lines".into(),
+                value: "42".into(),
+            },
+            line: 1,
+        },
+    );
 }
 
 #[test]
 fn header_op_delete() {
     let items = parse_rc("@D X-Mailer:").unwrap();
-    assert!(matches!(
-        &items[0],
-        Item::HeaderOp { op: HeaderOp::Delete { field }, .. }
-        if field == "X-Mailer"
-    ));
+    assert_eq!(
+        items[0],
+        Item::HeaderOp {
+            op: HeaderOp::Delete {
+                field: "X-Mailer".into(),
+            },
+            line: 1,
+        },
+    );
 }
 
 #[test]
 fn header_op_in_block() {
     let items = parse_rc(":0\n{\n@I Subject: test\n}").unwrap();
-    match &items[0] {
-        Item::Recipe { recipe: r, .. } => match &r.action {
-            Action::Nested(inner) => {
-                assert!(matches!(
-                    &inner[0],
-                    Item::HeaderOp {
-                        op: HeaderOp::DeleteInsert { .. },
-                        ..
-                    }
-                ));
-            }
-            _ => panic!("expected nested"),
-        },
-        _ => panic!("expected recipe"),
-    }
+    assert_eq!(
+        recipe(&items[0]).action,
+        Action::Nested(vec![Item::HeaderOp {
+            op: HeaderOp::DeleteInsert {
+                field: "Subject".into(),
+                value: "test".into(),
+            },
+            line: 3,
+        }]),
+    );
 }

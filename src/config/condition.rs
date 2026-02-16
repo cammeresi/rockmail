@@ -126,7 +126,7 @@ fn parse_inner(
 }
 
 /// A condition line in a recipe (starts with *)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Condition {
     /// Regular expression match (possibly negated with `!`).
     Regex {

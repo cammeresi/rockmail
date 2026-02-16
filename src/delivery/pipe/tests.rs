@@ -1,8 +1,16 @@
 use std::time::Instant;
 
 use super::*;
+use crate::delivery::DeliveryError;
 use crate::delivery::tests::msg;
 use crate::variables::TIMEOUT;
+
+fn pipe_exit(r: Result<PipeResult, DeliveryError>) -> i32 {
+    let Err(DeliveryError::PipeExit(code)) = r else {
+        panic!("expected PipeExit, got {r:?}");
+    };
+    code
+}
 
 #[test]
 fn pipe_to_cat() {
@@ -52,10 +60,14 @@ fn exit_code_error_with_wait() {
         &Environment::from_process(),
     );
 
-    match r {
-        Err(DeliveryError::PipeExit(1)) => {}
-        other => panic!("expected PipeExit(1), got {:?}", other),
-    }
+    assert_eq!(pipe_exit(r), 1);
+}
+
+#[test]
+#[should_panic(expected = "expected PipeExit")]
+fn pipe_exit_helper_panics_on_ok() {
+    let m = msg("Subject: Test\n\nBody\n");
+    pipe_exit(deliver_test("true", &m, false));
 }
 
 #[test]

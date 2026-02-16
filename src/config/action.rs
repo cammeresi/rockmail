@@ -6,7 +6,7 @@ use super::{Item, is_var_name};
 mod tests;
 
 /// The action line of a recipe
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     /// Deliver to one or more folders.
     Folder(Vec<PathBuf>),
