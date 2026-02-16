@@ -101,3 +101,12 @@ fn broken_pipe_tolerance() {
     let r = deliver_test("true", &m, false);
     assert!(r.is_ok());
 }
+
+#[test]
+fn filter_large_message() {
+    // Message larger than pipe buffer; deadlocks without poll-based pump.
+    let body = "x".repeat(256 * 1024);
+    let m = msg(&format!("Subject: Test\n\n{body}\n"));
+    let r = deliver_test("cat", &m, true).unwrap();
+    assert_eq!(r.output.unwrap(), m.as_bytes());
+}

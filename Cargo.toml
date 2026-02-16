@@ -16,7 +16,7 @@ clap = { version = "4", features = ["derive"] }
 filetime = "0.2"
 linker-set = "0.5.4"
 miette = { version = "7", features = ["fancy"] }
-nix = { version = "0.29", features = ["user", "fs", "process", "signal", "hostname"] }
+nix = { version = "0.29", features = ["user", "fs", "process", "signal", "hostname", "poll"] }
 pastey = "0.2.1"
 regex = "1"
 thiserror = "1"
