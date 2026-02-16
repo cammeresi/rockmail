@@ -9,6 +9,16 @@ mod tests;
 /// Callback that executes a shell command and returns captured stdout.
 pub type BacktickFn<'a> = &'a dyn Fn(&str) -> String;
 
+/// Signature of top-level substitution functions (`subst_limited`,
+/// `subst_quoted`).
+pub type SubstFn = fn(
+    &Environment,
+    &SubstCtx,
+    &str,
+    usize,
+    Option<BacktickFn>,
+) -> (String, bool);
+
 /// Holds context for variable substitution (positional args, special vars).
 pub struct SubstCtx {
     /// Positional arguments (`$1`, `$2`, ...).
@@ -269,15 +279,23 @@ fn expand_var(
     }
 }
 
-fn subst_limited_with(
+#[derive(Clone, Copy, PartialEq)]
+enum Quote {
+    None,
+    Double,
+    Single,
+}
+
+fn subst_impl(
     env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
-    run: Option<BacktickFn>,
+    run: Option<BacktickFn>, preserve_quotes: bool,
 ) -> (String, bool) {
     let mut out = String::with_capacity(s.len().min(limit));
     let mut chars = s.chars().peekable();
+    let mut q = Quote::None;
 
     while let Some(c) = chars.next() {
-        if c == '\\' {
+        if c == '\\' && (preserve_quotes || q != Quote::Single) {
             if let Some(&next) = chars.peek()
                 && (next == '$'
                     || next == '\\'
@@ -289,9 +307,21 @@ fn subst_limited_with(
             } else {
                 out.push(c);
             }
-        } else if c == '$' {
+        } else if !preserve_quotes && c == '"' && q != Quote::Single {
+            q = if q == Quote::Double {
+                Quote::None
+            } else {
+                Quote::Double
+            };
+        } else if !preserve_quotes && c == '\'' && q != Quote::Double {
+            q = if q == Quote::Single {
+                Quote::None
+            } else {
+                Quote::Single
+            };
+        } else if c == '$' && (preserve_quotes || q != Quote::Single) {
             expand_var(&mut chars, ctx, env, &mut out, run);
-        } else if c == '`' {
+        } else if c == '`' && (preserve_quotes || q != Quote::Single) {
             if let Some(runner) = run {
                 let cmd = collect_backtick(&mut chars, env, ctx, run);
                 out.push_str(&runner(&cmd));
@@ -313,12 +343,12 @@ fn subst_limited_with(
 fn subst_with(
     env: &Environment, ctx: &SubstCtx, s: &str, run: Option<BacktickFn>,
 ) -> String {
-    subst_limited_with(env, ctx, s, usize::MAX, run).0
+    subst_impl(env, ctx, s, usize::MAX, run, true).0
 }
 
 /// Expand all `$variable` references in `s`.
 pub fn subst(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
-    subst_limited_with(env, ctx, s, usize::MAX, None).0
+    subst_impl(env, ctx, s, usize::MAX, None, true).0
 }
 
 /// Like `subst`, but truncates output at `limit` bytes.
@@ -327,5 +357,14 @@ pub fn subst_limited(
     env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
     run: Option<BacktickFn>,
 ) -> (String, bool) {
-    subst_limited_with(env, ctx, s, limit, run)
+    subst_impl(env, ctx, s, limit, run, true)
+}
+
+/// Expand variables and strip shell-like quotes (assignment context).
+/// Matches procmail's `readparse(sarg=1)`.
+pub fn subst_quoted(
+    env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
+    run: Option<BacktickFn>,
+) -> (String, bool) {
+    subst_impl(env, ctx, s, limit, run, false)
 }

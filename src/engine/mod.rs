@@ -29,11 +29,11 @@ use crate::util::wait_timeout;
 use crate::variables::{
     BacktickFn, DEF_LINEBUF, DEV_NULL, Environment, HOST, LINEBUF, LOCKEXT,
     LOCKSLEEP, LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, SENDMAIL, SENDMAILFLAGS,
-    SHELL, SHELLFLAGS, SubstCtx, VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC,
-    VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE, VAR_LOG, VAR_LOGFILE,
-    VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW, VAR_SHIFT, VAR_SWITCHRC,
-    VAR_TRAP, VAR_UMASK, VAR_VERBOSE, is_builtin, subst_limited, value_as_int,
-    value_is_true,
+    SHELL, SHELLFLAGS, SubstCtx, SubstFn, VAR_EXITCODE, VAR_HOST,
+    VAR_INCLUDERC, VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE, VAR_LOG,
+    VAR_LOGFILE, VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW, VAR_SHIFT,
+    VAR_SWITCHRC, VAR_TRAP, VAR_UMASK, VAR_VERBOSE, is_builtin, subst_limited,
+    subst_quoted, value_as_int, value_is_true,
 };
 
 #[cfg(test)]
@@ -409,6 +409,17 @@ impl Engine {
 
     /// Expand variables (and backtick commands when `msg` is provided).
     fn expand(&mut self, s: &str, msg: Option<&Message>) -> String {
+        self.expand_inner(s, msg, subst_limited)
+    }
+
+    /// Expand with shell-like quote stripping (for assignments).
+    fn expand_assign(&mut self, s: &str, msg: Option<&Message>) -> String {
+        self.expand_inner(s, msg, subst_quoted)
+    }
+
+    fn expand_inner(
+        &mut self, s: &str, msg: Option<&Message>, f: SubstFn,
+    ) -> String {
         let limit = self.env.get_num(&LINEBUF) as usize;
         let run;
         let runner: Option<BacktickFn>;
@@ -429,8 +440,7 @@ impl Engine {
         } else {
             runner = None;
         }
-        let (r, overflow) =
-            subst_limited(&self.env, &self.ctx, s, limit, runner);
+        let (r, overflow) = f(&self.env, &self.ctx, s, limit, runner);
         if overflow {
             self.env.set(VAR_PROCMAIL_OVERFLOW, "yes");
         }
@@ -1246,7 +1256,7 @@ impl Engine {
                 Item::Assign {
                     name, value, line, ..
                 } => {
-                    let expanded = self.expand(value, Some(msg));
+                    let expanded = self.expand_assign(value, Some(msg));
                     if self.dryrun && !is_builtin(name) {
                         self.drylog(
                             *line,

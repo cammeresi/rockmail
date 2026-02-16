@@ -315,6 +315,90 @@ fn backtick_in_default() {
     assert_eq!(r.0, "val");
 }
 
+fn sq(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
+    subst_quoted(env, ctx, s, usize::MAX, None).0
+}
+
+#[test]
+fn double_quotes_stripped() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    assert_eq!(sq(&env, &ctx, "\"hello\""), "hello");
+}
+
+#[test]
+fn single_quotes_stripped() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    assert_eq!(sq(&env, &ctx, "'hello'"), "hello");
+}
+
+#[test]
+fn single_inside_double() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    assert_eq!(sq(&env, &ctx, "\"it's\""), "it's");
+}
+
+#[test]
+fn double_inside_single() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    assert_eq!(sq(&env, &ctx, "'she said \"hi\"'"), "she said \"hi\"");
+}
+
+#[test]
+fn expansion_in_double_quotes() {
+    let mut env = Environment::new();
+    env.set("VAR", "world");
+    let ctx = SubstCtx::default();
+    assert_eq!(sq(&env, &ctx, "\"$VAR\""), "world");
+}
+
+#[test]
+fn no_expansion_in_single_quotes() {
+    let mut env = Environment::new();
+    env.set("VAR", "world");
+    let ctx = SubstCtx::default();
+    assert_eq!(sq(&env, &ctx, "'$VAR'"), "$VAR");
+}
+
+#[test]
+fn escaped_quotes_not_delimiters() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    assert_eq!(sq(&env, &ctx, "\\\"literal\\\""), "\"literal\"");
+}
+
+#[test]
+fn quote_stripping_with_var() {
+    let mut env = Environment::new();
+    env.set("NEWSUBJECT", "Thanksgiving Feast");
+    let ctx = SubstCtx::default();
+    assert_eq!(
+        sq(&env, &ctx, "\"Re: $NEWSUBJECT\""),
+        "Re: Thanksgiving Feast"
+    );
+}
+
+#[test]
+fn backtick_literal_in_single_quotes() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    let run = |_: &str| "nope".to_owned();
+    let r = subst_quoted(&env, &ctx, "'`cmd`'", usize::MAX, Some(&run));
+    assert_eq!(r.0, "`cmd`");
+}
+
+#[test]
+fn quotes_preserved_by_default() {
+    let mut env = Environment::new();
+    env.set("VAR", "world");
+    let ctx = SubstCtx::default();
+    assert_eq!(subst(&env, &ctx, "\"$VAR\""), "\"world\"");
+    assert_eq!(subst(&env, &ctx, "'$VAR'"), "'world'");
+}
+
 fn esc(s: &str) -> String {
     let mut out = String::new();
     regex_escape_into(s, &mut out);
