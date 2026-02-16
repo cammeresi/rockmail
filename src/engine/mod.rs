@@ -189,12 +189,18 @@ fn skip_from_line(data: &[u8]) -> &[u8] {
     data
 }
 
-fn decode_header_and_body(msg: &Message) -> Cow<'_, str> {
-    let h = rfc2047::decode(msg.header());
-    if matches!(h, Cow::Borrowed(_)) {
-        // No encoded words — avoid copying the whole message.
-        return String::from_utf8_lossy(msg.as_bytes());
+fn unfold_and_decode(header: &[u8]) -> Cow<'static, str> {
+    let mut fields = field::parse_bytes(header);
+    for f in fields.iter_mut() {
+        f.concatenate();
     }
+    let mut buf = Vec::with_capacity(header.len());
+    fields.write_to(&mut buf).unwrap();
+    Cow::Owned(rfc2047::decode(&buf).into_owned())
+}
+
+fn decode_header_and_body(msg: &Message) -> Cow<'_, str> {
+    let h = unfold_and_decode(msg.header());
     let b = String::from_utf8_lossy(msg.body());
     Cow::Owned(format!("{h}{b}"))
 }
@@ -499,7 +505,7 @@ impl Engine {
         match (flags.head, flags.body) {
             (true, true) => decode_header_and_body(msg),
             (false, true) => String::from_utf8_lossy(msg.body()),
-            _ => rfc2047::decode(msg.header()),
+            _ => unfold_and_decode(msg.header()),
         }
     }
 
@@ -508,7 +514,7 @@ impl Engine {
         &'a self, name: &str, msg: &'a Message,
     ) -> Cow<'a, str> {
         match name {
-            "H" => rfc2047::decode(msg.header()),
+            "H" => unfold_and_decode(msg.header()),
             "B" => String::from_utf8_lossy(msg.body()),
             "HB" | "BH" => decode_header_and_body(msg),
             _ => Cow::Borrowed(self.get_var(name).unwrap_or("")),

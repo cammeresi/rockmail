@@ -1090,3 +1090,21 @@ SCRATCH =~ s/-/_/
 ";
     GoldTest::new(rc, MSGS).run();
 }
+
+#[test]
+fn continuation_header_to_match() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^TOsac@cheesecake\\.org
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: x@host\nTo: alice@host\nCc: steve@coach.com,\n sac@cheesecake.org\n\nBody\n",
+        b"From: x@host\nTo: sac@cheesecake.org\n\nBody\n",
+        b"From: x@host\nTo: bob@host\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
