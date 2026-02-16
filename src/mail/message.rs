@@ -307,6 +307,23 @@ impl Message {
         str::from_utf8(&rest[..end]).ok()
     }
 
+    fn replace_from_line(&mut self, from: &[u8], old: usize) {
+        let mut buf = Vec::with_capacity(from.len() + self.data.len());
+        buf.extend_from_slice(from);
+        buf.extend_from_slice(&self.data[old..self.header_end]);
+        buf.extend_from_slice(&self.data[self.header_end..]);
+        let delta = from.len() as isize - old as isize;
+        self.header_end = self
+            .header_end
+            .saturating_add_signed(delta)
+            .min(buf.len());
+        self.body_start = self
+            .body_start
+            .saturating_add_signed(delta)
+            .min(buf.len());
+        self.data = buf;
+    }
+
     /// Set or replace the From_ line with a new sender.
     pub fn set_envelope_sender(&mut self, sender: &str) {
         let from = super::generate(sender);
@@ -315,16 +332,7 @@ impl Message {
         } else {
             0
         };
-
-        let mut buf = Vec::with_capacity(from.len() + self.data.len());
-        buf.extend_from_slice(&from);
-        buf.extend_from_slice(&self.data[old..self.header_end]);
-        buf.extend_from_slice(&self.data[self.header_end..]);
-
-        let delta = from.len() as isize - old as isize;
-        self.header_end = (self.header_end as isize + delta) as usize;
-        self.body_start = (self.body_start as isize + delta) as usize;
-        self.data = buf;
+        self.replace_from_line(&from, old);
     }
 
     /// Replace the sender in the From_ line, preserving the existing timestamp.
@@ -336,16 +344,7 @@ impl Message {
         };
         let from = super::generate_raw(sender, &ts);
         let old = self.data.iter().position(|&b| b == b'\n').unwrap_or(0) + 1;
-
-        let mut buf = Vec::with_capacity(from.len() + self.data.len());
-        buf.extend_from_slice(&from);
-        buf.extend_from_slice(&self.data[old..self.header_end]);
-        buf.extend_from_slice(&self.data[self.header_end..]);
-
-        let delta = from.len() as isize - old as isize;
-        self.header_end = (self.header_end as isize + delta) as usize;
-        self.body_start = (self.body_start as isize + delta) as usize;
-        self.data = buf;
+        self.replace_from_line(&from, old);
     }
 
     /// Strip the From_ line if present.
@@ -354,8 +353,8 @@ impl Message {
             let end =
                 self.data.iter().position(|&b| b == b'\n').unwrap_or(0) + 1;
             self.data.drain(..end);
-            self.header_end -= end;
-            self.body_start -= end;
+            self.header_end = self.header_end.saturating_sub(end);
+            self.body_start = self.body_start.saturating_sub(end);
         }
     }
 }
