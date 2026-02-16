@@ -134,7 +134,7 @@ fn push_char(
 /// Handle backslash escapes during compilation.
 fn handle_escape(
     chars: &mut Peekable<Chars>, out: &mut String, group_count: &mut usize,
-    anchor_end: &mut bool,
+    anchor_end: &mut bool, capture: &mut Option<usize>,
 ) {
     match chars.peek() {
         Some('<') | Some('>') => {
@@ -144,6 +144,7 @@ fn handle_escape(
         Some('/') => {
             chars.next();
             *group_count += 1;
+            *capture = Some(*group_count);
             out.push('(');
             while let Some(c2) = chars.next() {
                 if push_char(out, c2, chars, group_count) {
@@ -161,15 +162,14 @@ fn handle_escape(
     }
 }
 
-fn compile(pat: &str) -> String {
-    // Capacity: worst case is \< or \> expanding to \b (same size),
-    // plus \A and \z anchors (4 bytes total)
+fn compile(pat: &str) -> (String, Option<usize>) {
     let mut out = String::with_capacity(pat.len() + 4);
     let mut chars = pat.chars().peekable();
-    let mut group_count = 0usize;
+    let mut groups = 0usize;
     let mut anchor_start = false;
     let mut anchor_end = false;
     let mut at_start = true;
+    let mut capture = None;
 
     while let Some(c) = chars.next() {
         match c {
@@ -185,12 +185,13 @@ fn compile(pat: &str) -> String {
             '\\' => handle_escape(
                 &mut chars,
                 &mut out,
-                &mut group_count,
+                &mut groups,
                 &mut anchor_end,
+                &mut capture,
             ),
             '(' => {
                 if chars.peek() != Some(&'?') {
-                    group_count += 1;
+                    groups += 1;
                 }
                 out.push('(');
             }
@@ -199,7 +200,6 @@ fn compile(pat: &str) -> String {
         at_start = false;
     }
 
-    // Prepend/append anchors to compiled pattern
     let mut result = String::with_capacity(out.len() + 4);
     if anchor_start {
         result.push_str(r"\A");
@@ -208,40 +208,7 @@ fn compile(pat: &str) -> String {
     if anchor_end {
         result.push_str(r"\z");
     }
-    result
-}
-
-/// Compute capture group index for a pattern (for \/ extraction).
-fn compiled_capture_group(pat: &str) -> Option<usize> {
-    let mut chars = pat.chars().peekable();
-    let mut group_count = 0usize;
-
-    while let Some(c) = chars.next() {
-        match c {
-            '^' if chars.peek() == Some(&'^') => {
-                chars.next();
-            }
-            '\\' => match chars.peek() {
-                Some('<') | Some('>') => {
-                    chars.next();
-                }
-                Some('/') => {
-                    chars.next();
-                    group_count += 1;
-                    return Some(group_count);
-                }
-                Some(_) => {
-                    chars.next();
-                }
-                None => {}
-            },
-            '(' if chars.peek() != Some(&'?') => {
-                group_count += 1;
-            }
-            _ => {}
-        }
-    }
-    None
+    (result, capture)
 }
 
 /// Compiled procmail regex matcher.
@@ -262,17 +229,14 @@ impl Matcher {
         }
 
         let expanded = expand_macros(pattern);
-        let compiled = compile(&expanded);
+        let (compiled, capture) = compile(&expanded);
 
         let regex = RegexBuilder::new(&compiled)
             .case_insensitive(case_insensitive)
             .multi_line(true)
             .build()?;
 
-        Ok(Self {
-            regex,
-            capture_group: compiled_capture_group(&expanded),
-        })
+        Ok(Self { regex, capture_group: capture })
     }
 
     /// Match against text.
