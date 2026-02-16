@@ -308,7 +308,7 @@ impl Matcher {
 
     /// Find next match starting at byte offset `pos`. Returns (start, end).
     pub fn find_from(&self, text: &str, pos: usize) -> Option<(usize, usize)> {
-        let m = self.regex.find(&text[pos..])?;
+        let m = self.regex.find(text.get(pos..)?)?;
         Some((pos + m.start(), pos + m.end()))
     }
 }

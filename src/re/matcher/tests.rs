@@ -353,3 +353,23 @@ fn capture_double_caret_mid() {
     assert!(r.matched);
     assert_eq!(r.capture, Some("foobar"));
 }
+
+#[test]
+fn find_from_basic() {
+    let m = Matcher::new("foo", false).unwrap();
+    let text = "xx foo yy foo";
+    assert_eq!(m.find_from(text, 0), Some((3, 6)));
+    assert_eq!(m.find_from(text, 4), Some((10, 13)));
+}
+
+#[test]
+fn find_from_at_end() {
+    let m = Matcher::new("foo", false).unwrap();
+    assert_eq!(m.find_from("foo", 3), None);
+}
+
+#[test]
+fn find_from_past_end() {
+    let m = Matcher::new("foo", false).unwrap();
+    assert_eq!(m.find_from("foo", 99), None);
+}
