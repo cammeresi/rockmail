@@ -67,6 +67,10 @@ struct Args {
     #[arg(short = 'n')]
     dryrun: bool,
 
+    /// Show resulting message in dry-run mode
+    #[arg(short = 'M')]
+    show_msg: bool,
+
     /// Override From_ fakes
     #[arg(short = 'o')]
     override_from: bool,
@@ -100,6 +104,7 @@ Options:
   -p          Preserve old environment
   -t          Return EX_TEMPFAIL on error
   -n          Dry-run: show what would be delivered without writing
+  -M          Show resulting message in dry-run mode
   -f sender   Regenerate From_ line with sender
   -o          Override fake From_ lines
   -a arg      Set $1, $2, ... (can be repeated)
@@ -405,8 +410,10 @@ fn run(
     }
 
     if engine.dryrun() {
-        eprintln!("-----");
-        io::stdout().write_all(msg.as_bytes())?;
+        if args.show_msg {
+            eprintln!("-----");
+            io::stdout().write_all(msg.as_bytes())?;
+        }
     } else if !delivered {
         let folder = deliver_default(&mut engine, &msg)?;
         engine.log_abstract(&folder, &msg);
