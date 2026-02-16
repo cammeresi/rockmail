@@ -215,3 +215,10 @@ pub fn deliver_test(
 ) -> Result<DeliveryResult, DeliveryError> {
     deliver(&mut Namer::new(), path, msg, DeliveryOpts::default())
 }
+
+#[cfg(test)]
+pub fn deliver_dir_test(
+    path: &Path, msg: &Message,
+) -> Result<DeliveryResult, DeliveryError> {
+    deliver_dir(path, msg, DeliveryOpts::default())
+}

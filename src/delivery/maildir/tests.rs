@@ -6,6 +6,63 @@ use tempfile::tempdir;
 use super::*;
 use crate::delivery::{DeliveryError, tests::msg};
 
+// --- dir delivery tests ---
+
+#[test]
+fn dir_creates_dir() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("plain");
+
+    let m = msg("Subject: Test\n\nHello\n");
+    deliver_dir_test(&target, &m).unwrap();
+
+    assert!(target.is_dir());
+    let files: Vec<_> = fs::read_dir(&target).unwrap().collect();
+    assert_eq!(files.len(), 1);
+    let name = files[0].as_ref().unwrap().file_name();
+    assert!(name.to_str().unwrap().starts_with("msg."));
+}
+
+#[test]
+fn dir_preserves_from_line() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("plain");
+
+    let m =
+        msg("From sender Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n");
+    let r = deliver_dir_test(&target, &m).unwrap();
+
+    let content = fs::read_to_string(&r.path).unwrap();
+    assert!(content.starts_with("From "));
+}
+
+#[test]
+fn dir_forces_trailing_blank() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("plain");
+
+    // Body ends with a single newline; dir delivery adds one more.
+    let m = msg("Subject: Test\n\nBody\n");
+    let r = deliver_dir_test(&target, &m).unwrap();
+
+    let content = fs::read_to_string(&r.path).unwrap();
+    assert!(content.ends_with("\n\n"));
+    assert!(!content.ends_with("\n\n\n"));
+}
+
+#[test]
+fn dir_no_subdirs() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("plain");
+
+    let m = msg("Subject: Test\n\nHello\n");
+    deliver_dir_test(&target, &m).unwrap();
+
+    assert!(!target.join("tmp").exists());
+    assert!(!target.join("new").exists());
+    assert!(!target.join("cur").exists());
+}
+
 #[test]
 fn deliver_creates_dirs() {
     let dir = tempdir().unwrap();
