@@ -523,3 +523,100 @@ fn dryrun_pipe_runs_normally() {
     assert_eq!(code, 0);
     assert!(marker.exists(), "pipe should still run in dryrun");
 }
+
+#[test]
+fn recipe_lockfile_auto() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+:0 :
+inbox
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(d.join("inbox").exists(), "mbox not created");
+    assert!(
+        !d.join("inbox.lock").exists(),
+        "auto lockfile should be cleaned up"
+    );
+}
+
+#[test]
+fn recipe_lockfile_named() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+:0 : my.lock
+inbox
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(d.join("inbox").exists(), "mbox not created");
+    assert!(
+        !d.join("my.lock").exists(),
+        "named lockfile should be cleaned up"
+    );
+}
+
+#[test]
+fn forward_with_sendmail_true() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+SENDMAIL=/bin/true
+SENDMAILFLAGS=
+
+:0
+! user@example.com
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(
+        !d.join("default").exists(),
+        "message should be consumed by forward, not delivered to default"
+    );
+}
+
+#[test]
+fn header_op_add_always() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+@A X-Tag: first
+@A X-Tag: second
+",
+    );
+    let input = b"From: user@host\nX-Tag: existing\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(content.contains("X-Tag: existing"), "original header lost");
+    assert!(content.contains("X-Tag: first"), "first @A not added");
+    assert!(content.contains("X-Tag: second"), "second @A not added");
+}

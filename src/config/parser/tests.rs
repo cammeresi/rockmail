@@ -675,12 +675,7 @@ fn recipe_helper_panics_on_non_recipe() {
 #[should_panic(expected = "expected Nested")]
 fn nested_helper_panics_on_non_nested() {
     let item = Item::Recipe {
-        recipe: Recipe::new(
-            Flags::new(),
-            None,
-            vec![],
-            Action::Folder(vec![]),
-        ),
+        recipe: Recipe::new(Flags::new(), None, vec![], Action::Folder(vec![])),
         line: 0,
     };
     nested(&item);

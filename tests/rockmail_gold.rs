@@ -1017,3 +1017,65 @@ after
     ];
     GoldTest::new(rc, msgs).run();
 }
+
+#[test]
+fn nested_subst_condition() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+PAT=one
+
+:0
+* $$ ^Subject:.*$PAT
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: one\n\nBody\n",
+        b"From: b@host\nSubject: two\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn subst_in_variable_condition() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SUF=VAL
+SUFVAL=hello
+
+:0
+* $ SUF$SUF ?? hello
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn weighted_shell_condition() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 1^0 ? /bin/true
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn weighted_shell_condition_negated() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 1^0 ! ? /bin/false
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}

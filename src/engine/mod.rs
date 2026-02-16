@@ -16,12 +16,14 @@ use nix::unistd::dup2;
 
 use regex::RegexBuilder;
 
-use crate::config::{Action, Condition, Flags, HeaderOp, Item, Recipe, Weight};
+use crate::config::{
+    self, Action, Condition, Flags, HeaderOp, Item, Recipe, Weight,
+};
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
 use crate::field::{self, Field};
 use crate::locking::FileLock;
 use crate::mail::Message;
-use crate::re::Matcher;
+use crate::re::{Matcher, PatternError};
 use crate::rfc2047;
 use crate::util::wait_timeout;
 use crate::variables::{
@@ -31,6 +33,7 @@ use crate::variables::{
     VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE, VAR_LOG, VAR_LOGFILE,
     VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW, VAR_SHIFT, VAR_SWITCHRC,
     VAR_TRAP, VAR_UMASK, VAR_VERBOSE, is_builtin, subst_limited, value_as_int,
+    value_is_true,
 };
 
 #[cfg(test)]
@@ -61,7 +64,7 @@ pub enum Outcome {
 pub enum EngineError {
     /// Regex compilation or matching error.
     #[error("regex error: {0}")]
-    Regex(#[from] crate::re::PatternError),
+    Regex(#[from] PatternError),
     /// Delivery failure (folder, pipe, or forward).
     #[error("delivery error: {0}")]
     Delivery(#[from] DeliveryError),
@@ -316,7 +319,7 @@ impl Engine {
     fn apply_side_effect(&mut self, name: &str, value: &str) {
         match name {
             VAR_VERBOSE => {
-                self.verbose = crate::variables::value_is_true(value);
+                self.verbose = value_is_true(value);
             }
             VAR_UMASK => {
                 if let Ok(m) = u32::from_str_radix(value, 8) {
@@ -534,8 +537,7 @@ impl Engine {
             return Err(e.into());
         }
 
-        let status =
-            crate::util::wait_timeout(&mut child, self.timeout(), cmd)?;
+        let status = wait_timeout(&mut child, self.timeout(), cmd)?;
         Ok(status.code().unwrap_or(-1))
     }
 
@@ -984,8 +986,7 @@ impl Engine {
             return Err(e.into());
         }
 
-        let status =
-            crate::util::wait_timeout(&mut child, self.timeout(), &sendmail)?;
+        let status = wait_timeout(&mut child, self.timeout(), &sendmail)?;
         self.ctx.last_exit = status.code().unwrap_or(-1);
 
         if !status.success() {
@@ -1114,7 +1115,7 @@ impl Engine {
             }
         };
 
-        match crate::config::parse(&content, path) {
+        match config::parse(&content, path) {
             Ok(items) => Some(items),
             Err(e) => {
                 eprintln!("failed to parse rcfile {}: {}", path, e);
@@ -1462,8 +1463,7 @@ impl Engine {
             let _ = w.write_all(msg.as_bytes());
         }
         let timeout = self.timeout();
-        if let Ok(status) = crate::util::wait_timeout(&mut child, timeout, &cmd)
-        {
+        if let Ok(status) = wait_timeout(&mut child, timeout, &cmd) {
             let code = status.code().unwrap_or(-1);
             if !user_set && code != 0 {
                 self.set_var(VAR_EXITCODE, &code.to_string());

@@ -213,7 +213,7 @@ fn walk(base: &Path, dir: &Path, map: &mut BTreeMap<String, Vec<u8>>) {
         let p = e.path();
         if p.is_dir() {
             walk(base, &p, map);
-        } else if !p.extension().is_some_and(|x| x == "profraw") {
+        } else if p.extension().is_none_or(|x| x != "profraw") {
             // skip llvm-cov artifacts
             let rel = p.strip_prefix(base).unwrap();
             map.insert(

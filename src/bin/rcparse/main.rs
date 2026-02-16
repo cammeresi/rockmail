@@ -5,6 +5,9 @@ use std::process;
 
 use rockmail::config::{Action, Condition, Flags, Item, Recipe, Weight, parse};
 
+#[cfg(test)]
+mod tests;
+
 fn format_flags(f: &Flags) -> String {
     let mut parts = Vec::new();
 
@@ -329,6 +332,18 @@ fn print_item(item: &Item, num: usize, depth: usize) {
     println!();
 }
 
+fn run(content: &str, path: &str) -> Vec<Item> {
+    let items = parse(content, path).unwrap_or_else(|e| {
+        eprintln!("Parse error: {}", e);
+        process::exit(1);
+    });
+    println!("Parsed {} items from {}\n", items.len(), path);
+    for (i, item) in items.iter().enumerate() {
+        print_item(item, i + 1, 0);
+    }
+    items
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
@@ -345,16 +360,5 @@ fn main() {
         }
     };
 
-    match parse(&content, path) {
-        Ok(items) => {
-            println!("Parsed {} items from {}\n", items.len(), path);
-            for (i, item) in items.iter().enumerate() {
-                print_item(item, i + 1, 0);
-            }
-        }
-        Err(e) => {
-            eprintln!("Parse error: {}", e);
-            process::exit(1);
-        }
-    }
+    run(&content, path);
 }
