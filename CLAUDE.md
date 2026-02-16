@@ -12,6 +12,9 @@ rcfile syntax and CLI must match Procmail exactly.  A few features are
 deliberately not implemented; these features are documented in
 `COMPATIBILITY.md`.
 
+Some extensions have been implemented beyond what procmail supports.
+Extensions are described in `ENHANCEMENTS.md`.
+
 # Project Structure
 
 ## Binaries (`src/bin/`)
