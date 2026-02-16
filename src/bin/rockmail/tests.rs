@@ -79,7 +79,7 @@ fn find_rcfile_explicit() {
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &engine, None).unwrap();
+    let result = find_rcfile(&files, &engine).unwrap();
     assert_eq!(result.map(|r| r.path), Some(rc));
 }
 
@@ -90,7 +90,7 @@ fn find_rcfile_default_procmailrc() {
     std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
-    let result = find_rcfile(&[], &engine, None).unwrap();
+    let result = find_rcfile(&[], &engine).unwrap();
     assert_eq!(result.map(|r| r.path), Some(rc));
 }
 
@@ -98,7 +98,7 @@ fn find_rcfile_default_procmailrc() {
 fn find_rcfile_no_default() {
     let tmp = tempfile::tempdir().unwrap();
     let engine = engine_with_home(&tmp.path().to_string_lossy());
-    let result = find_rcfile(&[], &engine, None).unwrap();
+    let result = find_rcfile(&[], &engine).unwrap();
     assert!(result.is_none());
 }
 
@@ -131,7 +131,7 @@ fn security_rejects_world_writable() {
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &engine, None);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("world writable"));
 }
@@ -145,7 +145,7 @@ fn security_rejects_group_writable_default() {
         .unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
-    let result = find_rcfile(&[], &engine, None);
+    let result = find_rcfile(&[], &engine);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("group writable"));
 }
@@ -160,7 +160,7 @@ fn security_allows_group_writable_explicit() {
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &engine, None);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_ok());
 }
 
@@ -174,7 +174,7 @@ fn security_accepts_safe_permissions() {
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &engine, None);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_ok());
     assert!(result.unwrap().is_some());
 }
@@ -194,7 +194,7 @@ fn dir_security_rejects_world_writable() {
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &engine, None);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("directory"));
 }
@@ -214,6 +214,6 @@ fn dir_security_allows_sticky_world_writable() {
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
-    let result = find_rcfile(&files, &engine, None);
+    let result = find_rcfile(&files, &engine);
     assert!(result.is_ok());
 }

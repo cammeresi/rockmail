@@ -23,9 +23,7 @@ use rockmail::variables::*;
 #[cfg(test)]
 mod tests;
 
-const ETC_PROCMAILRC: &str = "/etc/procmailrc";
 const MAIL_SPOOL: &str = "/var/mail";
-const ROOT_UID: u32 = 0;
 const MAX_MAIL_SIZE: u64 = 1024 * 1024 * 1024; // 1 GB
 const MAX_RCFILE_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
 
@@ -219,38 +217,9 @@ fn check_rcfile_security(
     Ok(())
 }
 
-/// Check that /etc/procmailrc has safe permissions.
-fn check_etcrc_security(
-    file: &File, path: &Path,
-) -> Result<(), Box<dyn Error>> {
-    let meta = file.metadata()?;
-    let mode = meta.mode();
-    let owner = meta.uid();
-
-    // Must be owned by root
-    if owner != ROOT_UID {
-        return Err(format!(
-            "system rcfile not owned by root: {}",
-            path.display()
-        )
-        .into());
-    }
-
-    // Must not be world writable
-    if mode & 0o002 != 0 {
-        return Err(format!(
-            "system rcfile is world writable: {}",
-            path.display()
-        )
-        .into());
-    }
-
-    Ok(())
-}
-
 /// Open file and check security on the open handle.
 fn open_and_check(
-    path: &Path, is_default: bool, is_global: bool,
+    path: &Path, is_default: bool,
 ) -> Result<Option<ValidatedRcfile>, Box<dyn Error>> {
     // Check for symlinks before opening
     let link_meta = match fs::symlink_metadata(path) {
@@ -266,11 +235,7 @@ fn open_and_check(
 
     let file =
         File::open(path).map_err(|e| format!("{}: {}", path.display(), e))?;
-    if is_global {
-        check_etcrc_security(&file, path)?;
-    } else {
-        check_rcfile_security(&file, path, is_default)?;
-    }
+    check_rcfile_security(&file, path, is_default)?;
 
     Ok(Some(ValidatedRcfile {
         path: path.to_path_buf(),
@@ -279,7 +244,7 @@ fn open_and_check(
 }
 
 fn find_rcfile(
-    files: &[String], engine: &Engine, args: Option<&Args>,
+    files: &[String], engine: &Engine,
 ) -> Result<Option<ValidatedRcfile>, Box<dyn Error>> {
     if files.len() > 1 {
         return Err("too many rc files on command line".into());
@@ -289,23 +254,10 @@ fn find_rcfile(
 
     if let Some(f) = files.first() {
         let path = resolve_rcpath(f, home);
-        open_and_check(&path, false, false)
+        open_and_check(&path, false)
     } else {
-        // ~/.procmailrc
         let path = PathBuf::from(home).join(".procmailrc");
-        if let Some(rc) = open_and_check(&path, true, false)? {
-            return Ok(Some(rc));
-        }
-
-        // /etc/procmailrc
-        if let Some(args) = args
-            && !args.preserve
-        {
-            let path = Path::new(ETC_PROCMAILRC);
-            open_and_check(path, true, true)
-        } else {
-            Ok(None)
-        }
+        open_and_check(&path, true)
     }
 }
 
@@ -423,7 +375,7 @@ fn run(
         engine.set_dryrun(true);
     }
 
-    let rcfile = find_rcfile(rcfiles, &engine, Some(&args))?;
+    let rcfile = find_rcfile(rcfiles, &engine)?;
 
     if let Some(rc) = rcfile {
         let content = read_file(rc.file)?;
