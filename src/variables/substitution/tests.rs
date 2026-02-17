@@ -461,6 +461,20 @@ fn regex_escape_into_non_meta_special() {
     assert_eq!(esc("a{b}"), "(a){b}");
 }
 
+#[test]
+fn depth_limit() {
+    let env = Environment::new();
+    let ctx = SubstCtx::default();
+    // Build 40 levels: ${X:-${X:-${X:-...leaf...}}}
+    let mut s = "leaf".to_owned();
+    for _ in 0..40 {
+        s = format!("${{X:-{s}}}");
+    }
+    let r = subst(&env, &ctx, &s);
+    assert!(r.contains("${X:-"), "expected unexpanded syntax");
+    assert!(r.contains("leaf"));
+}
+
 fn ctb(s: &str) -> String {
     let mut chars = s.chars().peekable();
     collect_to_brace(&mut chars)

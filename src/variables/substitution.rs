@@ -6,6 +6,8 @@ use super::Environment;
 #[cfg(test)]
 mod tests;
 
+const MAX_SUBST_DEPTH: usize = 32;
+
 /// Callback that executes a shell command and returns captured stdout.
 pub type BacktickFn<'a> = &'a dyn Fn(&str) -> String;
 
@@ -135,7 +137,7 @@ fn skip_to_brace(chars: &mut Peekable<Chars>) {
 /// Collect chars until closing backtick, expanding `$var` inside.
 fn collect_backtick(
     chars: &mut Peekable<Chars>, env: &Environment, ctx: &SubstCtx,
-    run: Option<BacktickFn>,
+    run: Option<BacktickFn>, depth: usize,
 ) -> String {
     let mut cmd = String::new();
     while let Some(c) = chars.next() {
@@ -146,7 +148,7 @@ fn collect_backtick(
         {
             cmd.push(chars.next().unwrap());
         } else if c == '$' {
-            expand_var(chars, ctx, env, &mut cmd, run);
+            expand_var(chars, ctx, env, &mut cmd, run, depth);
         } else {
             cmd.push(c);
         }
@@ -157,7 +159,7 @@ fn collect_backtick(
 
 fn expand_braced(
     chars: &mut Peekable<Chars>, ctx: &SubstCtx, env: &Environment,
-    out: &mut String, run: Option<BacktickFn>,
+    out: &mut String, run: Option<BacktickFn>, depth: usize,
 ) {
     let name = collect_name(chars);
     if name.is_empty() {
@@ -181,7 +183,8 @@ fn expand_braced(
                     let alt = collect_to_brace(chars);
                     match val {
                         Some(v) if !v.is_empty() => out.push_str(v),
-                        _ => out.push_str(&subst_with(env, ctx, &alt, run)),
+                        _ => out
+                            .push_str(&subst_with(env, ctx, &alt, run, depth)),
                     }
                 }
                 Some('+') => {
@@ -189,7 +192,7 @@ fn expand_braced(
                     if let Some(v) = val
                         && !v.is_empty()
                     {
-                        out.push_str(&subst_with(env, ctx, &alt, run));
+                        out.push_str(&subst_with(env, ctx, &alt, run, depth));
                     }
                 }
                 _ => skip_to_brace(chars),
@@ -200,14 +203,14 @@ fn expand_braced(
             let alt = collect_to_brace(chars);
             match val {
                 Some(v) => out.push_str(v),
-                None => out.push_str(&subst_with(env, ctx, &alt, run)),
+                None => out.push_str(&subst_with(env, ctx, &alt, run, depth)),
             }
         }
         Some(&'+') => {
             chars.next();
             let alt = collect_to_brace(chars);
             if val.is_some() {
-                out.push_str(&subst_with(env, ctx, &alt, run));
+                out.push_str(&subst_with(env, ctx, &alt, run, depth));
             }
         }
         _ => skip_to_brace(chars),
@@ -216,13 +219,13 @@ fn expand_braced(
 
 fn expand_var(
     chars: &mut Peekable<Chars>, ctx: &SubstCtx, env: &Environment,
-    out: &mut String, run: Option<BacktickFn>,
+    out: &mut String, run: Option<BacktickFn>, depth: usize,
 ) {
     match chars.peek() {
         None => out.push('$'),
         Some(&'{') => {
             chars.next();
-            expand_braced(chars, ctx, env, out, run);
+            expand_braced(chars, ctx, env, out, run, depth);
         }
         Some(&'$') => {
             chars.next();
@@ -288,7 +291,7 @@ enum Quote {
 
 fn subst_impl(
     env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
-    run: Option<BacktickFn>, preserve_quotes: bool,
+    run: Option<BacktickFn>, preserve_quotes: bool, depth: usize,
 ) -> (String, bool) {
     let mut out = String::with_capacity(s.len().min(limit));
     let mut chars = s.chars().peekable();
@@ -320,10 +323,10 @@ fn subst_impl(
                 Quote::Single
             };
         } else if c == '$' && (preserve_quotes || q != Quote::Single) {
-            expand_var(&mut chars, ctx, env, &mut out, run);
+            expand_var(&mut chars, ctx, env, &mut out, run, depth);
         } else if c == '`' && (preserve_quotes || q != Quote::Single) {
             if let Some(runner) = run {
-                let cmd = collect_backtick(&mut chars, env, ctx, run);
+                let cmd = collect_backtick(&mut chars, env, ctx, run, depth);
                 out.push_str(&runner(&cmd));
             } else {
                 out.push(c);
@@ -342,13 +345,20 @@ fn subst_impl(
 /// Internal: expand with optional backtick runner.
 fn subst_with(
     env: &Environment, ctx: &SubstCtx, s: &str, run: Option<BacktickFn>,
+    depth: usize,
 ) -> String {
-    subst_impl(env, ctx, s, usize::MAX, run, true).0
+    if depth >= MAX_SUBST_DEPTH {
+        eprintln!(
+            "variable substitution nested too deeply (limit {MAX_SUBST_DEPTH})"
+        );
+        return s.to_owned();
+    }
+    subst_impl(env, ctx, s, usize::MAX, run, true, depth + 1).0
 }
 
 /// Expand all `$variable` references in `s`.
 pub fn subst(env: &Environment, ctx: &SubstCtx, s: &str) -> String {
-    subst_impl(env, ctx, s, usize::MAX, None, true).0
+    subst_impl(env, ctx, s, usize::MAX, None, true, 0).0
 }
 
 /// Like `subst`, but truncates output at `limit` bytes.
@@ -357,7 +367,7 @@ pub fn subst_limited(
     env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
     run: Option<BacktickFn>,
 ) -> (String, bool) {
-    subst_impl(env, ctx, s, limit, run, true)
+    subst_impl(env, ctx, s, limit, run, true, 0)
 }
 
 /// Expand variables and strip shell-like quotes (assignment context).
@@ -366,5 +376,5 @@ pub fn subst_quoted(
     env: &Environment, ctx: &SubstCtx, s: &str, limit: usize,
     run: Option<BacktickFn>,
 ) -> (String, bool) {
-    subst_impl(env, ctx, s, limit, run, false)
+    subst_impl(env, ctx, s, limit, run, false, 0)
 }
