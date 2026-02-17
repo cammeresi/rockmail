@@ -196,7 +196,7 @@ fn unfold_and_decode(header: &[u8]) -> String {
         f.concatenate();
     }
     let mut buf = Vec::with_capacity(header.len());
-    fields.write_to(&mut buf).unwrap();
+    fields.write_to(&mut buf).expect("Vec write");
     rfc2047::decode(&buf).into_owned()
 }
 
@@ -1276,7 +1276,7 @@ impl Engine {
             apply_op_to_fields(op, &value, &mut fields);
         }
         let mut header = Vec::new();
-        fields.write_to(&mut header).unwrap();
+        fields.write_to(&mut header).expect("Vec write");
         *msg = Message::from_parts(&header, msg.body());
     }
 
@@ -1507,9 +1507,10 @@ impl Engine {
         }
         let cmd = self.expand(&trap, Some(msg));
         let shell = self.env.get_or_default(&SHELL).to_owned();
+        let flags = self.env.get_or_default(&SHELLFLAGS);
         let child = self
             .spawn(&shell)
-            .arg(SHELLFLAGS.def.unwrap())
+            .arg(flags)
             .arg(&cmd)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
