@@ -209,14 +209,15 @@ fn decode_header_and_body(msg: &Message) -> Cow<'_, str> {
 /// Spawn `$SHELL $SHELLFLAGS cmd` with `input` on stdin, capture stdout,
 /// strip trailing newlines (pipes.c:277).
 fn run_backtick(
-    shell: &str, flags: &str, cmd: &str, input: &[u8],
-    envs: &[(String, String)], timeout: Duration,
+    env: &Environment, cmd: &str, input: &[u8], timeout: Duration,
 ) -> String {
+    let shell = env.get_or_default(&SHELL);
+    let flags = env.get_or_default(&SHELLFLAGS);
     let child = Command::new(shell)
         .arg(flags)
         .arg(cmd)
         .env_clear()
-        .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .envs(env.iter())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -427,31 +428,26 @@ impl Engine {
     fn expand_inner(
         &mut self, s: &str, msg: Option<&Message>, f: SubstFn,
     ) -> String {
-        let limit = self.env.get_num(&LINEBUF) as usize;
+        let Self { env, ctx, .. } = &*self;
+
+        let limit = env.get_num(&LINEBUF) as usize;
         let run;
-        let runner: Option<BacktickFn>;
-        if let Some(msg) = msg {
-            let shell = self.env.get_or_default(&SHELL).to_owned();
-            let flags = self.env.get_or_default(&SHELLFLAGS).to_owned();
-            let envs: Vec<_> = self
-                .env
-                .iter()
-                .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                .collect();
-            let timeout = self.timeout();
-            let input = msg.as_bytes().to_vec();
-            run = move |cmd: &str| {
-                run_backtick(&shell, &flags, cmd, &input, &envs, timeout)
-            };
-            runner = Some(&run as BacktickFn);
+        let runner = if let Some(msg) = msg
+            && s.contains('`')
+        {
+            let timeout = env.timeout();
+            let input = msg.as_bytes();
+            run = move |cmd: &str| run_backtick(env, cmd, input, timeout);
+            Some(&run as BacktickFn)
         } else {
-            runner = None;
-        }
-        let (r, overflow) = f(&self.env, &self.ctx, s, limit, runner);
+            None
+        };
+
+        let (res, overflow) = f(env, ctx, s, limit, runner);
         if overflow {
             self.env.set(VAR_PROCMAIL_OVERFLOW, "yes");
         }
-        r
+        res
     }
 
     /// Return a copy of `cond` with all string fields expanded.
