@@ -966,6 +966,333 @@ fn pipe_spawn_failure() {
 }
 
 #[test]
+fn case_sensitive_flag() {
+    let mut t = Test::with_msg("Subject: TEST\n\nBody");
+    let mut flags = Flags::new();
+    flags.case = true;
+
+    // "TEST" should NOT match lowercase "test" with D flag
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "test".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("case"))]),
+        },
+        line: 0,
+    }];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn case_sensitive_flag_matches() {
+    let mut t = Test::with_msg("Subject: TEST\n\nBody");
+    let mut flags = Flags::new();
+    flags.case = true;
+
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "TEST".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("case"))]),
+        },
+        line: 0,
+    }];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn ignore_flag_suppresses_delivery_error() {
+    let mut t = Test::new();
+    let mut flags = Flags::new();
+    flags.ignore = true;
+
+    let items = vec![
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    "/nonexistent/deeply/nested/path/",
+                )]),
+            },
+            line: 0,
+        },
+        // Delivery after the ignored error should still work
+        Item::Recipe {
+            recipe: Recipe {
+                flags: Flags::new(),
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("fallback"),
+                )]),
+            },
+            line: 0,
+        },
+    ];
+    assert!(
+        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("fallback"))
+    );
+}
+
+#[test]
+fn else_if_skips_when_prev_matched() {
+    let mut t = Test::new();
+    let mut flags = Flags::new();
+    flags.r#else = true;
+
+    let items = vec![
+        // First recipe matches
+        regex_recipe("Subject:", &t.maildir("first")),
+        // E recipe should be skipped because first matched
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("else"))]),
+            },
+            line: 0,
+        },
+    ];
+    assert!(
+        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("first"))
+    );
+}
+
+#[test]
+fn error_flag_runs_on_failed_action() {
+    let mut t = Test::new();
+    let mut err = Flags::new();
+    err.err = true;
+
+    let mut wf = Flags::new();
+    wf.wait = true;
+
+    let items = vec![
+        // Pipe exits non-zero with `w` flag → action fails (Outcome::Default)
+        Item::Recipe {
+            recipe: Recipe {
+                flags: wf,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Pipe {
+                    cmd: "false".into(),
+                    capture: None,
+                },
+            },
+            line: 0,
+        },
+        // `e` recipe runs because prev matched but action failed
+        Item::Recipe {
+            recipe: Recipe {
+                flags: err,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("err"))]),
+            },
+            line: 0,
+        },
+    ];
+    assert!(
+        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("err"))
+    );
+}
+
+#[test]
+fn error_flag_skips_on_success() {
+    let mut t = Test::new();
+    let mut flags = Flags::new();
+    flags.err = true;
+
+    let mut copy = Flags::new();
+    copy.copy = true;
+
+    let items = vec![
+        Item::Recipe {
+            recipe: Recipe {
+                flags: copy,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("first"))]),
+            },
+            line: 0,
+        },
+        // `e` recipe should be skipped because prev action succeeded
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("err"))]),
+            },
+            line: 0,
+        },
+    ];
+    // Should deliver to "first" via copy, then skip error handler, then
+    // fall through to default
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn quiet_flag_suppresses_pipe_error_message() {
+    // W (quiet=true, wait=true) should not print error messages.
+    // We can't easily test stderr output, but we can verify the outcome
+    // is correct: pipe failure returns Default, not an error.
+    let mut t = Test::new();
+    let mut flags = Flags::new();
+    flags.wait = true;
+    flags.quiet = true;
+
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![],
+            action: Action::Pipe {
+                cmd: "false".into(),
+                capture: None,
+            },
+        },
+        line: 0,
+    }];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn head_and_body_flag_greps_both() {
+    let mut t = Test::with_msg("Subject: test\n\nBody has keyword");
+    let mut flags = Flags::new();
+    flags.head = true;
+    flags.body = true;
+
+    // Pattern in body, grepping both H and B
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "keyword".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("both"))]),
+        },
+        line: 0,
+    }];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn head_and_body_case_sensitive() {
+    let mut t = Test::with_msg("Subject: TEST\n\nBODY");
+    let mut flags = Flags::new();
+    flags.head = true;
+    flags.body = true;
+    flags.case = true;
+
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![Condition::Regex {
+                pattern: "test".to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("hbd"))]),
+        },
+        line: 0,
+    }];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn copy_and_wait() {
+    // cw: copy flag + wait flag on a pipe
+    let mut t = Test::new();
+    let mut flags = Flags::new();
+    flags.copy = true;
+    flags.wait = true;
+
+    let items = vec![
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Pipe {
+                    cmd: "true".into(),
+                    capture: None,
+                },
+            },
+            line: 0,
+        },
+        Item::Recipe {
+            recipe: Recipe {
+                flags: Flags::new(),
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("after"))]),
+            },
+            line: 0,
+        },
+    ];
+    assert!(
+        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("after"))
+    );
+}
+
+#[test]
+fn filter_replaces_message() {
+    let mut t = Test::with_msg("Subject: test\n\nOriginal body");
+    let mut flags = Flags::new();
+    flags.filter = true;
+    flags.wait = true;
+
+    let items = vec![
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Pipe {
+                    cmd: "echo filtered".into(),
+                    capture: None,
+                },
+            },
+            line: 0,
+        },
+        Item::Recipe {
+            recipe: Recipe {
+                flags: Flags::new(),
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("out"))]),
+            },
+            line: 0,
+        },
+    ];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    // Message should have been replaced by filter output
+    assert!(
+        !t.msg.as_bytes().windows(8).any(|w| w == b"Original"),
+        "original body should be replaced"
+    );
+}
+
+#[test]
 fn backtick_spawn_failure_returns_empty() {
     let mut env = Environment::new();
     env.set("SHELL", "/no/such/shell");
