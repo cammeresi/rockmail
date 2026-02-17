@@ -63,6 +63,22 @@ fn regex_recipe(pattern: &str, folder: &str) -> Item {
     }
 }
 
+fn shell_recipe(cmd: &str, folder: &str) -> Item {
+    Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: cmd.to_string(),
+                negate: false,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(folder)]),
+        },
+        line: 0,
+    }
+}
+
 #[test]
 fn no_recipes_returns_default() {
     let mut t = Test::new();
@@ -1396,4 +1412,181 @@ fn dryrun_log_header_expands_vars() {
     }];
     t.process(&items);
     assert_eq!(t.msg.get_header("X-By").as_deref(), Some("alice"));
+}
+
+#[test]
+fn shell_true_delivers() {
+    let mut t = Test::new();
+    let items = vec![shell_recipe("/bin/true", &t.maildir("inbox"))];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn shell_false_skips() {
+    let mut t = Test::new();
+    let items = vec![shell_recipe("/bin/false", &t.maildir("inbox"))];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn shell_negated_true_skips() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: "/bin/true".into(),
+                negate: true,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
+        },
+        line: 0,
+    }];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn shell_negated_false_delivers() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: "/bin/false".into(),
+                negate: true,
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
+        },
+        line: 0,
+    }];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+}
+
+#[test]
+fn shell_sets_last_exit() {
+    let mut t = Test::new();
+    let items = vec![shell_recipe("exit 7", &t.maildir("inbox"))];
+    assert_eq!(t.process(&items), Outcome::Default);
+    assert_eq!(t.engine.ctx.last_exit, 7);
+}
+
+#[test]
+fn shell_weighted_exit_zero() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: "/bin/true".into(),
+                negate: false,
+                weight: Some(Weight { w: 5.0, x: 2.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    assert_eq!(t.engine.ctx.last_score, 5);
+}
+
+#[test]
+fn shell_weighted_exit_nonzero() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: "/bin/false".into(),
+                negate: false,
+                weight: Some(Weight { w: 5.0, x: 2.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    assert_eq!(t.engine.ctx.last_score, 2);
+}
+
+#[test]
+fn shell_weighted_negated_loop() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: "exit 3".into(),
+                negate: true,
+                weight: Some(Weight { w: 2.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    assert_eq!(t.engine.ctx.last_score, 6);
+}
+
+#[test]
+fn shell_weighted_negated_decay() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: "exit 3".into(),
+                negate: true,
+                weight: Some(Weight { w: 1.0, x: 0.5 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    assert_eq!(t.engine.ctx.last_score, 1);
+}
+
+#[test]
+fn shell_weighted_negated_exit_zero() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Shell {
+                cmd: "/bin/true".into(),
+                negate: true,
+                weight: Some(Weight { w: 5.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    assert_eq!(t.process(&items), Outcome::Default);
+    assert_eq!(t.engine.ctx.last_score, 0);
+}
+
+#[test]
+fn shell_spawn_failure() {
+    let mut t = Test::new();
+    t.engine.set_var("SHELL", "/no/such/shell");
+    let items = vec![shell_recipe("true", &t.maildir("inbox"))];
+    assert!(t.try_process(&items).is_err());
+}
+
+#[test]
+fn shell_timeout_fails() {
+    let mut t = Test::new();
+    t.engine.set_var("TIMEOUT", "1");
+    let items = vec![shell_recipe("sleep 60", &t.maildir("inbox"))];
+    assert_eq!(t.process(&items), Outcome::Default);
+    assert_eq!(t.engine.ctx.last_exit, -1);
 }

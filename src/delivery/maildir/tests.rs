@@ -6,8 +6,6 @@ use tempfile::tempdir;
 use super::*;
 use crate::delivery::{DeliveryError, tests::msg};
 
-// --- dir delivery tests ---
-
 #[test]
 fn dir_creates_dir() {
     let dir = tempdir().unwrap();

@@ -1081,6 +1081,85 @@ matched/
 }
 
 #[test]
+fn shell_true_delivers() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ? /bin/true
+matched/
+";
+    GoldTest::new(rc, MSGS).run();
+}
+
+#[test]
+fn shell_false_skips() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ? /bin/false
+matched/
+";
+    GoldTest::new(rc, MSGS).run();
+}
+
+#[test]
+fn shell_negated_false_delivers() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ! ? /bin/false
+matched/
+";
+    GoldTest::new(rc, MSGS).run();
+}
+
+#[test]
+fn shell_negated_true_skips() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ! ? /bin/true
+matched/
+";
+    GoldTest::new(rc, MSGS).run();
+}
+
+#[test]
+fn shell_exit_code() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ? exit 3
+matched/
+";
+    GoldTest::new(rc, MSGS).run();
+}
+
+#[test]
+fn weighted_shell_exit_nonzero() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 5^2 ? /bin/false
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
 fn subst_item_in_rcfile() {
     let rc = "\
 MAILDIR=$MAILDIR
