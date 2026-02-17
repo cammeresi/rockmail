@@ -59,16 +59,14 @@ Procmail's `mailstat` has no configuration file. Rockmail adds support for
 
 The default date format is `%e %b, %H:%M`.
 
-## formail: -Y flag
+## formail removed
 
-The original formail's `-Y` flag (ignore Content-Length headers) is not
-implemented. Content-Length headers are always ignored since rockmail uses
-From_ line detection for message boundaries.
-
-## formail: -q- syntax
-
-The `-q-` syntax to disable quiet mode is not implemented. The `-q` flag
-is accepted but has no effect (quiet mode is always on).
+Formail has been removed due to security issues.  Procmail idioms tend to
+pass untrusted input through the shell when piping to formail, which
+creates command injection risks.  The header manipulation and duplicate
+detection functions that formail provided are available natively via the
+`@I`/`@i`/`@a`/`@A` header ops and `@D` duplicate detection described in
+`ENHANCEMENTS.md`.
 
 ## Comsat/Biff Notifications
 
@@ -78,15 +76,6 @@ controls this.
 
 Rockmail does not support comsat notifications. The `COMSAT` variable
 is ignored. This feature is rarely used on modern systems.
-
-## formail: -s with command
-
-The `-s` (split) flag does not support piping to a command. Only `-s`
-without arguments is supported, which outputs split messages to stdout.
-
-## formail: -B flag
-
-Splitting BABYL format mailboxes is unsupported.
 
 ## TIMEOUT: SIGKILL escalation
 

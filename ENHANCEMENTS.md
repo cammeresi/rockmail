@@ -103,6 +103,5 @@ regex patterns can match the decoded text directly — e.g. a pattern for
 "café" will match `=?UTF-8?Q?caf=C3=A9?=`. Procmail matches headers in
 raw encoded form only.
 
-Formail's `-x` flag outputs decoded header values. The `-I`, `-i`, `-a`,
-and `-A` flags automatically encode non-ASCII values as RFC 2047 encoded
-words when inserting headers.
+The `@I`, `@i`, `@a`, and `@A` header ops automatically encode non-ASCII
+values as RFC 2047 encoded words when inserting headers.
