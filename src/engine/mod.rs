@@ -1280,23 +1280,63 @@ impl Engine {
         *msg = Message::from_parts(&header, msg.body());
     }
 
+    fn process_assign(
+        &mut self, name: &str, value: &str, line: usize, msg: &Message,
+    ) {
+        let expanded = self.expand_assign(value, Some(msg));
+        if self.dryrun && !is_builtin(name) {
+            self.drylog(line, &format!("assign: {}={:?}", name, expanded));
+        }
+        self.set_var(name, &expanded);
+    }
+
+    fn process_subst(
+        &mut self, name: &str, pat: &str, rep: &str, global: bool, ci: bool,
+        line: usize,
+    ) {
+        self.apply_subst(name, pat, rep, global, ci);
+        if self.dryrun {
+            let flags = match (global, ci) {
+                (true, true) => "gi",
+                (true, false) => "g",
+                (false, true) => "i",
+                (false, false) => "",
+            };
+            let val = self.get_var(name).unwrap_or("");
+            self.drylog(
+                line,
+                &format!(
+                    "subst: {} =~ s/{}/{}/{} -> {:?}",
+                    name, pat, rep, flags, val
+                ),
+            );
+        }
+    }
+
+    fn process_header_ops(
+        &mut self, items: &[Item], start: usize, msg: &mut Message,
+    ) -> usize {
+        let mut i = start;
+        while i < items.len() && matches!(items[i], Item::HeaderOp { .. }) {
+            if let Item::HeaderOp { op, line } = &items[i]
+                && self.dryrun
+            {
+                self.log_header_op(op, *line);
+            }
+            i += 1;
+        }
+        self.apply_header_ops(&items[start..i], msg);
+        i
+    }
+
     fn process_items(
         &mut self, items: &[Item], msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
         let mut i = 0;
         while i < items.len() {
             match &items[i] {
-                Item::Assign {
-                    name, value, line, ..
-                } => {
-                    let expanded = self.expand_assign(value, Some(msg));
-                    if self.dryrun && !is_builtin(name) {
-                        self.drylog(
-                            *line,
-                            &format!("assign: {}={:?}", name, expanded),
-                        );
-                    }
-                    self.set_var(name, &expanded);
+                Item::Assign { name, value, line } => {
+                    self.process_assign(name, value, *line, msg);
                     if self.abort {
                         self.abort = false;
                         return Ok(Outcome::Default);
@@ -1310,75 +1350,34 @@ impl Engine {
                     case_insensitive,
                     line,
                 } => {
-                    self.apply_subst(
+                    self.process_subst(
                         name,
                         pattern,
                         replace,
                         *global,
                         *case_insensitive,
+                        *line,
                     );
-                    if self.dryrun {
-                        let flags = match (*global, *case_insensitive) {
-                            (true, true) => "gi",
-                            (true, false) => "g",
-                            (false, true) => "i",
-                            (false, false) => "",
-                        };
-                        let val = self.get_var(name).unwrap_or("");
-                        self.drylog(
-                            *line,
-                            &format!(
-                                "subst: {} =~ s/{}/{}/{} -> {:?}",
-                                name, pattern, replace, flags, val
-                            ),
-                        );
-                    }
                 }
                 Item::HeaderOp { .. } => {
-                    let start = i;
-                    while i < items.len()
-                        && matches!(items[i], Item::HeaderOp { .. })
-                    {
-                        if let Item::HeaderOp { op, line } = &items[i]
-                            && self.dryrun
-                        {
-                            self.log_header_op(op, *line);
-                        }
-                        i += 1;
-                    }
-                    self.apply_header_ops(&items[start..i], msg);
+                    i = self.process_header_ops(items, i, msg);
                     continue;
                 }
                 Item::Recipe { recipe, line } => {
-                    let outcome =
-                        self.eval_recipe(recipe, *line, msg, state)?;
-                    match outcome {
-                        Outcome::Delivered(_) => return Ok(outcome),
-                        Outcome::Continue | Outcome::Default => {}
-                    }
-                }
-                Item::Include { path, .. } => {
-                    if let Some(o) = self.process_rcfile(
-                        path,
-                        VAR_INCLUDERC,
-                        false,
-                        msg,
-                        state,
-                    )? {
+                    let o = self.eval_recipe(recipe, *line, msg, state)?;
+                    if matches!(o, Outcome::Delivered(_)) {
                         return Ok(o);
                     }
                 }
-                Item::Switch { path, .. } => {
-                    if path.is_empty() {
+                Item::Include { path, .. } | Item::Switch { path, .. } => {
+                    let switch = matches!(items[i], Item::Switch { .. });
+                    if switch && path.is_empty() {
                         return Ok(Outcome::Default);
                     }
-                    if let Some(o) = self.process_rcfile(
-                        path,
-                        VAR_SWITCHRC,
-                        true,
-                        msg,
-                        state,
-                    )? {
+                    let var = if switch { VAR_SWITCHRC } else { VAR_INCLUDERC };
+                    if let Some(o) =
+                        self.process_rcfile(path, var, switch, msg, state)?
+                    {
                         return Ok(o);
                     }
                 }
