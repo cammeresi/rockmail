@@ -70,7 +70,7 @@ The value undergoes `$VAR` expansion but never touches a shell.
 
 Check the Message-ID against a cache file and set `DUPLICATE=yes` if the
 message has been seen before.  This replaces the common procmail idiom of
-piping through `formail -D` without forking a subprocess.
+piping through `formail -D` but without forking a subprocess.
 
 ### Syntax
 
@@ -84,11 +84,10 @@ size in bytes; `cachefile` is the path to the circular cache.
 ### Example
 
 ```
-# Check for duplicates (sets DUPLICATE variable)
-@D 8192 $HOME/.msgid-cache
+:0 Wh:
+@D 8192 .msgid.cache
 
-# Discard duplicates
-:0:
+:0
 * DUPLICATE ?? yes
 /dev/null
 ```

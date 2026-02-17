@@ -21,6 +21,13 @@ pub enum Action {
     Forward(Vec<String>),
     /// Nested block
     Nested(Vec<Item>),
+    /// Duplicate detection (`@D maxlen cache`).
+    DupeCheck {
+        /// Max cache size in bytes.
+        maxlen: String,
+        /// Path to the cache file.
+        cache: String,
+    },
 }
 
 impl Action {
@@ -56,6 +63,16 @@ impl Action {
             return Action::Pipe {
                 cmd: rest.trim_start().to_string(),
                 capture: None,
+            };
+        }
+
+        if let Some(rest) = s.strip_prefix("@D")
+            && let Some((maxlen, cache)) =
+                rest.trim_start().split_once(char::is_whitespace)
+        {
+            return Action::DupeCheck {
+                maxlen: maxlen.trim().into(),
+                cache: cache.trim().into(),
             };
         }
 

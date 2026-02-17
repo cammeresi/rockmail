@@ -866,16 +866,26 @@ fn header_op_add_always_duplicate() {
     assert!(raw.contains("X-Tag: second"), "duplicate header not added");
 }
 
+fn dedup_recipe(cache: &str) -> Vec<Item> {
+    vec![Item::Recipe {
+        recipe: Recipe::new(
+            Flags::new(),
+            None,
+            vec![],
+            Action::DupeCheck {
+                maxlen: "8192".into(),
+                cache: cache.into(),
+            },
+        ),
+        line: 0,
+    }]
+}
+
 #[test]
 fn dupecheck_new_message() {
     let mut t = Test::with_msg("Message-ID: <unique@example>\n\nbody");
     let cache = t.folder("msgid.cache");
-    let items = vec![Item::DupeCheck {
-        maxlen: "8192".into(),
-        cache: cache.to_string_lossy().into(),
-        line: 0,
-    }];
-    t.process(&items);
+    t.process(&dedup_recipe(&cache.to_string_lossy()));
     assert_eq!(t.engine.get_var("DUPLICATE"), Some(""));
 }
 
@@ -884,21 +894,11 @@ fn dupecheck_duplicate() {
     let mut t = Test::with_msg("Message-ID: <dup@example>\n\nbody");
     let cache = t.folder("msgid.cache");
     let path: String = cache.to_string_lossy().into();
-    let items = vec![Item::DupeCheck {
-        maxlen: "8192".into(),
-        cache: path.clone(),
-        line: 0,
-    }];
-    t.process(&items);
+    t.process(&dedup_recipe(&path));
     assert_eq!(t.engine.get_var("DUPLICATE"), Some(""));
 
     let mut t2 = Test::with_msg("Message-ID: <dup@example>\n\nbody");
-    let items2 = vec![Item::DupeCheck {
-        maxlen: "8192".into(),
-        cache: path,
-        line: 0,
-    }];
-    t2.process(&items2);
+    t2.process(&dedup_recipe(&path));
     assert_eq!(t2.engine.get_var("DUPLICATE"), Some("yes"));
 }
 
@@ -906,12 +906,7 @@ fn dupecheck_duplicate() {
 fn dupecheck_no_msgid() {
     let mut t = Test::with_msg("Subject: test\n\nbody");
     let cache = t.folder("msgid.cache");
-    let items = vec![Item::DupeCheck {
-        maxlen: "8192".into(),
-        cache: cache.to_string_lossy().into(),
-        line: 0,
-    }];
-    t.process(&items);
+    t.process(&dedup_recipe(&cache.to_string_lossy()));
     assert_eq!(t.engine.get_var("DUPLICATE"), Some(""));
 }
 

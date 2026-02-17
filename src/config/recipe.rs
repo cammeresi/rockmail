@@ -124,7 +124,7 @@ impl Recipe {
             Action::Pipe {
                 capture: Some(_), ..
             } => false,
-            Action::Nested(_) => false,
+            Action::Nested(_) | Action::DupeCheck { .. } => false,
         }
     }
 }
@@ -195,11 +195,6 @@ pub enum Item {
     },
     Switch {
         path: String,
-        line: usize,
-    },
-    DupeCheck {
-        maxlen: String,
-        cache: String,
         line: usize,
     },
 }

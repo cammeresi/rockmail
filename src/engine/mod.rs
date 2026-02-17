@@ -1060,7 +1060,8 @@ impl Engine {
 
     /// Perform the recipe's action.
     fn perform_action(
-        &mut self, recipe: &Recipe, msg: &mut Message, state: &mut State,
+        &mut self, recipe: &Recipe, line: usize, msg: &mut Message,
+        state: &mut State,
     ) -> EngineResult<Outcome> {
         let _lock = if self.dryrun {
             None
@@ -1101,6 +1102,10 @@ impl Engine {
                 self.forward(recipe, msg, &expanded)
             }
             Action::Nested(items) => self.process_items(items, msg, state),
+            Action::DupeCheck { maxlen, cache } => {
+                self.handle_dupecheck(maxlen, cache, line, msg);
+                Ok(Outcome::Default)
+            }
         }
     }
 
@@ -1137,7 +1142,7 @@ impl Engine {
             self.log_match(recipe, line);
         }
 
-        let result = self.perform_action(recipe, msg, state)?;
+        let result = self.perform_action(recipe, line, msg, state)?;
 
         state.last_succ =
             matches!(result, Outcome::Delivered(_) | Outcome::Continue);
@@ -1381,13 +1386,6 @@ impl Engine {
                         return Ok(o);
                     }
                 }
-                Item::DupeCheck {
-                    maxlen,
-                    cache,
-                    line,
-                } => {
-                    self.handle_dupecheck(maxlen, cache, *line, msg);
-                }
             }
             i += 1;
         }
@@ -1427,7 +1425,7 @@ impl Engine {
                     addrs.iter().map(|a| self.expand(a, None)).collect();
                 format!("forward: {}", expanded.join(" "))
             }
-            Action::Nested(_) => return,
+            Action::Nested(_) | Action::DupeCheck { .. } => return,
         };
         self.drylog(line, &msg);
     }

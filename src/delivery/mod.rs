@@ -151,6 +151,9 @@ impl FolderType {
 
 /// Set the "new mail" permission bit on a folder after delivery.
 pub fn update_perms(path: &Path) {
+    if path.starts_with("/dev/") {
+        return;
+    }
     let Ok(meta) = fs::metadata(path) else { return };
     let mode = meta.permissions().mode();
     if mode & UPDATE_MASK == 0
