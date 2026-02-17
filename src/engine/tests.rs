@@ -835,6 +835,36 @@ fn header_ops_batched() {
 }
 
 #[test]
+fn header_op_add_always() {
+    let mut t = Test::with_msg("Subject: test\n\nbody");
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::AddAlways {
+            field: "X-Tag".into(),
+            value: "first".into(),
+        },
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("X-Tag").as_deref(), Some("first"));
+}
+
+#[test]
+fn header_op_add_always_duplicate() {
+    let mut t = Test::with_msg("X-Tag: existing\n\nbody");
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::AddAlways {
+            field: "X-Tag".into(),
+            value: "second".into(),
+        },
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("X-Tag").as_deref(), Some("existing"));
+    let raw = std::str::from_utf8(t.msg.header()).unwrap();
+    assert!(raw.contains("X-Tag: second"), "duplicate header not added");
+}
+
+#[test]
 fn dupecheck_new_message() {
     let mut t = Test::with_msg("Message-ID: <unique@example>\n\nbody");
     let cache = t.folder("msgid.cache");
