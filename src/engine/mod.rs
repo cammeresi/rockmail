@@ -217,16 +217,24 @@ fn run_backtick(
         .stderr(Stdio::null())
         .spawn();
     let Ok(mut child) = child else {
+        eprintln!("Failed forking \"{}\"", cmd);
         return String::new();
     };
-    if let Some(mut w) = child.stdin.take() {
-        let _ = w.write_all(input);
+    if let Some(mut w) = child.stdin.take()
+        && let Err(e) = w.write_all(input)
+        && e.kind() != ErrorKind::BrokenPipe
+    {
+        eprintln!("Error writing to \"{}\" stdin: {}", cmd, e);
     }
     let mut buf = Vec::new();
-    if let Some(mut r) = child.stdout.take() {
-        let _ = io::Read::read_to_end(&mut r, &mut buf);
+    if let Some(mut r) = child.stdout.take()
+        && let Err(e) = io::Read::read_to_end(&mut r, &mut buf)
+    {
+        eprintln!("Error reading from \"{}\" stdout: {}", cmd, e);
     }
-    let _ = wait_timeout(&mut child, timeout, cmd);
+    if let Err(e) = wait_timeout(&mut child, timeout, cmd) {
+        eprintln!("Error waiting for \"{}\": {}", cmd, e);
+    }
     while buf.last() == Some(&b'\n') {
         buf.pop();
     }
@@ -1507,9 +1515,15 @@ impl Engine {
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn();
-        let Ok(mut child) = child else { return };
-        if let Some(mut w) = child.stdin.take() {
-            let _ = w.write_all(msg.as_bytes());
+        let Ok(mut child) = child else {
+            eprintln!("Failed forking \"{}\"", cmd);
+            return;
+        };
+        if let Some(mut w) = child.stdin.take()
+            && let Err(e) = w.write_all(msg.as_bytes())
+            && e.kind() != ErrorKind::BrokenPipe
+        {
+            eprintln!("Error writing to \"{}\" stdin: {}", cmd, e);
         }
         let timeout = self.timeout();
         if let Ok(status) = wait_timeout(&mut child, timeout, &cmd) {

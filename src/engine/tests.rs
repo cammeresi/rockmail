@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use tempfile::TempDir;
 
@@ -962,4 +963,32 @@ fn pipe_spawn_failure() {
     }];
     let err = t.try_process(&items).unwrap_err();
     assert!(matches!(err, EngineError::Delivery(_)));
+}
+
+#[test]
+fn backtick_spawn_failure_returns_empty() {
+    let mut env = Environment::new();
+    env.set("SHELL", "/no/such/shell");
+    let r = super::run_backtick(&env, "echo hi", b"", Duration::from_secs(5));
+    assert_eq!(r, "");
+}
+
+#[test]
+fn backtick_captures_stdout() {
+    let env = Environment::new();
+    let r =
+        super::run_backtick(&env, "echo hello", b"", Duration::from_secs(5));
+    assert_eq!(r, "hello");
+}
+
+#[test]
+fn backtick_strips_trailing_newlines() {
+    let env = Environment::new();
+    let r = super::run_backtick(
+        &env,
+        "printf 'abc\\n\\n\\n'",
+        b"",
+        Duration::from_secs(5),
+    );
+    assert_eq!(r, "abc");
 }
