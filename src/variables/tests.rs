@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::*;
 
 #[test]
@@ -50,4 +52,147 @@ fn is_true() {
     assert!(!value_is_true("no"));
     assert!(!value_is_true("off"));
     assert!(!value_is_true(""));
+}
+
+#[test]
+fn env_get_set() {
+    let mut e = Environment::new();
+    assert_eq!(e.get("FOO"), None);
+    e.set("FOO", "bar");
+    assert_eq!(e.get("FOO"), Some("bar"));
+}
+
+#[test]
+fn env_get_or_default_explicit() {
+    let mut e = Environment::new();
+    e.set("SHELL", "/bin/zsh");
+    assert_eq!(e.get_or_default(&SHELL), "/bin/zsh");
+}
+
+#[test]
+fn env_get_or_default_builtin() {
+    let e = Environment::new();
+    assert_eq!(e.get_or_default(&SHELL), "/bin/sh");
+}
+
+#[test]
+fn env_get_or_default_no_default() {
+    let e = Environment::new();
+    assert_eq!(e.get_or_default(&HOME), "");
+}
+
+#[test]
+fn env_get_or_default_str_key() {
+    let e = Environment::new();
+    assert_eq!(e.get_or_default("UNKNOWN"), "");
+}
+
+#[test]
+fn env_get_num_set() {
+    let mut e = Environment::new();
+    e.set("TIMEOUT", "300");
+    assert_eq!(e.get_num(&TIMEOUT), 300);
+}
+
+#[test]
+fn env_get_num_default() {
+    let e = Environment::new();
+    assert_eq!(e.get_num(&TIMEOUT), 960);
+}
+
+#[test]
+fn env_get_num_unparseable() {
+    let mut e = Environment::new();
+    e.set("TIMEOUT", "junk");
+    assert_eq!(e.get_num(&TIMEOUT), 960);
+}
+
+#[test]
+fn env_get_num_no_default() {
+    let e = Environment::new();
+    assert_eq!(e.get_num(&HOME), 0);
+}
+
+#[test]
+fn env_remove() {
+    let mut e = Environment::new();
+    e.set("X", "1");
+    e.remove("X");
+    assert_eq!(e.get("X"), None);
+}
+
+#[test]
+fn env_remove_absent() {
+    let mut e = Environment::new();
+    e.remove("NONEXISTENT");
+    assert_eq!(e.get("NONEXISTENT"), None);
+}
+
+#[test]
+fn env_set_default() {
+    let mut e = Environment::new();
+    e.set_default(&SHELL);
+    assert_eq!(e.get(&SHELL), Some("/bin/sh"));
+}
+
+#[test]
+fn env_set_default_no_default() {
+    let mut e = Environment::new();
+    e.set_default(&HOME);
+    assert_eq!(e.get(&HOME), Some(""));
+}
+
+#[test]
+fn env_set_all_defaults() {
+    let mut e = Environment::new();
+    e.set_all_defaults();
+    assert_eq!(e.get(&SHELL), Some("/bin/sh"));
+    assert_eq!(e.get(&TIMEOUT), Some("960"));
+    assert_eq!(e.get(&LOCKEXT), Some(".lock"));
+    assert_eq!(e.get(&HOME), None);
+}
+
+#[test]
+fn env_timeout_default() {
+    let e = Environment::new();
+    assert_eq!(e.timeout(), Duration::from_secs(960));
+}
+
+#[test]
+fn env_timeout_custom() {
+    let mut e = Environment::new();
+    e.set("TIMEOUT", "30");
+    assert_eq!(e.timeout(), Duration::from_secs(30));
+}
+
+#[test]
+fn env_timeout_zero() {
+    let mut e = Environment::new();
+    e.set("TIMEOUT", "0");
+    assert_eq!(e.timeout(), Duration::MAX);
+}
+
+#[test]
+fn env_timeout_negative() {
+    let mut e = Environment::new();
+    e.set("TIMEOUT", "-1");
+    assert_eq!(e.timeout(), Duration::MAX);
+}
+
+#[test]
+fn env_iter() {
+    let mut e = Environment::new();
+    e.set("A", "1");
+    e.set("B", "2");
+    let mut pairs: Vec<_> = e.iter().collect();
+    pairs.sort();
+    assert_eq!(pairs, vec![("A", "1"), ("B", "2")]);
+}
+
+#[test]
+fn env_set_overwrites() {
+    let mut e = Environment::new();
+    e.set("X", "old");
+    e.set("X", "new");
+    assert_eq!(e.get("X"), Some("new"));
 }
