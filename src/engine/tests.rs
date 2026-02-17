@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 
 use tempfile::TempDir;
@@ -911,4 +912,54 @@ fn dupecheck_no_msgid() {
     }];
     t.process(&items);
     assert_eq!(t.engine.get_var("DUPLICATE"), Some(""));
+}
+
+#[test]
+fn recursion_limit() {
+    let mut t = Test::new();
+    let rc = t.folder("self.rc");
+    let text = format!("INCLUDERC={}", rc.display());
+    fs::write(&rc, text).unwrap();
+    let items = vec![Item::Include {
+        path: rc.to_string_lossy().into(),
+        line: 0,
+    }];
+    let err = t.try_process(&items).unwrap_err();
+    assert!(matches!(err, EngineError::RecursionLimit));
+}
+
+#[test]
+fn lock_failure() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: Some("/no/such/dir/test.lock".into()),
+            conds: vec![],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("inbox"))]),
+        },
+        line: 0,
+    }];
+    let err = t.try_process(&items).unwrap_err();
+    assert!(matches!(err, EngineError::Lock(_)));
+}
+
+#[test]
+fn pipe_spawn_failure() {
+    let mut t = Test::new();
+    t.engine.set_var("SHELL", "/no/such/shell");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![],
+            action: Action::Pipe {
+                cmd: "true".into(),
+                capture: None,
+            },
+        },
+        line: 0,
+    }];
+    let err = t.try_process(&items).unwrap_err();
+    assert!(matches!(err, EngineError::Delivery(_)));
 }
