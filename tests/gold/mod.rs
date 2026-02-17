@@ -37,10 +37,8 @@ pub const LISTS: &[&str] =
     &["dev@lists.net", "announce@lists.net", "security@lists.net"];
 
 fn copy_dir(src: &Path, dst: &Path) {
-    let _ = fs::create_dir_all(dst);
-    let Ok(entries) = fs::read_dir(src) else {
-        return;
-    };
+    fs::create_dir_all(dst).expect("couldn't mkdir to copy failure");
+    let entries = fs::read_dir(src).expect("couldn't read failure dir");
     for e in entries.flatten() {
         let p = e.path();
         let target = dst.join(e.file_name());
@@ -55,7 +53,7 @@ fn copy_dir(src: &Path, dst: &Path) {
 fn preserve_failure(g: &Gold, rc: &str, inputs: &[&[u8]]) -> PathBuf {
     let dir = PathBuf::from("tmp")
         .join(format!("rockmail-gold-fail-{}", process::id()));
-    let _ = fs::create_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("couldn't mkdir to preserve failure");
     fs::write(dir.join("rcfile"), rc).ok();
     for (i, msg) in inputs.iter().enumerate() {
         fs::write(dir.join(format!("msg-{i:02}")), msg).ok();
