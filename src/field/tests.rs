@@ -39,6 +39,14 @@ fn field_rename() {
 }
 
 #[test]
+fn rename_without_colon() {
+    let mut f = Field::new(b"Subject: Test\n".to_vec()).unwrap();
+    f.rename(b"X-Subject");
+    assert_eq!(f.name(), b"X-Subject");
+    assert_eq!(&f.text, b"X-Subject: Test\n");
+}
+
+#[test]
 fn read_header_basic() {
     let input = b"From: user@host\nSubject: Test\n\nBody here\n";
     let (fields, body) = read_headers(&input[..]).unwrap();
@@ -180,6 +188,34 @@ fn prepend_old_prefixes() {
     list.prepend_old(b"Subject");
     assert_eq!(list[0].name(), b"Old-Subject");
     assert_eq!(list[1].name(), b"From");
+}
+
+#[test]
+fn whitespace_before_colon() {
+    let f = Field::new(b"Subject : Hello\n".to_vec()).unwrap();
+    // "Subject " (8 bytes), colon at [8], name_len = 9
+    assert_eq!(f.name_len, 9);
+    // name() includes trailing whitespace before colon
+    assert_eq!(f.name(), b"Subject ");
+    assert_eq!(f.value(), b" Hello");
+}
+
+#[test]
+fn whitespace_tab_before_colon() {
+    let f = Field::new(b"Subject\t: Hello\n".to_vec()).unwrap();
+    assert_eq!(f.value(), b" Hello");
+}
+
+#[test]
+fn whitespace_multi_before_colon() {
+    let f = Field::new(b"Subject \t : Hello\n".to_vec()).unwrap();
+    assert_eq!(f.value(), b" Hello");
+}
+
+#[test]
+fn whitespace_no_colon_after() {
+    // Whitespace followed by non-colon → not a header
+    assert!(Field::new(b"Not a header\n".to_vec()).is_none());
 }
 
 #[test]

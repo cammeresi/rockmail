@@ -5,6 +5,9 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use nix::fcntl::{Flock, FlockArg};
 
+#[cfg(test)]
+mod tests;
+
 /// Check if `key` exists in the cache file at `path`.
 ///
 /// Returns `true` if `key` was already present (duplicate).  If new,
