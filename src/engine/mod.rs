@@ -190,20 +190,14 @@ fn skip_from_line(data: &[u8]) -> &[u8] {
     data
 }
 
-fn unfold_and_decode(header: &[u8]) -> Cow<'static, str> {
+fn unfold_and_decode(header: &[u8]) -> String {
     let mut fields = field::parse_bytes(header);
     for f in fields.iter_mut() {
         f.concatenate();
     }
     let mut buf = Vec::with_capacity(header.len());
     fields.write_to(&mut buf).unwrap();
-    Cow::Owned(rfc2047::decode(&buf).into_owned())
-}
-
-fn decode_header_and_body(msg: &Message) -> Cow<'_, str> {
-    let h = unfold_and_decode(msg.header());
-    let b = String::from_utf8_lossy(msg.body());
-    Cow::Owned(format!("{h}{b}"))
+    rfc2047::decode(&buf).into_owned()
 }
 
 /// Spawn `$SHELL $SHELLFLAGS cmd` with `input` on stdin, capture stdout,
@@ -239,9 +233,7 @@ fn run_backtick(
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-fn apply_op_to_fields(
-    op: &HeaderOp, value: &str, fields: &mut FieldList,
-) {
+fn apply_op_to_fields(op: &HeaderOp, value: &str, fields: &mut FieldList) {
     let name = op.field().as_bytes();
     match op {
         HeaderOp::DeleteInsert { .. } => {
@@ -524,22 +516,30 @@ impl Engine {
     }
 
     /// Get text to grep based on H/B flags.
-    fn grep_text<'a>(msg: &'a Message, flags: &Flags) -> Cow<'a, str> {
+    fn grep_text<'a>(
+        msg: &'a Message, flags: &Flags, decoded: &'a str,
+    ) -> Cow<'a, str> {
         match (flags.head, flags.body) {
-            (true, true) => decode_header_and_body(msg),
+            (true, true) => {
+                let b = String::from_utf8_lossy(msg.body());
+                Cow::Owned(format!("{decoded}{b}"))
+            }
             (false, true) => String::from_utf8_lossy(msg.body()),
-            _ => unfold_and_decode(msg.header()),
+            _ => Cow::Borrowed(decoded),
         }
     }
 
     /// Get text for variable condition (VAR ?? pattern).
     fn get_variable_text<'a>(
-        &'a self, name: &str, msg: &'a Message,
+        &'a self, name: &str, msg: &'a Message, decoded: &'a str,
     ) -> Cow<'a, str> {
         match name {
-            "H" => unfold_and_decode(msg.header()),
+            "H" => Cow::Borrowed(decoded),
             "B" => String::from_utf8_lossy(msg.body()),
-            "HB" | "BH" => decode_header_and_body(msg),
+            "HB" | "BH" => {
+                let b = String::from_utf8_lossy(msg.body());
+                Cow::Owned(format!("{decoded}{b}"))
+            }
             _ => Cow::Borrowed(self.get_var(name).unwrap_or("")),
         }
     }
@@ -626,9 +626,9 @@ impl Engine {
 
     fn eval_shell(
         &mut self, cmd: &str, negate: bool, weight: Option<Weight>,
-        recipe: &Recipe, msg: &Message,
+        recipe: &Recipe, msg: &Message, decoded: &str,
     ) -> EngineResult<ConditionResult> {
-        let text = Self::grep_text(msg, &recipe.flags);
+        let text = Self::grep_text(msg, &recipe.flags, decoded);
         let exit = self.run_shell(cmd, text.as_bytes())?;
         self.ctx.last_exit = exit;
         let ok = (exit == 0) ^ negate;
@@ -699,9 +699,9 @@ impl Engine {
 
     fn eval_regex(
         &mut self, pattern: &str, negate: bool, weight: Option<Weight>,
-        recipe: &Recipe, msg: &Message,
+        recipe: &Recipe, msg: &Message, decoded: &str,
     ) -> EngineResult<ConditionResult> {
-        let text = Self::grep_text(msg, &recipe.flags);
+        let text = Self::grep_text(msg, &recipe.flags, decoded);
         let label = format!("\"{}\"", pattern);
         self.eval_pattern(
             &text,
@@ -715,9 +715,9 @@ impl Engine {
 
     fn eval_variable(
         &mut self, name: &str, pattern: &str, weight: Option<Weight>,
-        recipe: &Recipe, msg: &Message,
+        recipe: &Recipe, msg: &Message, decoded: &str,
     ) -> EngineResult<ConditionResult> {
-        let text = self.get_variable_text(name, msg).into_owned();
+        let text = self.get_variable_text(name, msg, decoded).into_owned();
         let label = format!("{} ?? {}", name, pattern);
         self.eval_pattern(
             &text,
@@ -732,13 +732,16 @@ impl Engine {
     /// Evaluate a single condition. Returns (matched, score_delta, is_scored).
     fn eval_condition(
         &mut self, cond: &Condition, recipe: &Recipe, msg: &Message,
+        decoded: &str,
     ) -> EngineResult<ConditionResult> {
         match cond {
             Condition::Regex {
                 pattern,
                 negate,
                 weight,
-            } => self.eval_regex(pattern, *negate, *weight, recipe, msg),
+            } => {
+                self.eval_regex(pattern, *negate, *weight, recipe, msg, decoded)
+            }
             Condition::Size {
                 op,
                 bytes,
@@ -749,15 +752,18 @@ impl Engine {
                 cmd,
                 negate,
                 weight,
-            } => self.eval_shell(cmd, *negate, *weight, recipe, msg),
+            } => self.eval_shell(cmd, *negate, *weight, recipe, msg, decoded),
             Condition::Variable {
                 name,
                 pattern,
                 weight,
-            } => self.eval_variable(name, pattern, *weight, recipe, msg),
+            } => {
+                self.eval_variable(name, pattern, *weight, recipe, msg, decoded)
+            }
             Condition::Subst { inner, negate } => {
                 let expanded = self.expand_condition(inner, msg);
-                let mut r = self.eval_condition(&expanded, recipe, msg)?;
+                let mut r =
+                    self.eval_condition(&expanded, recipe, msg, decoded)?;
                 r.matched ^= negate;
                 Ok(r)
             }
@@ -772,12 +778,13 @@ impl Engine {
             return Ok((true, 0.0));
         }
 
+        let decoded = unfold_and_decode(msg.header());
         let mut score = 0.0f64;
         let mut has_score = false;
         let mut failed = false;
 
         for cond in &recipe.conds {
-            let r = self.eval_condition(cond, recipe, msg)?;
+            let r = self.eval_condition(cond, recipe, msg, &decoded)?;
             if !r.matched {
                 failed = true;
             }
