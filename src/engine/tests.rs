@@ -1319,3 +1319,86 @@ fn backtick_strips_trailing_newlines() {
     );
     assert_eq!(r, "abc");
 }
+
+#[test]
+fn dryrun_log_header_delete_insert() {
+    let mut t = Test::with_msg("Subject: old\n\nbody");
+    t.engine.set_dryrun(true);
+    t.engine.set_rcfile("test.rc");
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::DeleteInsert {
+            field: "Subject".into(),
+            value: "new".into(),
+        },
+        line: 5,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
+}
+
+#[test]
+fn dryrun_log_header_rename_insert() {
+    let mut t = Test::with_msg("Subject: old\n\nbody");
+    t.engine.set_dryrun(true);
+    t.engine.set_rcfile("test.rc");
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::RenameInsert {
+            field: "Subject".into(),
+            value: "new".into(),
+        },
+        line: 10,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
+    assert_eq!(t.msg.get_header("Old-Subject").as_deref(), Some("old"));
+}
+
+#[test]
+fn dryrun_log_header_add_if_not() {
+    let mut t = Test::with_msg("Subject: test\n\nbody");
+    t.engine.set_dryrun(true);
+    t.engine.set_rcfile("test.rc");
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::AddIfNot {
+            field: "X-New".into(),
+            value: "added".into(),
+        },
+        line: 3,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("X-New").as_deref(), Some("added"));
+}
+
+#[test]
+fn dryrun_log_header_add_always() {
+    let mut t = Test::with_msg("X-Tag: first\n\nbody");
+    t.engine.set_dryrun(true);
+    t.engine.set_rcfile("test.rc");
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::AddAlways {
+            field: "X-Tag".into(),
+            value: "second".into(),
+        },
+        line: 7,
+    }];
+    t.process(&items);
+    let raw = std::str::from_utf8(t.msg.header()).unwrap();
+    assert!(raw.contains("X-Tag: second"));
+}
+
+#[test]
+fn dryrun_log_header_expands_vars() {
+    let mut t = Test::with_msg("Subject: old\n\nbody");
+    t.engine.set_dryrun(true);
+    t.engine.set_rcfile("test.rc");
+    t.engine.set_var("WHO", "alice");
+    let items = vec![Item::HeaderOp {
+        op: HeaderOp::DeleteInsert {
+            field: "X-By".into(),
+            value: "$WHO".into(),
+        },
+        line: 1,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("X-By").as_deref(), Some("alice"));
+}
