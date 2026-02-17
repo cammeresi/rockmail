@@ -143,6 +143,27 @@ pub enum HeaderOp {
     AddAlways { field: String, value: String },
 }
 
+#[allow(missing_docs)]
+impl HeaderOp {
+    pub fn field(&self) -> &str {
+        match self {
+            Self::DeleteInsert { field, .. }
+            | Self::RenameInsert { field, .. }
+            | Self::AddIfNot { field, .. }
+            | Self::AddAlways { field, .. } => field,
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        match self {
+            Self::DeleteInsert { value, .. }
+            | Self::RenameInsert { value, .. }
+            | Self::AddIfNot { value, .. }
+            | Self::AddAlways { value, .. } => value,
+        }
+    }
+}
+
 /// An rcfile item: variable assignment, recipe, or include directive.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(missing_docs)]

@@ -803,6 +803,38 @@ fn header_op_rename_insert() {
 }
 
 #[test]
+fn header_ops_batched() {
+    let mut t = Test::with_msg("Subject: old\nX-Foo: bar\n\nbody");
+    let items = vec![
+        Item::HeaderOp {
+            op: HeaderOp::DeleteInsert {
+                field: "Subject".into(),
+                value: "new".into(),
+            },
+            line: 0,
+        },
+        Item::HeaderOp {
+            op: HeaderOp::AddAlways {
+                field: "X-Tag".into(),
+                value: "yes".into(),
+            },
+            line: 0,
+        },
+        Item::HeaderOp {
+            op: HeaderOp::AddIfNot {
+                field: "X-Foo".into(),
+                value: "ignored".into(),
+            },
+            line: 0,
+        },
+    ];
+    t.process(&items);
+    assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
+    assert_eq!(t.msg.get_header("X-Tag").as_deref(), Some("yes"));
+    assert_eq!(t.msg.get_header("X-Foo").as_deref(), Some("bar"));
+}
+
+#[test]
 fn dupecheck_new_message() {
     let mut t = Test::with_msg("Message-ID: <unique@example>\n\nbody");
     let cache = t.folder("msgid.cache");

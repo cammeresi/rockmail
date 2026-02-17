@@ -21,7 +21,7 @@ use crate::config::{
 };
 use crate::dedup;
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
-use crate::field::{self, Field};
+use crate::field::{self, Field, FieldList};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::{Matcher, PatternError};
@@ -237,6 +237,32 @@ fn run_backtick(
         buf.pop();
     }
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+fn apply_op_to_fields(
+    op: &HeaderOp, value: &str, fields: &mut FieldList,
+) {
+    let name = op.field().as_bytes();
+    match op {
+        HeaderOp::DeleteInsert { .. } => {
+            fields.remove_all(name);
+            if !value.is_empty() {
+                fields.push(Field::from_parts(name, value.as_bytes()));
+            }
+        }
+        HeaderOp::RenameInsert { .. } => {
+            fields.prepend_old(name);
+            fields.push(Field::from_parts(name, value.as_bytes()));
+        }
+        HeaderOp::AddIfNot { .. } => {
+            if fields.find(name).is_none() {
+                fields.push(Field::from_parts(name, value.as_bytes()));
+            }
+        }
+        HeaderOp::AddAlways { .. } => {
+            fields.push(Field::from_parts(name, value.as_bytes()));
+        }
+    }
 }
 
 /// Recipe evaluation engine.
@@ -1224,48 +1250,15 @@ impl Engine {
     }
 
     /// Apply `@X Header: value` manipulation on the in-flight message.
-    fn apply_header_op(&mut self, op: &HeaderOp, msg: &mut Message) {
-        let (field, value) = match op {
-            HeaderOp::DeleteInsert { field, value }
-            | HeaderOp::RenameInsert { field, value }
-            | HeaderOp::AddIfNot { field, value }
-            | HeaderOp::AddAlways { field, value } => {
-                (field.as_str(), self.expand(value, None))
-            }
-        };
-        let pat = field.as_bytes();
+    fn apply_header_ops(&mut self, ops: &[Item], msg: &mut Message) {
         let mut fields = field::parse_bytes(msg.header());
-        match op {
-            HeaderOp::DeleteInsert { .. } => {
-                fields.remove_all(pat);
-                if !value.is_empty() {
-                    fields.push(Field::from_parts(
-                        field.as_bytes(),
-                        value.as_bytes(),
-                    ));
-                }
-            }
-            HeaderOp::RenameInsert { .. } => {
-                fields.prepend_old(pat);
-                fields.push(Field::from_parts(
-                    field.as_bytes(),
-                    value.as_bytes(),
-                ));
-            }
-            HeaderOp::AddIfNot { .. } => {
-                if fields.find(pat).is_none() {
-                    fields.push(Field::from_parts(
-                        field.as_bytes(),
-                        value.as_bytes(),
-                    ));
-                }
-            }
-            HeaderOp::AddAlways { .. } => {
-                fields.push(Field::from_parts(
-                    field.as_bytes(),
-                    value.as_bytes(),
-                ));
-            }
+        for item in ops {
+            let Item::HeaderOp { op, .. } = item else {
+                unreachable!("expected HeaderOp");
+            };
+            let value = op.value();
+            let value = self.expand(value, None);
+            apply_op_to_fields(op, &value, &mut fields);
         }
         let mut header = Vec::new();
         fields.write_to(&mut header).unwrap();
@@ -1275,8 +1268,9 @@ impl Engine {
     fn process_items(
         &mut self, items: &[Item], msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
-        for item in items {
-            match item {
+        let mut i = 0;
+        while i < items.len() {
+            match &items[i] {
                 Item::Assign {
                     name, value, line, ..
                 } => {
@@ -1325,11 +1319,20 @@ impl Engine {
                         );
                     }
                 }
-                Item::HeaderOp { op, line } => {
-                    if self.dryrun {
-                        self.log_header_op(op, *line);
+                Item::HeaderOp { .. } => {
+                    let start = i;
+                    while i < items.len()
+                        && matches!(items[i], Item::HeaderOp { .. })
+                    {
+                        if let Item::HeaderOp { op, line } = &items[i]
+                            && self.dryrun
+                        {
+                            self.log_header_op(op, *line);
+                        }
+                        i += 1;
                     }
-                    self.apply_header_op(op, msg);
+                    self.apply_header_ops(&items[start..i], msg);
+                    continue;
                 }
                 Item::Recipe { recipe, line } => {
                     let outcome =
@@ -1372,6 +1375,7 @@ impl Engine {
                     self.handle_dupecheck(maxlen, cache, *line, msg);
                 }
             }
+            i += 1;
         }
         Ok(Outcome::Default)
     }
