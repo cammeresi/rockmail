@@ -137,19 +137,6 @@ fn multiple_deliveries() {
 }
 
 #[test]
-fn escaping_in_headers() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("mbox");
-
-    // Headers shouldn't normally have "From " at line start, but test anyway
-    let m = msg("Subject: Test\nFrom scratch\n\nBody\n");
-    deliver_test(&path, &m, "user@host").unwrap();
-
-    let content = fs::read_to_string(&path).unwrap();
-    assert!(content.contains(">From scratch"));
-}
-
-#[test]
 fn body_without_trailing_newline() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("mbox");

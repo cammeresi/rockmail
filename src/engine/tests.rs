@@ -1,4 +1,5 @@
 use std::fs;
+use std::str;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -878,7 +879,8 @@ fn header_op_add_always_duplicate() {
     }];
     t.process(&items);
     assert_eq!(t.msg.get_header("X-Tag").as_deref(), Some("existing"));
-    let raw = std::str::from_utf8(t.msg.header()).unwrap();
+    let hdr = t.msg.header();
+    let raw = str::from_utf8(&hdr).unwrap();
     assert!(raw.contains("X-Tag: second"), "duplicate header not added");
 }
 
@@ -1298,7 +1300,7 @@ fn filter_replaces_message() {
     assert!(matches!(t.process(&items), Outcome::Delivered(_)));
     // Message should have been replaced by filter output
     assert!(
-        !t.msg.as_bytes().windows(8).any(|w| w == b"Original"),
+        !t.msg.body().windows(8).any(|w| w == b"Original"),
         "original body should be replaced"
     );
 }
@@ -1393,7 +1395,8 @@ fn dryrun_log_header_add_always() {
         line: 7,
     }];
     t.process(&items);
-    let raw = std::str::from_utf8(t.msg.header()).unwrap();
+    let hdr = t.msg.header();
+    let raw = str::from_utf8(&hdr).unwrap();
     assert!(raw.contains("X-Tag: second"));
 }
 

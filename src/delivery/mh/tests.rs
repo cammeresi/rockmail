@@ -64,6 +64,16 @@ fn preserves_from_line() {
 }
 
 #[test]
+fn empty_body_no_extra_newline() {
+    let dir = tempdir().unwrap();
+    let mh = dir.path().join("inbox");
+    let m = msg("Subject: Test\n\n");
+    deliver_test(&mh, &m).unwrap();
+    let content = fs::read(mh.join("1")).unwrap();
+    assert_eq!(content, b"Subject: Test\n\n");
+}
+
+#[test]
 fn skips_existing_contiguous() {
     let dir = tempdir().unwrap();
     let mh = dir.path().join("inbox");

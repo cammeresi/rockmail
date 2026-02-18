@@ -5,7 +5,7 @@ use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{DeliveryError, DeliveryOpts, DeliveryResult, io_err};
-use crate::mail::{Message, skip_from_lines};
+use crate::mail::Message;
 
 /// Matches procmail's MAILDIRretries (config.h:243).
 const RETRIES: u32 = 5;
@@ -85,22 +85,14 @@ fn write_msg(path: &Path, msg: &Message, opts: WriteOpts) -> io::Result<usize> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
-    let data = msg.as_bytes();
-    let data = if opts.strip_from && msg.from_line().is_some() {
-        skip_from_lines(data)
-    } else {
-        data
-    };
+    let bytes = msg.write_to(&mut w, opts.strip_from)?;
 
-    w.write_all(data)?;
-    let bytes = data.len();
-
-    let tail = if opts.force_blank {
-        b"\n\n".as_slice()
+    let needs_nl = if opts.force_blank {
+        !msg.ends_with_blank_line()
     } else {
-        b"\n"
+        !msg.ends_with_newline()
     };
-    let extra = if !opts.raw && !data.ends_with(tail) {
+    let extra = if !opts.raw && needs_nl {
         w.write_all(b"\n")?;
         1
     } else {

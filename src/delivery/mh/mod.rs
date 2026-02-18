@@ -53,19 +53,17 @@ fn create_unique(
 fn write_msg(
     file: File, msg: &Message, opts: DeliveryOpts,
 ) -> io::Result<usize> {
-    let data = msg.as_bytes();
-
     let mut w = BufWriter::new(file);
 
-    w.write_all(data)?;
-    let bytes = data.len();
+    let bytes = msg.write_to(&mut w, false)?;
 
-    let mut extra = 0;
-    if !opts.raw && !data.ends_with(b"\n\n") {
-        // weirdly, procmail checks for two then adds only one
+    // weirdly, procmail checks for two then adds only one
+    let extra = if !opts.raw && !msg.ends_with_blank_line() {
         w.write_all(b"\n")?;
-        extra += 1;
-    }
+        1
+    } else {
+        0
+    };
 
     w.flush()?;
     let file = w.into_inner().map_err(|e| e.into_error())?;

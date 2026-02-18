@@ -1,5 +1,11 @@
 use super::*;
 
+fn to_bytes(msg: &Message) -> Vec<u8> {
+    let mut buf = Vec::new();
+    msg.write_to(&mut buf, false).expect("Vec write");
+    buf
+}
+
 #[test]
 fn null_bytes_in_header() {
     let msg = Message::parse(b"Subject: Test\x00null\n\nBody");
@@ -169,9 +175,9 @@ fn empty_message() {
 #[test]
 fn only_body_no_headers() {
     let msg = Message::parse(b"\nJust body text");
-    // Leading newline skipped, no blank line found, so all is header
-    // Actually with one leading newline skipped, "Just body text" has no \n\n
-    assert_eq!(msg.header(), b"Just body text");
+    // Leading newline skipped, no blank line found — raw data has no
+    // valid fields so header is empty, body is empty (no \n\n boundary).
+    assert!(msg.header().is_empty());
     assert_eq!(msg.body(), b"");
 }
 
@@ -225,7 +231,7 @@ fn crlf_headers() {
 #[test]
 fn from_parts_has_separator() {
     let msg = Message::from_parts(b"Subject: Test\n", b"Body");
-    assert_eq!(msg.as_bytes(), b"Subject: Test\n\nBody");
+    assert_eq!(to_bytes(&msg), b"Subject: Test\n\nBody");
 }
 
 #[test]
@@ -250,22 +256,6 @@ fn malformed_header_skipped() {
 }
 
 #[test]
-fn parse_owned_no_copy() {
-    let data = b"Subject: Test\n\nBody".to_vec();
-    let msg = Message::parse_owned(data);
-    assert_eq!(msg.header(), b"Subject: Test\n");
-    assert_eq!(msg.body(), b"Body");
-}
-
-#[test]
-fn parse_owned_with_leading_newlines() {
-    let data = b"\n\nSubject: Test\n\nBody".to_vec();
-    let msg = Message::parse_owned(data);
-    assert_eq!(msg.header(), b"Subject: Test\n");
-    assert_eq!(msg.body(), b"Body");
-}
-
-#[test]
 fn set_envelope_sender_no_existing() {
     let mut msg = Message::parse(b"Subject: Test\n\nBody");
     msg.set_envelope_sender("alice@host");
@@ -281,7 +271,8 @@ fn set_envelope_sender_replaces() {
     );
     msg.set_envelope_sender("new@host");
     assert_eq!(msg.envelope_sender(), Some("new@host"));
-    assert!(!msg.as_bytes().windows(8).any(|w| w == b"old@host"));
+    let bytes = to_bytes(&msg);
+    assert!(!bytes.windows(8).any(|w| w == b"old@host"));
     assert_eq!(msg.body(), b"Body");
 }
 
@@ -309,7 +300,7 @@ fn strip_from_line_noop() {
     let msg_a = Message::parse(b"Subject: Test\n\nBody");
     let mut msg_b = msg_a.clone();
     msg_b.strip_from_line();
-    assert_eq!(msg_a.as_bytes(), msg_b.as_bytes());
+    assert_eq!(to_bytes(&msg_a), to_bytes(&msg_b));
 }
 
 #[test]
@@ -318,7 +309,7 @@ fn set_then_strip_roundtrip() {
     let mut msg = orig.clone();
     msg.set_envelope_sender("user@host");
     msg.strip_from_line();
-    assert_eq!(orig.as_bytes(), msg.as_bytes());
+    assert_eq!(to_bytes(&orig), to_bytes(&msg));
 }
 
 #[test]
@@ -353,4 +344,87 @@ fn refresh_envelope_sender_no_existing() {
     assert_eq!(msg.envelope_sender(), Some("user@host"));
     assert!(msg.envelope_timestamp().is_some());
     assert_eq!(msg.body(), b"Body");
+}
+
+#[test]
+fn fields_direct_access() {
+    let msg = Message::parse(b"Subject: Test\nFrom: a@b\n\nBody");
+    assert_eq!(msg.fields().len(), 2);
+    assert_eq!(msg.fields().byte_len(), b"Subject: Test\nFrom: a@b\n".len());
+}
+
+#[test]
+fn fields_mut_modify() {
+    let mut msg = Message::parse(b"Subject: old\nFrom: a@b\n\nBody");
+    msg.fields_mut().remove_all(b"Subject");
+    assert!(msg.get_header("Subject").is_none());
+    assert_eq!(msg.header(), b"From: a@b\n");
+}
+
+fn to_bytes_stripped(msg: &Message) -> Vec<u8> {
+    let mut buf = Vec::new();
+    msg.write_to(&mut buf, true).expect("Vec write");
+    buf
+}
+
+#[test]
+fn write_to_roundtrip() {
+    let msg = Message::parse(b"Subject: Test\n\nBody text");
+    assert_eq!(to_bytes(&msg), b"Subject: Test\n\nBody text");
+}
+
+#[test]
+fn write_to_strip_from() {
+    let msg = Message::parse(
+        b"From user@host  Thu Jan  1 00:00:00 1970\nSubject: Test\n\nBody",
+    );
+    let mut expected = msg.clone();
+    expected.strip_from_line();
+    assert_eq!(to_bytes_stripped(&msg), to_bytes(&expected));
+}
+
+#[test]
+fn write_to_strip_from_no_from_line() {
+    let msg = Message::parse(b"Subject: Test\n\nBody");
+    assert_eq!(to_bytes_stripped(&msg), to_bytes(&msg));
+}
+
+#[test]
+fn write_to_strip_from_only_from_line() {
+    let msg = Message::parse(b"From user@host  Thu Jan  1 00:00:00 1970\n\nBody");
+    let out = to_bytes_stripped(&msg);
+    assert_eq!(out, b"Body");
+}
+
+#[test]
+fn write_to_strip_from_return_value() {
+    let msg = Message::parse(
+        b"From user@host  Thu Jan  1 00:00:00 1970\nSubject: Test\n\nBody",
+    );
+    let mut buf = Vec::new();
+    let n = msg.write_to(&mut buf, true).expect("Vec write");
+    assert_eq!(n, buf.len());
+    let full = to_bytes(&msg).len();
+    assert!(n < full);
+}
+
+#[test]
+fn ends_with_empty_body_with_headers() {
+    let msg = Message::parse(b"Subject: Test\n\n");
+    assert!(msg.ends_with_newline());
+    assert!(msg.ends_with_blank_line());
+}
+
+#[test]
+fn ends_with_body_single_newline_with_headers() {
+    let msg = Message::parse(b"Subject: Test\n\n\n");
+    assert!(msg.ends_with_newline());
+    assert!(msg.ends_with_blank_line());
+}
+
+#[test]
+fn ends_with_completely_empty() {
+    let msg = Message::parse(b"");
+    assert!(!msg.ends_with_newline());
+    assert!(!msg.ends_with_blank_line());
 }

@@ -5,6 +5,12 @@ use crate::delivery::DeliveryError;
 use crate::delivery::tests::msg;
 use crate::variables::TIMEOUT;
 
+fn to_bytes(msg: &Message) -> Vec<u8> {
+    let mut buf = Vec::new();
+    msg.write_to(&mut buf, false).expect("Vec write");
+    buf
+}
+
 fn pipe_exit(r: Result<PipeResult, DeliveryError>) -> i32 {
     let Err(DeliveryError::PipeExit(code)) = r else {
         panic!("expected PipeExit, got {r:?}");
@@ -16,7 +22,7 @@ fn pipe_exit(r: Result<PipeResult, DeliveryError>) -> i32 {
 fn pipe_to_cat() {
     let m = msg("Subject: Test\n\nBody content\n");
     let r = deliver_test("cat > /dev/null", &m, false).unwrap();
-    assert_eq!(r.bytes, m.as_bytes().len());
+    assert_eq!(r.bytes, m.len());
 }
 
 #[test]
@@ -25,7 +31,7 @@ fn filter_mode() {
     let r = deliver_test("cat", &m, true).unwrap();
 
     let output = r.output.unwrap();
-    assert_eq!(output, m.as_bytes());
+    assert_eq!(output, to_bytes(&m));
 }
 
 #[test]
@@ -108,5 +114,5 @@ fn filter_large_message() {
     let body = "x".repeat(256 * 1024);
     let m = msg(&format!("Subject: Test\n\n{body}\n"));
     let r = deliver_test("cat", &m, true).unwrap();
-    assert_eq!(r.output.unwrap(), m.as_bytes());
+    assert_eq!(r.output.unwrap(), to_bytes(&m));
 }

@@ -49,6 +49,16 @@ fn dir_forces_trailing_blank() {
 }
 
 #[test]
+fn dir_empty_body_no_extra_newline() {
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("plain");
+    let m = msg("Subject: Test\n\n");
+    let r = deliver_dir_test(&target, &m).unwrap();
+    let content = fs::read(&r.path).unwrap();
+    assert_eq!(content, b"Subject: Test\n\n");
+}
+
+#[test]
 fn dir_no_subdirs() {
     let dir = tempdir().unwrap();
     let target = dir.path().join("plain");

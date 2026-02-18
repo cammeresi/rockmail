@@ -72,9 +72,8 @@ pub fn extract_timestamp(line: &[u8]) -> Option<&str> {
     str::from_utf8(ts).ok()
 }
 
-/// Skip From_ line(s) at start of data.
-/// Also skips >From_ continuation lines (for forwarded mail).
-pub fn skip_from_lines(mut data: &[u8]) -> &[u8] {
+#[cfg(test)]
+fn skip_from_lines(mut data: &[u8]) -> &[u8] {
     while data.starts_with(b"From ") || data.starts_with(b">From ") {
         if let Some(pos) = data.iter().position(|&b| b == b'\n') {
             data = &data[pos + 1..];

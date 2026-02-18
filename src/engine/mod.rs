@@ -21,7 +21,7 @@ use crate::config::{
 };
 use crate::dedup;
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
-use crate::field::{self, Field, FieldList};
+use crate::field::{Field, FieldList};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::{Matcher, PatternError};
@@ -180,24 +180,8 @@ fn score_regex(m: &Matcher, text: &str, wt: Weight) -> f64 {
     score.clamp(MIN32, MAX32)
 }
 
-/// Skip mbox From_ line if present.
-fn skip_from_line(data: &[u8]) -> &[u8] {
-    if data.starts_with(b"From ")
-        && let Some(pos) = data.iter().position(|&b| b == b'\n')
-    {
-        return &data[pos + 1..];
-    }
-    data
-}
-
-fn unfold_and_decode(header: &[u8]) -> String {
-    let mut fields = field::parse_bytes(header);
-    for f in fields.iter_mut() {
-        f.concatenate();
-    }
-    let mut buf = Vec::with_capacity(header.len());
-    fields.write_to(&mut buf).expect("Vec write");
-    rfc2047::decode(&buf).into_owned()
+fn unfold_and_decode(fields: &FieldList) -> String {
+    rfc2047::decode(&fields.unfold_to_bytes()).into_owned()
 }
 
 /// Spawn `$SHELL $SHELLFLAGS cmd` with `input` on stdin, capture stdout,
@@ -458,12 +442,15 @@ impl Engine {
 
         let limit = env.get_num(&LINEBUF) as usize;
         let run;
+        let input;
         let runner = if let Some(msg) = msg
             && s.contains('`')
         {
             let timeout = env.timeout();
-            let input = msg.as_bytes();
-            run = move |cmd: &str| run_backtick(env, cmd, input, timeout);
+            let mut buf = Vec::new();
+            msg.write_to(&mut buf, false).expect("Vec write");
+            input = buf;
+            run = move |cmd: &str| run_backtick(env, cmd, &input, timeout);
             Some(&run as BacktickFn)
         } else {
             None
@@ -558,9 +545,16 @@ impl Engine {
     ) -> Cow<'a, Message> {
         match (recipe.flags.pass_head, recipe.flags.pass_body) {
             (true, true) => Cow::Borrowed(msg),
-            (true, false) => Cow::Owned(Message::from_parts(msg.header(), &[])),
-            (false, true) => Cow::Owned(Message::from_parts(&[], msg.body())),
-            (false, false) => Cow::Owned(Message::from_parts(&[], &[])),
+            (true, false) => {
+                Cow::Owned(Message::from_fields(msg.fields().clone(), vec![]))
+            }
+            (false, true) => Cow::Owned(Message::from_fields(
+                FieldList::new(),
+                msg.body().to_vec(),
+            )),
+            (false, false) => {
+                Cow::Owned(Message::from_fields(FieldList::new(), vec![]))
+            }
         }
     }
 
@@ -786,7 +780,7 @@ impl Engine {
             return Ok((true, 0.0));
         }
 
-        let decoded = unfold_and_decode(msg.header());
+        let decoded = unfold_and_decode(msg.fields());
         let mut score = 0.0f64;
         let mut has_score = false;
         let mut failed = false;
@@ -1020,8 +1014,8 @@ impl Engine {
         let flags = self.env.get_or_default(&SENDMAILFLAGS).to_owned();
         let msg = self.message_for_delivery(recipe, msg);
 
-        // Skip From_ line for forwarding
-        let data = skip_from_line(msg.as_bytes());
+        let mut data = Vec::new();
+        msg.write_to(&mut data, true).expect("Vec write");
 
         let flag_args: Vec<&str> = flags.split_whitespace().collect();
         let mut child = self
@@ -1034,7 +1028,7 @@ impl Engine {
             .spawn()?;
 
         if let Some(mut stdin) = child.stdin.take()
-            && let Err(e) = stdin.write_all(data)
+            && let Err(e) = stdin.write_all(&data)
             && e.kind() != ErrorKind::BrokenPipe
         {
             return Err(e.into());
@@ -1271,18 +1265,13 @@ impl Engine {
 
     /// Apply `@X Header: value` manipulation on the in-flight message.
     fn apply_header_ops(&mut self, ops: &[Item], msg: &mut Message) {
-        let mut fields = field::parse_bytes(msg.header());
         for item in ops {
             let Item::HeaderOp { op, .. } = item else {
                 unreachable!("expected HeaderOp");
             };
-            let value = op.value();
-            let value = self.expand(value, None);
-            apply_op_to_fields(op, &value, &mut fields);
+            let value = self.expand(op.value(), None);
+            apply_op_to_fields(op, &value, msg.fields_mut());
         }
-        let mut header = Vec::new();
-        fields.write_to(&mut header).expect("Vec write");
-        *msg = Message::from_parts(&header, msg.body());
     }
 
     fn process_assign(
@@ -1486,9 +1475,8 @@ impl Engine {
         let col = col - col % TAB;
         let tabs = TAB_STOP.saturating_sub(col).div_ceil(TAB);
         let pad: String = "\t".repeat(tabs.max(1));
-        // mailfold.c:87,116-118: lastdump = message length, +1 for forced
-        // trailing blank line if the message doesn't already end with \n\n
-        let size = msg.len() + usize::from(!msg.as_bytes().ends_with(b"\n\n"));
+        // mailfold.c:87,116-118: +1 for forced trailing blank line
+        let size = msg.len() + usize::from(!msg.ends_with_blank_line());
         eprintln!("  Folder: {detabbed}{pad}{:>7}", size);
     }
 
@@ -1517,11 +1505,14 @@ impl Engine {
             eprintln!("Failed forking \"{}\"", cmd);
             return;
         };
-        if let Some(mut w) = child.stdin.take()
-            && let Err(e) = w.write_all(msg.as_bytes())
-            && e.kind() != ErrorKind::BrokenPipe
-        {
-            eprintln!("Error writing to \"{}\" stdin: {}", cmd, e);
+        if let Some(mut w) = child.stdin.take() {
+            let r = msg.write_to(&mut w, false);
+            drop(w);
+            if let Err(e) = r
+                && e.kind() != ErrorKind::BrokenPipe
+            {
+                eprintln!("Error writing to \"{}\" stdin: {}", cmd, e);
+            }
         }
         let timeout = self.timeout();
         if let Ok(status) = wait_timeout(&mut child, timeout, &cmd) {

@@ -50,20 +50,20 @@ fn write_body(
 ) -> io::Result<usize> {
     let mut bytes = 0;
 
-    let header = msg.header();
-    let hdr = if let Some(fl) = msg.from_line() {
+    let skip = if let Some(fl) = msg.from_line() {
         w.write_all(fl)?;
         w.write_all(b"\n")?;
         bytes += fl.len() + 1;
-        header.get(fl.len() + 1..).unwrap_or(&[])
+        1
     } else {
         let line = from_line(sender);
         w.write_all(&line)?;
         bytes += line.len();
-        header
+        0
     };
-
-    bytes += write_escaped(w, hdr)?;
+    for f in msg.fields().iter().skip(skip) {
+        bytes += write_escaped(w, f.as_bytes())?;
+    }
 
     w.write_all(b"\n")?;
     bytes += 1;

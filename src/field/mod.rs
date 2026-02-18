@@ -1,15 +1,10 @@
-//! Formail: mail header manipulation and mailbox splitting.
-//!
-//! This module provides the core functionality for the formail binary,
-//! including header field operations, auto-reply generation, and mailbox
-//! splitting.
+//! Email header field parsing and manipulation.
 
 #[cfg(test)]
 mod tests;
 
-use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
-use std::mem;
-use std::ops::{Deref, DerefMut};
+use std::io::{self, Write};
+use std::ops::Deref;
 
 /// Find the end of the field name (position after the colon).
 /// Returns None if this doesn't look like a valid header field.
@@ -45,10 +40,20 @@ fn find_field_name_end(data: &[u8]) -> Option<usize> {
 /// A parsed email header field.
 #[derive(Debug, Clone)]
 pub struct Field {
-    /// Full text of the field including name, colon, value, and newline.
-    pub text: Vec<u8>,
+    text: Vec<u8>,
+    name_len: usize,
+}
+
+impl Field {
+    /// Full text of the field as a byte slice.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.text
+    }
+
     /// Length of field name including colon (and any whitespace before colon).
-    pub name_len: usize,
+    pub fn name_len(&self) -> usize {
+        self.name_len
+    }
 }
 
 impl Field {
@@ -187,22 +192,17 @@ impl Field {
 }
 
 /// A list of header fields.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FieldList {
     fields: Vec<Field>,
+    byte_len: usize,
 }
 
 impl Deref for FieldList {
-    type Target = Vec<Field>;
+    type Target = [Field];
 
     fn deref(&self) -> &Self::Target {
         &self.fields
-    }
-}
-
-impl DerefMut for FieldList {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.fields
     }
 }
 
@@ -212,19 +212,67 @@ impl FieldList {
         Self::default()
     }
 
+    /// Total byte length of all fields.
+    pub fn byte_len(&self) -> usize {
+        self.byte_len
+    }
+
+    /// Append a field.
+    pub fn push(&mut self, f: Field) {
+        self.byte_len += f.len();
+        self.fields.push(f);
+    }
+
+    /// Insert a field at the given index.
+    pub fn insert(&mut self, idx: usize, f: Field) {
+        self.byte_len += f.len();
+        self.fields.insert(idx, f);
+    }
+
+    /// Remove the field at the given index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx` is out of bounds.
+    pub fn remove(&mut self, idx: usize) {
+        self.byte_len -= self.fields[idx].len();
+        self.fields.remove(idx);
+    }
+
+    /// Replace the first field, maintaining byte_len.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the list is empty.
+    pub fn replace_first(&mut self, f: Field) {
+        self.byte_len -= self.fields[0].len();
+        self.byte_len += f.len();
+        self.fields[0] = f;
+    }
+
     /// Find first field matching the pattern (case-insensitive prefix).
     pub fn find(&self, pattern: &[u8]) -> Option<&Field> {
         self.fields.iter().find(|f| f.name_matches(pattern))
     }
 
-    /// Find first field matching the pattern, returning mutable reference.
-    pub fn find_mut(&mut self, pattern: &[u8]) -> Option<&mut Field> {
-        self.fields.iter_mut().find(|f| f.name_matches(pattern))
+    /// Concatenate continuation lines in all fields.
+    pub fn concatenate_all(&mut self) {
+        // byte_len unchanged due to replacement of '\n' with ' ' in place
+        for f in &mut self.fields {
+            f.concatenate();
+        }
     }
 
     /// Remove all fields matching the pattern.
     pub fn remove_all(&mut self, pattern: &[u8]) {
-        self.fields.retain(|f| !f.name_matches(pattern));
+        self.fields.retain(|f| {
+            if f.name_matches(pattern) {
+                self.byte_len -= f.len();
+                false
+            } else {
+                true
+            }
+        });
     }
 
     /// Keep only the first occurrence of fields matching pattern.
@@ -233,6 +281,7 @@ impl FieldList {
         self.fields.retain(|f| {
             if f.name_matches(pattern) {
                 if seen {
+                    self.byte_len -= f.len();
                     return false;
                 }
                 seen = true;
@@ -249,6 +298,9 @@ impl FieldList {
             let mut idx = 0;
             self.fields.retain(|f| {
                 let keep = !f.name_matches(pattern) || idx == last;
+                if !keep {
+                    self.byte_len -= f.len();
+                }
                 idx += 1;
                 keep
             });
@@ -259,7 +311,9 @@ impl FieldList {
     pub fn rename_all(&mut self, old_name: &[u8], new_name: &[u8]) {
         for field in &mut self.fields {
             if field.name_matches(old_name) {
+                self.byte_len -= field.len();
                 field.rename(new_name);
+                self.byte_len += field.len();
             }
         }
     }
@@ -268,10 +322,12 @@ impl FieldList {
     pub fn prepend_old(&mut self, pattern: &[u8]) {
         for field in &mut self.fields {
             if field.name_matches(pattern) {
-                let mut new_name = b"Old-".to_vec();
-                new_name.extend_from_slice(field.name());
-                new_name.push(b':');
-                field.rename(&new_name);
+                self.byte_len -= field.len();
+                let mut name = b"Old-".to_vec();
+                name.extend_from_slice(field.name());
+                name.push(b':');
+                field.rename(&name);
+                self.byte_len += field.len();
             }
         }
     }
@@ -282,82 +338,93 @@ impl FieldList {
         W: Write,
     {
         for field in &self.fields {
-            w.write_all(&field.text)?;
+            w.write_all(field.as_bytes())?;
         }
         Ok(())
+    }
+
+    /// Serialize with continuation lines unfolded (newlines replaced by
+    /// spaces), without cloning. Mirrors `concatenate_all` + `write_to`.
+    pub fn unfold_to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(self.byte_len);
+        for f in &self.fields {
+            let b = f.as_bytes();
+            if f.is_from_line() {
+                buf.extend_from_slice(b);
+            } else {
+                let mut start = 0;
+                for i in 0..b.len() {
+                    if b[i] == b'\n' && i + 1 < b.len() {
+                        buf.extend_from_slice(&b[start..i]);
+                        buf.push(b' ');
+                        start = i + 1;
+                    }
+                }
+                buf.extend_from_slice(&b[start..]);
+            }
+        }
+        buf
     }
 
     /// Zap whitespace: ensure space after colon and remove empty fields.
     pub fn zap_whitespace(&mut self) {
         for field in &mut self.fields {
+            self.byte_len -= field.len();
             field.zap_whitespace();
+            self.byte_len += field.len();
         }
-        self.fields.retain(|f| !f.is_empty_value());
-    }
-}
-
-/// Parse header fields from a byte slice.
-pub fn parse_bytes(header: &[u8]) -> FieldList {
-    let (fields, _) = read_headers(Cursor::new(header)).unwrap_or_default();
-    fields
-}
-
-/// Read header fields from a reader.
-/// Stops at the first blank line (end of headers).
-pub fn read_headers<R>(reader: R) -> io::Result<(FieldList, Vec<u8>)>
-where
-    R: Read,
-{
-    let mut reader = BufReader::new(reader);
-    let mut fields = FieldList::new();
-    let mut buf = Vec::new();
-    let mut leftover = Vec::new();
-
-    loop {
-        buf.clear();
-        let n = reader.read_until(b'\n', &mut buf)?;
-        if n == 0 {
-            break;
-        }
-
-        // Blank line ends header
-        if buf == b"\n" || buf == b"\r\n" {
-            break;
-        }
-
-        // Check if this looks like a header field.
-        // From_ only counts as a header if it's the very first field.
-        if let Some(name_len) = find_field_name_end(&buf)
-            && (!buf.starts_with(b"From ") || fields.is_empty())
-        {
-            // Read continuation lines
-            loop {
-                let mut peek = [0u8; 1];
-                match reader.fill_buf() {
-                    Ok(available) if !available.is_empty() => {
-                        peek[0] = available[0];
-                    }
-                    _ => break,
-                }
-                if peek[0] == b' ' || peek[0] == b'\t' {
-                    reader.read_until(b'\n', &mut buf)?;
-                } else {
-                    break;
-                }
+        self.fields.retain(|f| {
+            if f.is_empty_value() {
+                self.byte_len -= f.len();
+                false
+            } else {
+                true
             }
-
-            fields.push(Field {
-                text: mem::take(&mut buf),
-                name_len,
-            });
-        } else {
-            // Not a header field - this is the start of body
-            leftover = buf.clone();
-            break;
-        }
+        });
     }
+}
 
-    // Read remaining data
-    reader.read_to_end(&mut leftover)?;
-    Ok((fields, leftover))
+/// Parse header fields from a byte slice, skipping malformed lines.
+pub fn parse_bytes(header: &[u8]) -> FieldList {
+    let mut fields = FieldList::new();
+    let mut i = 0;
+    while i < header.len() {
+        let start = i;
+        // Find end of this line
+        while i < header.len() && header[i] != b'\n' {
+            i += 1;
+        }
+        if i < header.len() {
+            i += 1; // skip \n
+        }
+        let line = &header[start..i];
+
+        let Some(name_len) = find_field_name_end(line) else {
+            continue;
+        };
+        if line.starts_with(b"From ") && !fields.is_empty() {
+            continue;
+        }
+
+        // Gather continuation lines
+        let mut end = i;
+        while end < header.len()
+            && (header[end] == b' ' || header[end] == b'\t')
+        {
+            while end < header.len() && header[end] != b'\n' {
+                end += 1;
+            }
+            if end < header.len() {
+                end += 1;
+            }
+        }
+
+        let mut text = header[start..end].to_vec();
+        if !text.ends_with(b"\n") {
+            text.push(b'\n');
+        }
+        fields.push(Field { text, name_len });
+        i = end;
+    }
+    fields
 }

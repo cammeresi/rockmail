@@ -129,21 +129,25 @@ pub fn deliver(
         .spawn()
         .map_err(|e| me(e, "spawn"))?;
 
-    let data = msg.as_bytes();
-
-    let captured = if grab {
-        Some(pump(&mut child, data).map_err(|e| me(e, "pipe"))?)
+    let (bytes, captured) = if grab {
+        let mut data = Vec::new();
+        msg.write_to(&mut data, false).expect("Vec write");
+        let out = pump(&mut child, &data).map_err(|e| me(e, "pipe"))?;
+        (data.len(), Some(out))
     } else {
+        let mut n = 0;
         if let Some(mut w) = child.stdin.take() {
-            let r = w.write_all(data);
+            let r = msg.write_to(&mut w, false);
             drop(w);
-            if let Err(e) = r
-                && e.kind() != ErrorKind::BrokenPipe
-            {
-                return Err(me(e, "write"));
+            match r {
+                Ok(written) => n = written,
+                Err(e) if e.kind() != ErrorKind::BrokenPipe => {
+                    return Err(me(e, "write"));
+                }
+                _ => {}
             }
         }
-        None
+        (n, None)
     };
 
     let status = crate::util::wait_timeout(&mut child, env.timeout(), cmd)
@@ -164,7 +168,7 @@ pub fn deliver(
     }
 
     Ok(PipeResult {
-        bytes: data.len(),
+        bytes,
         output: captured,
     })
 }

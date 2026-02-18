@@ -3,7 +3,7 @@
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
-use std::io::{self, ErrorKind, IsTerminal, Read, Write};
+use std::io::{self, ErrorKind, IsTerminal, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -412,7 +412,7 @@ fn run(
     if engine.dryrun() {
         if args.show_msg {
             eprintln!("-----");
-            io::stdout().write_all(msg.as_bytes())?;
+            msg.write_to(&mut io::stdout(), false)?;
         }
     } else if !delivered {
         let folder = deliver_default(&mut engine, &msg)?;
