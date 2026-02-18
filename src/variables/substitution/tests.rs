@@ -270,13 +270,22 @@ fn backtick_var_inside() {
     assert_eq!(r.0, "echo world");
 }
 
+fn nope(_: &str) -> String {
+    panic!("not called");
+}
+
+#[test]
+#[should_panic(expected = "not called")]
+fn nope_panics() {
+    nope("a");
+}
+
 #[test]
 fn backtick_escaped() {
     let env = Environment::new();
     let ctx = SubstCtx::default();
-    let run = |_: &str| "nope".to_owned();
     // \` should produce literal backtick, not invoke runner
-    let r = subst_limited(&env, &ctx, "\\`lit\\`", usize::MAX, Some(&run));
+    let r = subst_limited(&env, &ctx, "\\`lit\\`", usize::MAX, Some(&nope));
     assert_eq!(r.0, "`lit`");
 }
 
@@ -385,8 +394,7 @@ fn quote_stripping_with_var() {
 fn backtick_literal_in_single_quotes() {
     let env = Environment::new();
     let ctx = SubstCtx::default();
-    let run = |_: &str| "nope".to_owned();
-    let r = subst_quoted(&env, &ctx, "'`cmd`'", usize::MAX, Some(&run));
+    let r = subst_quoted(&env, &ctx, "'`cmd`'", usize::MAX, Some(&nope));
     assert_eq!(r.0, "`cmd`");
 }
 
