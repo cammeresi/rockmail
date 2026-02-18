@@ -1270,6 +1270,7 @@ impl Engine {
                 unreachable!("expected HeaderOp");
             };
             let value = self.expand(op.value(), None);
+            let value = rfc2047::encode(&value, rfc2047::Enc::Q);
             apply_op_to_fields(op, &value, msg.fields_mut());
         }
     }

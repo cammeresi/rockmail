@@ -739,3 +739,188 @@ fn dryrun_filter() {
     let err = String::from_utf8_lossy(&stderr);
     assert!(err.contains("filter:"), "expected filter log: {err:?}");
 }
+
+#[test]
+fn header_op_delete_insert() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+@I Subject: replaced
+",
+    );
+    let input = b"From: user@host\nSubject: original\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(content.contains("Subject: replaced"), "new subject missing");
+    assert!(
+        !content.contains("Subject: original"),
+        "old subject remains"
+    );
+}
+
+#[test]
+fn header_op_rename_insert() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+@i Subject: new subject
+",
+    );
+    let input = b"From: user@host\nSubject: original\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(
+        content.contains("Subject: new subject"),
+        "new subject missing"
+    );
+    assert!(
+        content.contains("Old-Subject: original"),
+        "old subject not renamed"
+    );
+}
+
+#[test]
+fn header_op_add_if_not() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+@a X-New: added
+@a Subject: ignored
+",
+    );
+    let input = b"From: user@host\nSubject: existing\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(content.contains("X-New: added"), "absent header not added");
+    assert!(
+        content.contains("Subject: existing"),
+        "original subject lost"
+    );
+    assert!(
+        !content.contains("Subject: ignored"),
+        "@a should not add when present"
+    );
+}
+
+#[test]
+fn header_op_variable_expansion() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+@A X-Folder: $MAILDIR
+",
+    );
+    let input = b"From: user@host\nSubject: test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    let expected = format!("X-Folder: {}", d.to_str().unwrap());
+    assert!(
+        content.contains(&expected),
+        "variable not expanded: {content:?}"
+    );
+}
+
+#[test]
+fn header_op_rfc2047() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n@A X-Tag: caf\u{e9}\n",
+    );
+    let input = b"From: user@host\nSubject: test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(
+        content.contains("=?UTF-8?"),
+        "non-ASCII value not RFC 2047 encoded: {content:?}"
+    );
+}
+
+#[test]
+fn dedup_new_message() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let dupes = d.join("dupes");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+:0 Wh:
+@D 8192 $DIR/msgid.cache
+
+:0
+* DUPLICATE ?? yes
+$DIR/dupes
+",
+    );
+    let input = b"From: user@host\nMessage-ID: <abc@example>\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(mbox.exists(), "message not delivered to inbox");
+    assert!(!dupes.exists(), "new message routed to dupes");
+}
+
+#[test]
+fn dedup_duplicate() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let dupes = d.join("dupes");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+:0 Wh:
+@D 8192 $DIR/msgid.cache
+
+:0
+* DUPLICATE ?? yes
+$DIR/dupes
+",
+    );
+    let input = b"From: user@host\nMessage-ID: <dup@example>\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(mbox.exists(), "first message not delivered");
+    assert!(!dupes.exists(), "first message routed to dupes");
+
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(dupes.exists(), "duplicate not routed to dupes");
+}
