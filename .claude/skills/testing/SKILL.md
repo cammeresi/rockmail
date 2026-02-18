@@ -7,10 +7,10 @@ description: How to run tests in the rockmail project.  Use when running or writ
 
 ## Running tests
 
-- `cargo test` — run all unit and integration tests
-- `cargo test --features gold` — run all tests including gold tests
-- `cargo test --features gold --test formail_gold` — run formail gold tests only
-- `cargo test --features gold --test rockmail_gold` — run rockmail gold tests only
+- `cargo test` — run all tests including gold tests (gold is a default feature)
+- `cargo test --no-default-features` — run tests without gold tests
+- `cargo test --test formail_gold` — run formail gold tests only
+- `cargo test --test rockmail_gold` — run rockmail gold tests only
 - `cargo test PATTERN` — run tests matching a name pattern
 
 ## Gold tests

@@ -4,7 +4,7 @@
 //! then verifies rockmail and procmail produce identical results.
 //!
 //! Run with:
-//!     cargo test --features gold --test rockmail_proptest
+//!     cargo test --test rockmail_proptest
 
 #![cfg(feature = "gold")]
 

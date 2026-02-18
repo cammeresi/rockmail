@@ -1,7 +1,7 @@
 //! Gold standard tests comparing Rust rockmail against procmail.
 //!
 //! Run with:
-//!     cargo test --features gold --test rockmail_gold
+//!     cargo test --test rockmail_gold
 //!
 //! The original procmail binary is found automatically.  To override,
 //! set PROCMAIL_PROCMAIL to the path of the original procmail.

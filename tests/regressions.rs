@@ -1,8 +1,9 @@
 //! Regression tests from preserved gold-test failures.
 //!
 //! Each `.tar.gz` in `tests/regressions/` becomes a separate test case.
-//! Without the `gold` feature, compares rockmail output against stored
-//! procmail output.  With `gold`, runs procmail live instead.
+//! Without the `gold` feature (--no-default-features), compares rockmail
+//! output against stored procmail output.  With `gold`, runs procmail
+//! live instead.
 
 use std::fs::{self, File};
 use std::path::Path;
