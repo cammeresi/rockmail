@@ -683,6 +683,130 @@ LOGABSTRACT=yes
 }
 
 #[test]
+fn logabstract_no_subject() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=$MAILDIR/log
+LOGABSTRACT=yes
+";
+    let input: &[&[u8]] = &[b"From: user@host\n\nBody\n"];
+    GoldTest::new(rc, input)
+        .pre(|d| fs::write(d.join("default"), b"").unwrap())
+        .no_cmp()
+        .post(|g| {
+            let rlog =
+                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                    .unwrap();
+            let plog =
+                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                    .unwrap();
+            let ra = normalize_abstract(&rlog);
+            let pa = normalize_abstract(&plog);
+            assert_eq!(
+                ra, pa,
+                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
+            );
+        })
+        .run();
+}
+
+#[test]
+fn logabstract_no_from_line() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=$MAILDIR/log
+LOGABSTRACT=yes
+";
+    let input: &[&[u8]] = &[b"Subject: hi\n\nBody\n"];
+    GoldTest::new(rc, input)
+        .pre(|d| fs::write(d.join("default"), b"").unwrap())
+        .no_cmp()
+        .post(|g| {
+            let rlog =
+                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                    .unwrap();
+            let plog =
+                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                    .unwrap();
+            let ra = normalize_abstract(&rlog);
+            let pa = normalize_abstract(&plog);
+            assert_eq!(
+                ra, pa,
+                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
+            );
+        })
+        .run();
+}
+
+#[test]
+fn logabstract_long_subject() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=$MAILDIR/log
+LOGABSTRACT=yes
+";
+    let long = "x".repeat(100);
+    let raw = format!("Subject: {long}\n\nBody\n");
+    let msg = raw.into_bytes();
+    let input: &[&[u8]] = &[&msg];
+    GoldTest::new(rc, input)
+        .pre(|d| fs::write(d.join("default"), b"").unwrap())
+        .no_cmp()
+        .post(|g| {
+            let rlog =
+                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                    .unwrap();
+            let plog =
+                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                    .unwrap();
+            let ra = normalize_abstract(&rlog);
+            let pa = normalize_abstract(&plog);
+            assert_eq!(
+                ra, pa,
+                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
+            );
+        })
+        .run();
+}
+
+#[test]
+fn logabstract_long_folder() {
+    let long = "x".repeat(80);
+    let rc = format!(
+        "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=$MAILDIR/log
+LOGABSTRACT=yes
+
+:0
+$MAILDIR/{long}
+"
+    );
+    let input: &[&[u8]] = &[b"Subject: test\n\nBody\n"];
+    GoldTest::new(&rc, input)
+        .no_cmp()
+        .post(|g| {
+            let rlog =
+                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                    .unwrap();
+            let plog =
+                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                    .unwrap();
+            let ra = normalize_abstract(&rlog);
+            let pa = normalize_abstract(&plog);
+            assert_eq!(
+                ra, pa,
+                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
+            );
+        })
+        .run();
+}
+
+#[test]
 fn macro_to_underscore() {
     let rc = "\
 MAILDIR=$MAILDIR

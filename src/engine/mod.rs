@@ -44,7 +44,7 @@ const MAX_INCLUDE_DEPTH: usize = 32;
 const MAX32: f64 = i32::MAX as f64;
 const MIN32: f64 = i32::MIN as f64;
 const MAX_SUBJECT: usize = 78;
-const MAX_FOLDER: usize = 61;
+const MAX_FOLDER: usize = 60;
 const TAB_STOP: usize = 72;
 const TAB: usize = 8;
 const LOGABSTRACT_ALL: i64 = 2;
@@ -1454,16 +1454,17 @@ impl Engine {
         }
 
         if let Some(subj) = msg.get_header("Subject") {
-            let subj: String = subj
+            // mailfold.c:349-354: truncation covers "Subject: " + value
+            let line: String = format!("Subject: {subj}")
                 .chars()
                 .map(|c| if c == '\t' { ' ' } else { c })
                 .collect();
-            let subj = if subj.len() > MAX_SUBJECT {
-                &subj[..MAX_SUBJECT]
+            let line = if line.len() > MAX_SUBJECT {
+                &line[..MAX_SUBJECT]
             } else {
-                &subj
+                &line
             };
-            eprintln!(" Subject: {subj}");
+            eprintln!(" {line}");
         }
 
         let detabbed: String = folder
