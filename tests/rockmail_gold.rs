@@ -651,10 +651,7 @@ fn assert_abstract(g: &Gold) {
         fs::read_to_string(g.proc_dir.path().join("maildir/log")).unwrap();
     let ra = normalize_abstract(&rlog);
     let pa = normalize_abstract(&plog);
-    assert_eq!(
-        ra, pa,
-        "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
-    );
+    assert_eq!(ra, pa, "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}");
 }
 
 const LOGABSTRACT_RC: &str = "\

@@ -391,7 +391,8 @@ fn write_to_strip_from_no_from_line() {
 
 #[test]
 fn write_to_strip_from_only_from_line() {
-    let msg = Message::parse(b"From user@host  Thu Jan  1 00:00:00 1970\n\nBody");
+    let msg =
+        Message::parse(b"From user@host  Thu Jan  1 00:00:00 1970\n\nBody");
     let out = to_bytes_stripped(&msg);
     assert_eq!(out, b"Body");
 }

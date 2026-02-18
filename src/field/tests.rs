@@ -279,9 +279,7 @@ fn byte_len_insert_remove_replace() {
 #[test]
 fn byte_len_concatenate_all() {
     let mut list = FieldList::new();
-    list.push(
-        Field::new(b"Subject: line1\n\tline2\n".to_vec()).unwrap(),
-    );
+    list.push(Field::new(b"Subject: line1\n\tline2\n".to_vec()).unwrap());
     list.push(Field::new(b"From: user\n".to_vec()).unwrap());
     let before = list.byte_len();
     list.concatenate_all();
@@ -292,9 +290,7 @@ fn byte_len_concatenate_all() {
 #[test]
 fn unfold_to_bytes_matches_concatenate_all() {
     let mut list = FieldList::new();
-    list.push(
-        Field::new(b"Subject: line1\n\tline2\n".to_vec()).unwrap(),
-    );
+    list.push(Field::new(b"Subject: line1\n\tline2\n".to_vec()).unwrap());
     list.push(Field::new(b"From: user\n".to_vec()).unwrap());
     let unfolded = list.unfold_to_bytes();
     let mut cloned = list.clone();
@@ -311,9 +307,7 @@ fn unfold_to_bytes_skips_from_line() {
         Field::new(b"From user@host Mon Jan 1 00:00:00 2024\n".to_vec())
             .unwrap(),
     );
-    list.push(
-        Field::new(b"Subject: line1\n\tline2\n".to_vec()).unwrap(),
-    );
+    list.push(Field::new(b"Subject: line1\n\tline2\n".to_vec()).unwrap());
     let out = list.unfold_to_bytes();
     assert!(out.starts_with(b"From user@host"));
     assert!(!out.windows(7).any(|w| w == b"line1\n\t"));

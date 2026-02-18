@@ -1,6 +1,6 @@
 use std::fs;
-use std::str;
 use std::path::PathBuf;
+use std::str;
 use std::time::Duration;
 
 use tempfile::TempDir;
@@ -1674,4 +1674,85 @@ fn shell_timeout_fails() {
     let items = vec![shell_recipe("sleep 60", &t.maildir("inbox"))];
     assert_eq!(t.process(&items), Outcome::Default);
     assert_eq!(t.engine.ctx.last_exit, -1);
+}
+
+#[test]
+fn trap_noop_when_unset() {
+    let mut t = Test::new();
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), None);
+    assert!(!t.engine.exit_was_set());
+}
+
+#[test]
+fn trap_noop_when_empty() {
+    let mut t = Test::new();
+    t.engine.set_var("TRAP", "");
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), None);
+    assert!(!t.engine.exit_was_set());
+}
+
+#[test]
+fn trap_sets_exitcode_zero() {
+    let mut t = Test::new();
+    t.engine.set_var("TRAP", "true");
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), Some("0"));
+    assert!(t.engine.exit_was_set());
+}
+
+#[test]
+fn trap_nonzero_updates_exitcode() {
+    let mut t = Test::new();
+    t.engine.set_var("TRAP", "exit 42");
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), Some("42"));
+}
+
+#[test]
+fn trap_preserves_user_exitcode() {
+    let mut t = Test::new();
+    t.engine.set_var("EXITCODE", "99");
+    t.engine.set_var("TRAP", "exit 1");
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), Some("99"));
+}
+
+#[test]
+fn trap_expands_variables() {
+    let mut t = Test::new();
+    let marker = t.folder("marker");
+    t.engine.set_var("MARKER", &marker.display().to_string());
+    t.engine.set_var("TRAP", "touch $MARKER");
+    t.engine.run_trap(&t.msg);
+    assert!(marker.exists(), "TRAP did not expand $MARKER");
+}
+
+#[test]
+fn trap_feeds_message() {
+    let mut t = Test::with_msg("Subject: t\n\nBody");
+    let out = t.folder("stdin");
+    t.engine
+        .set_var("TRAP", &format!("cat > {}", out.display()));
+    t.engine.run_trap(&t.msg);
+    let got = fs::read_to_string(&out).unwrap();
+    assert!(got.contains("Body"), "stdin missing body: {got:?}");
+}
+
+#[test]
+fn trap_spawn_failure() {
+    let mut t = Test::new();
+    t.engine.set_var("SHELL", "/no/such/shell");
+    t.engine.set_var("TRAP", "true");
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), Some("0"));
+
+    // user-set EXITCODE preserved on spawn failure
+    let mut t = Test::new();
+    t.engine.set_var("EXITCODE", "77");
+    t.engine.set_var("SHELL", "/no/such/shell");
+    t.engine.set_var("TRAP", "true");
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), Some("77"));
 }
