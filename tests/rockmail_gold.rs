@@ -20,7 +20,7 @@ use rockmail::delivery::FolderType;
 mod common;
 mod gold;
 
-use common::RcBuilder;
+use common::{Gold, RcBuilder};
 use gold::{ADDRS, GoldTest, LISTS, MSGS, SUBJECTS};
 
 fn build_complex_rc(kind: FolderType) -> String {
@@ -35,15 +35,16 @@ fn build_complex_rc(kind: FolderType) -> String {
     b.build()
 }
 
-fn build_complex_msgs() -> Vec<Vec<u8>> {
-    let msg = |from: &str, to: &str, subj: &str, extra: &str| {
-        let hdrs = if extra.is_empty() {
-            format!("From: {from}\nTo: {to}\nSubject: {subj}")
-        } else {
-            format!("From: {from}\nTo: {to}\nSubject: {subj}\n{extra}")
-        };
-        format!("{hdrs}\n\nBody\n").into_bytes()
+fn msg(from: &str, to: &str, subj: &str, extra: &str) -> Vec<u8> {
+    let hdrs = if extra.is_empty() {
+        format!("From: {from}\nTo: {to}\nSubject: {subj}")
+    } else {
+        format!("From: {from}\nTo: {to}\nSubject: {subj}\n{extra}")
     };
+    format!("{hdrs}\n\nBody\n").into_bytes()
+}
+
+fn build_complex_msgs() -> Vec<Vec<u8>> {
     vec![
         msg(ADDRS[3], ADDRS[0], SUBJECTS[0], "X-Spam-Flag: YES"),
         msg(ADDRS[4], LISTS[0], SUBJECTS[2], ""),
@@ -88,14 +89,6 @@ fn build_random_rc<R: Rng>(rng: &mut R, kind: FolderType) -> String {
 
 fn build_random_msgs<R: Rng>(rng: &mut R) -> Vec<Vec<u8>> {
     let n = rng.gen_range(10..=20);
-    let msg = |from: &str, to: &str, subj: &str, extra: &str| {
-        let hdrs = if extra.is_empty() {
-            format!("From: {from}\nTo: {to}\nSubject: {subj}")
-        } else {
-            format!("From: {from}\nTo: {to}\nSubject: {subj}\n{extra}")
-        };
-        format!("{hdrs}\n\nBody\n").into_bytes()
-    };
     let extras = ["", "", "", "X-Spam-Flag: YES", "X-Priority: 1"];
     (0..n)
         .map(|_| {
@@ -177,28 +170,26 @@ fn deliver_dev_null() {
     GoldTest::new(&rc, MSGS).run();
 }
 
-#[test]
-fn complex_filtering_static_mbox() {
+fn run_complex(kind: FolderType) {
     let msgs = build_complex_msgs();
     let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    let rc = build_complex_rc(FolderType::File);
+    let rc = build_complex_rc(kind);
     GoldTest::new(&rc, &refs).run();
+}
+
+#[test]
+fn complex_filtering_static_mbox() {
+    run_complex(FolderType::File);
 }
 
 #[test]
 fn complex_filtering_static_maildir() {
-    let msgs = build_complex_msgs();
-    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    let rc = build_complex_rc(FolderType::Maildir);
-    GoldTest::new(&rc, &refs).run();
+    run_complex(FolderType::Maildir);
 }
 
 #[test]
 fn complex_filtering_static_mh() {
-    let msgs = build_complex_msgs();
-    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    let rc = build_complex_rc(FolderType::Mh);
-    GoldTest::new(&rc, &refs).run();
+    run_complex(FolderType::Mh);
 }
 
 #[test]
@@ -269,25 +260,31 @@ matched
     GoldTest::new(rc, msgs).run();
 }
 
+fn run_trailing(kind: FolderType, body: &[u8]) {
+    let rc = RcBuilder::new(kind).folder("inbox").build();
+    let msgs: &[&[u8]] = &[body];
+    if kind == FolderType::Dir {
+        GoldTest::new(&rc, msgs)
+            .pre(|d| fs::create_dir(d.join("inbox")).unwrap())
+            .run();
+    } else {
+        GoldTest::new(&rc, msgs).run();
+    }
+}
+
 #[test]
 fn mh_trailing_blank() {
-    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];
-    GoldTest::new(&rc, msgs).run();
+    run_trailing(FolderType::Mh, b"From: a@host\nSubject: one\n\nBody\n\n");
 }
 
 #[test]
 fn mh_trailing_no_newline() {
-    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody"];
-    GoldTest::new(&rc, msgs).run();
+    run_trailing(FolderType::Mh, b"From: a@host\nSubject: one\n\nBody");
 }
 
 #[test]
 fn mh_trailing_single_newline() {
-    let rc = RcBuilder::new(FolderType::Mh).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n"];
-    GoldTest::new(&rc, msgs).run();
+    run_trailing(FolderType::Mh, b"From: a@host\nSubject: one\n\nBody\n");
 }
 
 fn run_dir_gold(rc: &str, inputs: &[&[u8]]) {
@@ -304,23 +301,17 @@ fn deliver_dir() {
 
 #[test]
 fn dir_trailing_blank() {
-    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n\n"];
-    run_dir_gold(&rc, msgs);
+    run_trailing(FolderType::Dir, b"From: a@host\nSubject: one\n\nBody\n\n");
 }
 
 #[test]
 fn dir_trailing_no_newline() {
-    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody"];
-    run_dir_gold(&rc, msgs);
+    run_trailing(FolderType::Dir, b"From: a@host\nSubject: one\n\nBody");
 }
 
 #[test]
 fn dir_trailing_single_newline() {
-    let rc = RcBuilder::new(FolderType::Dir).folder("inbox").build();
-    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: one\n\nBody\n"];
-    run_dir_gold(&rc, msgs);
+    run_trailing(FolderType::Dir, b"From: a@host\nSubject: one\n\nBody\n");
 }
 
 #[test]
@@ -653,123 +644,55 @@ fn normalize_abstract(log: &str) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn logabstract_matches_procmail() {
-    let rc = "\
+fn assert_abstract(g: &Gold) {
+    let rlog =
+        fs::read_to_string(g.rust_dir.path().join("maildir/log")).unwrap();
+    let plog =
+        fs::read_to_string(g.proc_dir.path().join("maildir/log")).unwrap();
+    let ra = normalize_abstract(&rlog);
+    let pa = normalize_abstract(&plog);
+    assert_eq!(
+        ra, pa,
+        "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
+    );
+}
+
+const LOGABSTRACT_RC: &str = "\
 MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT
 LOGFILE=$MAILDIR/log
 LOGABSTRACT=yes
 ";
-    let input: &[&[u8]] = &[b"Subject: Hello World\n\nBody\n"];
-    GoldTest::new(rc, input)
+
+fn logabstract_gold(input: &[&[u8]]) {
+    GoldTest::new(LOGABSTRACT_RC, input)
         .pre(|d| fs::write(d.join("default"), b"").unwrap())
         .no_cmp()
-        .post(|g| {
-            let rlog =
-                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
-                    .unwrap();
-            let plog =
-                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
-                    .unwrap();
-            let ra = normalize_abstract(&rlog);
-            let pa = normalize_abstract(&plog);
-            assert_eq!(
-                ra, pa,
-                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
-            );
-        })
+        .post(assert_abstract)
         .run();
+}
+
+#[test]
+fn logabstract_matches_procmail() {
+    logabstract_gold(&[b"Subject: Hello World\n\nBody\n"]);
 }
 
 #[test]
 fn logabstract_no_subject() {
-    let rc = "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-LOGFILE=$MAILDIR/log
-LOGABSTRACT=yes
-";
-    let input: &[&[u8]] = &[b"From: user@host\n\nBody\n"];
-    GoldTest::new(rc, input)
-        .pre(|d| fs::write(d.join("default"), b"").unwrap())
-        .no_cmp()
-        .post(|g| {
-            let rlog =
-                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
-                    .unwrap();
-            let plog =
-                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
-                    .unwrap();
-            let ra = normalize_abstract(&rlog);
-            let pa = normalize_abstract(&plog);
-            assert_eq!(
-                ra, pa,
-                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
-            );
-        })
-        .run();
+    logabstract_gold(&[b"From: user@host\n\nBody\n"]);
 }
 
 #[test]
 fn logabstract_no_from_line() {
-    let rc = "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-LOGFILE=$MAILDIR/log
-LOGABSTRACT=yes
-";
-    let input: &[&[u8]] = &[b"Subject: hi\n\nBody\n"];
-    GoldTest::new(rc, input)
-        .pre(|d| fs::write(d.join("default"), b"").unwrap())
-        .no_cmp()
-        .post(|g| {
-            let rlog =
-                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
-                    .unwrap();
-            let plog =
-                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
-                    .unwrap();
-            let ra = normalize_abstract(&rlog);
-            let pa = normalize_abstract(&plog);
-            assert_eq!(
-                ra, pa,
-                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
-            );
-        })
-        .run();
+    logabstract_gold(&[b"Subject: hi\n\nBody\n"]);
 }
 
 #[test]
 fn logabstract_long_subject() {
-    let rc = "\
-MAILDIR=$MAILDIR
-DEFAULT=$DEFAULT
-LOGFILE=$MAILDIR/log
-LOGABSTRACT=yes
-";
     let long = "x".repeat(100);
     let raw = format!("Subject: {long}\n\nBody\n");
     let msg = raw.into_bytes();
-    let input: &[&[u8]] = &[&msg];
-    GoldTest::new(rc, input)
-        .pre(|d| fs::write(d.join("default"), b"").unwrap())
-        .no_cmp()
-        .post(|g| {
-            let rlog =
-                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
-                    .unwrap();
-            let plog =
-                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
-                    .unwrap();
-            let ra = normalize_abstract(&rlog);
-            let pa = normalize_abstract(&plog);
-            assert_eq!(
-                ra, pa,
-                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
-            );
-        })
-        .run();
+    logabstract_gold(&[&msg]);
 }
 
 #[test]
@@ -786,23 +709,9 @@ LOGABSTRACT=yes
 $MAILDIR/{long}
 "
     );
-    let input: &[&[u8]] = &[b"Subject: test\n\nBody\n"];
-    GoldTest::new(&rc, input)
+    GoldTest::new(&rc, &[b"Subject: test\n\nBody\n"])
         .no_cmp()
-        .post(|g| {
-            let rlog =
-                fs::read_to_string(g.rust_dir.path().join("maildir/log"))
-                    .unwrap();
-            let plog =
-                fs::read_to_string(g.proc_dir.path().join("maildir/log"))
-                    .unwrap();
-            let ra = normalize_abstract(&rlog);
-            let pa = normalize_abstract(&plog);
-            assert_eq!(
-                ra, pa,
-                "logabstract differs:\nrust: {ra:?}\nproc: {pa:?}"
-            );
-        })
+        .post(assert_abstract)
         .run();
 }
 
