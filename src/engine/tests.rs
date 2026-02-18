@@ -765,6 +765,88 @@ fn subst_case_insensitive() {
 }
 
 #[test]
+fn subst_bad_regex() {
+    let mut t = Test::new();
+    t.engine.set_var("X", "hello");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "[invalid".into(),
+        replace: "gone".into(),
+        global: false,
+        case_insensitive: false,
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("hello"));
+}
+
+#[test]
+fn subst_expand_pattern() {
+    let mut t = Test::new();
+    t.engine.set_var("PAT", "world");
+    t.engine.set_var("X", "hello world");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "$PAT".into(),
+        replace: "rust".into(),
+        global: false,
+        case_insensitive: false,
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("hello rust"));
+}
+
+#[test]
+fn subst_expand_replace() {
+    let mut t = Test::new();
+    t.engine.set_var("REP", "rust");
+    t.engine.set_var("X", "hello world");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "world".into(),
+        replace: "$REP".into(),
+        global: false,
+        case_insensitive: false,
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("hello rust"));
+}
+
+#[test]
+fn subst_global_case_insensitive() {
+    let mut t = Test::new();
+    t.engine.set_var("X", "Foo foo FOO");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "foo".into(),
+        replace: "bar".into(),
+        global: true,
+        case_insensitive: true,
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("bar bar bar"));
+}
+
+#[test]
+fn subst_no_match() {
+    let mut t = Test::new();
+    t.engine.set_var("X", "hello");
+    let items = vec![Item::Subst {
+        name: "X".into(),
+        pattern: "xyz".into(),
+        replace: "gone".into(),
+        global: false,
+        case_insensitive: false,
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.engine.get_var("X"), Some("hello"));
+}
+
+#[test]
 fn header_op_delete_insert() {
     let mut t = Test::with_msg("Subject: old\nX-Foo: bar\n\nbody");
     let items = vec![Item::HeaderOp {
