@@ -1701,9 +1701,20 @@ fn trap_sets_exitcode_zero() {
     assert!(t.engine.exit_was_set());
 }
 
+// When EXITCODE is not set, TRAP exit code does NOT override (procmail
+// forceret==-1).  Only EXITCODE= (empty) enables TRAP exit override.
 #[test]
-fn trap_nonzero_updates_exitcode() {
+fn trap_nonzero_without_exitcode_set() {
     let mut t = Test::new();
+    t.engine.set_var("TRAP", "exit 42");
+    t.engine.run_trap(&t.msg);
+    assert_eq!(t.engine.get_var("EXITCODE"), Some("0"));
+}
+
+#[test]
+fn trap_nonzero_with_empty_exitcode() {
+    let mut t = Test::new();
+    t.engine.set_var("EXITCODE", "");
     t.engine.set_var("TRAP", "exit 42");
     t.engine.run_trap(&t.msg);
     assert_eq!(t.engine.get_var("EXITCODE"), Some("42"));

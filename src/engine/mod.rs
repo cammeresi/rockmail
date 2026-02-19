@@ -1483,15 +1483,24 @@ impl Engine {
     }
 
     /// Execute TRAP command before exit (pipes.c:288-312).
+    ///
+    /// EXITCODE interaction (variables.c:268-283, pipes.c:304):
+    ///  - not set  → provide EXITCODE=0 to env; TRAP exit code NOT used
+    ///  - empty    → TRAP exit code overrides if non-zero (forceret==-2)
+    ///  - positive → that value is used; TRAP exit code ignored
     pub fn run_trap(&mut self, msg: &Message) {
         let trap = match self.get_var(VAR_TRAP) {
             Some(t) if !t.is_empty() => t.to_owned(),
             _ => return,
         };
-        let user_set = self.get_var(VAR_EXITCODE).is_some();
-        if !user_set {
-            self.set_var(VAR_EXITCODE, "0");
-        }
+        let exitcode_val = self.get_var(VAR_EXITCODE).map(str::to_owned);
+        let use_trap_exit = match &exitcode_val {
+            None => {
+                self.set_var(VAR_EXITCODE, "0");
+                false
+            }
+            Some(v) => v.is_empty(),
+        };
         let cmd = self.expand(&trap, Some(msg));
         let shell = self.env.get_or_default(&SHELL).to_owned();
         let flags = self.env.get_or_default(&SHELLFLAGS);
@@ -1508,7 +1517,7 @@ impl Engine {
             return;
         };
         if let Some(mut w) = child.stdin.take() {
-            let r = msg.write_to(&mut w, false);
+            let r = msg.write_to_trap(&mut w);
             drop(w);
             if let Err(e) = r
                 && e.kind() != ErrorKind::BrokenPipe
@@ -1519,7 +1528,7 @@ impl Engine {
         let timeout = self.timeout();
         if let Ok(status) = wait_timeout(&mut child, timeout, &cmd) {
             let code = status.code().unwrap_or(-1);
-            if !user_set && code != 0 {
+            if use_trap_exit && code != 0 {
                 self.set_var(VAR_EXITCODE, &code.to_string());
             }
         }

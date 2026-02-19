@@ -221,72 +221,6 @@ DEFAULT=$DIR/default
 }
 
 #[test]
-fn exitcode_override() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let rc = write_rc(
-        d,
-        "\
-MAILDIR=$DIR
-DEFAULT=$DIR/default
-EXITCODE=42
-",
-    );
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 42);
-}
-
-#[test]
-fn exitcode_not_set_returns_zero() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let rc = write_rc(
-        d,
-        "\
-MAILDIR=$DIR
-DEFAULT=$DIR/default
-",
-    );
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 0);
-}
-
-#[test]
-fn shift_positional_args() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let out = d.join("out");
-    let rc = write_rc(
-        d,
-        &format!(
-            "\
-MAILDIR=$DIR
-DEFAULT=$DIR/default
-SHIFT=1
-
-:0 hw
-| /bin/echo $1 > {}
-",
-            out.display()
-        ),
-    );
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (_, code) = run(
-        d,
-        &["-f", "sender@test", "-a", "first", "-a", "second", &rc],
-        input,
-    );
-    assert_eq!(code, 0);
-    let text = fs::read_to_string(&out).unwrap();
-    assert!(
-        text.contains("second"),
-        "SHIFT didn't move $1 to second arg: {text:?}"
-    );
-}
-
-#[test]
 fn host_mismatch_stops_processing() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
@@ -339,75 +273,6 @@ LOCKFILE={}
         !lock.exists(),
         "global lockfile should be removed after exit"
     );
-}
-
-#[test]
-fn trap_runs_on_exit() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let marker = d.join("trap_ran");
-    let rc = write_rc(
-        d,
-        &format!(
-            "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=touch {}\n",
-            marker.display()
-        ),
-    );
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 0);
-    assert!(marker.exists(), "TRAP did not run");
-}
-
-#[test]
-fn trap_receives_message_on_stdin() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let out = d.join("stdin_dump");
-    let rc = write_rc(
-        d,
-        &format!(
-            "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=cat > {}\n",
-            out.display()
-        ),
-    );
-    let input = b"From: user@host\nSubject: Test\n\nTrapBody\n";
-    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 0);
-    let content = fs::read_to_string(&out).unwrap();
-    assert!(
-        content.contains("TrapBody"),
-        "TRAP didn't get message: {content:?}"
-    );
-}
-
-#[test]
-fn trap_exitcode_available() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let out = d.join("exitcode");
-    let rc = write_rc(
-        d,
-        &format!(
-            "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=echo \\$EXITCODE > {}\n",
-            out.display()
-        ),
-    );
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 0);
-    let content = fs::read_to_string(&out).unwrap();
-    assert_eq!(content.trim(), "0", "EXITCODE not available: {content:?}");
-}
-
-#[test]
-fn trap_exit_overrides_exitcode() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/default\nTRAP=exit 7\n");
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 7, "TRAP exit code should override");
 }
 
 const UMASK_MSG: &[u8] = b"From: user@host\nSubject: Test\n\nBody\n";
@@ -621,31 +486,6 @@ inbox
     assert!(
         !d.join("my.lock").exists(),
         "named lockfile should be cleaned up"
-    );
-}
-
-#[test]
-fn forward_with_sendmail_true() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let rc = write_rc(
-        d,
-        "\
-MAILDIR=$DIR
-DEFAULT=$DIR/default
-SENDMAIL=/bin/true
-SENDMAILFLAGS=
-
-:0
-! user@example.com
-",
-    );
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 0);
-    assert!(
-        !d.join("default").exists(),
-        "message should be consumed by forward, not delivered to default"
     );
 }
 

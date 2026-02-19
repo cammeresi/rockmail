@@ -1201,6 +1201,26 @@ SCRATCH =~ s/-/_/
 }
 
 #[test]
+fn shift_positional_args() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SHIFT=1
+
+:0
+* $ ^Subject:.*$1
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: second\n\nBody\n",
+        b"From: b@host\nSubject: first\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs)
+        .args(&["-a", "first", "-a", "second"])
+        .run();
+}
+
+#[test]
 fn continuation_header_to_match() {
     let rc = "\
 MAILDIR=$MAILDIR
@@ -1215,5 +1235,87 @@ matched
         b"From: x@host\nTo: sac@cheesecake.org\n\nBody\n",
         b"From: x@host\nTo: bob@host\n\nBody\n",
     ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn exitcode_override() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+EXITCODE=42
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn exitcode_not_set_returns_zero() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn forward_with_sendmail_true() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SENDMAIL=/bin/true
+SENDMAILFLAGS=
+
+:0
+! user@example.com
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn trap_runs_on_exit() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+TRAP=\"touch $MAILDIR/trap_ran\"
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn trap_exitcode_available() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+TRAP=\"echo \\$EXITCODE > $MAILDIR/exitcode\"
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn trap_exit_overrides_exitcode() {
+    // `;` forces shell execution (shellmeta); EXITCODE= means use TRAP's code
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+EXITCODE=
+TRAP=\"/bin/true; exit 7\"
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn trap_receives_message_on_stdin() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+TRAP=\"cat > $MAILDIR/stdin_dump\"
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nTrapBody\n"];
     GoldTest::new(rc, msgs).run();
 }

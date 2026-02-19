@@ -202,6 +202,18 @@ impl Message {
         Ok(n)
     }
 
+    /// Write message to TRAP stdin, forcing a trailing newline
+    /// (procmail's rawnonl=0 + ft_forceblank; pipes.c:293, mailfold.c:115-118).
+    pub fn write_to_trap<W: Write>(&self, w: &mut W) -> io::Result<usize> {
+        let mut n = self.write_to(w, false)?;
+        let body = self.body();
+        if body.is_empty() || !body.ends_with(b"\n\n") {
+            w.write_all(b"\n")?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// Iterator over parsed headers (skips From_ and >From_ lines).
     pub fn headers(
         &self,
