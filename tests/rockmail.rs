@@ -745,6 +745,23 @@ fn header_op_rfc2047() {
 }
 
 #[test]
+fn header_op_not_rfc2047() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc =
+        write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n@A X-Tag: cafe\n");
+    let input = b"From: user@host\nSubject: test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(
+        !content.contains("=?UTF-8?"),
+        "ASCII value is RFC 2047 encoded: {content:?}"
+    );
+}
+
+#[test]
 fn dedup_new_message() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
