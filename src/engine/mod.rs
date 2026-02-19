@@ -17,7 +17,7 @@ use nix::unistd::dup2;
 use regex::RegexBuilder;
 
 use crate::config::{
-    self, Action, Condition, Flags, HeaderOp, Item, Recipe, Weight,
+    self, Action, Condition, Flags, Grep, HeaderOp, Item, Recipe, Weight,
 };
 use crate::dedup;
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
@@ -514,13 +514,13 @@ impl Engine {
     fn grep_text<'a>(
         msg: &'a Message, flags: &Flags, decoded: &'a str,
     ) -> Cow<'a, str> {
-        match (flags.head, flags.body) {
-            (true, true) => {
+        match flags.grep {
+            Grep::Full => {
                 let b = String::from_utf8_lossy(msg.body());
                 Cow::Owned(format!("{decoded}{b}"))
             }
-            (false, true) => String::from_utf8_lossy(msg.body()),
-            _ => Cow::Borrowed(decoded),
+            Grep::Body => String::from_utf8_lossy(msg.body()),
+            Grep::Headers => Cow::Borrowed(decoded),
         }
     }
 

@@ -3,17 +3,15 @@
 use std::cmp::Ordering;
 
 use super::parser::ParseError;
-use super::{Action, Condition, Flags, Item, Recipe, Weight, parse};
+use super::{Action, Condition, Flags, Grep, Item, Recipe, Weight, parse};
 
 fn fmt_flags(f: &Flags) -> String {
     let mut p = Vec::new();
 
-    if f.head && f.body {
-        p.push("HB (grep header+body)");
-    } else if f.head {
-        p.push("H (grep header)");
-    } else if f.body {
-        p.push("B (grep body)");
+    match f.grep {
+        Grep::Full => p.push("HB (grep header+body)"),
+        Grep::Headers => p.push("H (grep header)"),
+        Grep::Body => p.push("B (grep body)"),
     }
 
     if f.case {
@@ -230,6 +228,9 @@ fn fmt_item_str(item: &Item, num: usize, depth: usize) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests;
 
 /// Parse an rcfile and print a human-readable dump of every item.
 pub fn run(content: &str, path: &str) -> Result<Vec<Item>, ParseError> {

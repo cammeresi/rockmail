@@ -3,13 +3,23 @@ use super::{Action, Condition};
 #[cfg(test)]
 mod tests;
 
+/// Which parts of the message to grep against conditions.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum Grep {
+    /// `H` — grep headers only (default).
+    #[default]
+    Headers,
+    /// `B` — grep body only.
+    Body,
+    /// `HB` — grep both headers and body.
+    Full,
+}
+
 /// All 15 procmail recipe flags.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Flags {
-    /// `H` — grep header (default true).
-    pub head: bool,
-    /// `B` — grep body.
-    pub body: bool,
+    /// `H`/`B` — which message parts to grep.
+    pub grep: Grep,
     /// `D` — case sensitive.
     pub case: bool,
     /// `A` — chain on prior condition match.
@@ -41,10 +51,9 @@ pub struct Flags {
 }
 
 impl Flags {
-    /// Default flags: head, pass_head, and pass_body enabled.
+    /// Default flags: grep headers, pass_head, and pass_body enabled.
     pub fn new() -> Self {
         Self {
-            head: true,
             pass_head: true,
             pass_body: true,
             ..Default::default()
@@ -54,15 +63,16 @@ impl Flags {
     /// Parse flags from the colon line of a recipe.
     pub fn parse(s: &str) -> Self {
         let mut f = Flags::new();
-        // If any of H/B specified, reset defaults
-        let has_hb = s.chars().any(|c| c == 'H' || c == 'B');
-        if has_hb {
-            f.head = false;
-        }
+        let has_h = s.contains('H');
+        let has_b = s.contains('B');
+        f.grep = match (has_h, has_b) {
+            (true, true) => Grep::Full,
+            (false, true) => Grep::Body,
+            _ => Grep::Headers,
+        };
         for c in s.chars() {
             match c {
-                'H' => f.head = true,
-                'B' => f.body = true,
+                'H' | 'B' => {}
                 'D' => f.case = true,
                 'A' => f.chain = true,
                 'a' => f.succ = true,

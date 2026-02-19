@@ -5,8 +5,7 @@ use super::*;
 #[test]
 fn flags_default() {
     let f = Flags::new();
-    assert!(f.head);
-    assert!(!f.body);
+    assert_eq!(f.grep, Grep::Headers);
     assert!(f.pass_head);
     assert!(f.pass_body);
 }
@@ -14,22 +13,19 @@ fn flags_default() {
 #[test]
 fn flag_h() {
     let f = Flags::parse("H");
-    assert!(f.head);
-    assert!(!f.body);
+    assert_eq!(f.grep, Grep::Headers);
 }
 
 #[test]
 fn flag_b() {
     let f = Flags::parse("B");
-    assert!(!f.head);
-    assert!(f.body);
+    assert_eq!(f.grep, Grep::Body);
 }
 
 #[test]
 fn flag_hb() {
     let f = Flags::parse("HB");
-    assert!(f.head);
-    assert!(f.body);
+    assert_eq!(f.grep, Grep::Full);
 }
 
 #[test]
@@ -115,8 +111,7 @@ fn flag_raw() {
 #[test]
 fn flag_empty() {
     let f = Flags::parse("");
-    assert!(f.head);
-    assert!(!f.body);
+    assert_eq!(f.grep, Grep::Headers);
     assert!(f.pass_head);
     assert!(f.pass_body);
     assert!(!f.case);
@@ -142,8 +137,7 @@ fn flag_whitespace_ignored() {
 #[test]
 fn flag_all_combined() {
     let f = Flags::parse("HBDAaEehbfcwWir");
-    assert!(f.head);
-    assert!(f.body);
+    assert_eq!(f.grep, Grep::Full);
     assert!(f.case);
     assert!(f.chain);
     assert!(f.succ);
