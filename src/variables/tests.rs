@@ -33,6 +33,7 @@ fn all_alias() {
 fn fallback() {
     assert_eq!(value_as_int("", 7), 7);
     assert_eq!(value_as_int("junk", 99), 99);
+    assert_eq!(value_as_int("orange", 5), 5);
 }
 
 #[test]
