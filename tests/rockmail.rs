@@ -851,3 +851,25 @@ $DIR/good
         "should log invalid regex: {err}"
     );
 }
+
+#[test]
+fn rcfile_crlf() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    // Write rcfile with \r\n line endings (Windows style)
+    let rc = format!(
+        "MAILDIR={d}\r\nDEFAULT={d}/inbox\r\n\r\n:0\r\n* ^Subject: Test\r\n{d}/inbox\r\n",
+        d = d.display()
+    );
+    let p = d.join("rcfile");
+    fs::write(&p, &rc).unwrap();
+    fs::set_permissions(&p, Permissions::from_mode(0o644)).unwrap();
+    let rc = p.to_str().unwrap();
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", rc], input);
+    assert_eq!(code, 0);
+    assert!(mbox.exists(), "delivery with CRLF rcfile failed");
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(content.contains("Body"), "message body missing");
+}

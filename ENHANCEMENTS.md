@@ -94,6 +94,11 @@ size in bytes; `cachefile` is the path to the circular cache.
 
 There is no sender-based (`-r`) equivalent — only Message-ID detection.
 
+## Windows Line Endings in Rcfiles
+
+Rcfiles with CRLF (`\r\n`) line endings are handled transparently.
+Procmail only accepts Unix LF line endings.
+
 ## Non-ASCII Header Decoding During Matching
 
 Rockmail decodes RFC 2047 encoded words (`=?charset?B?...?=` and
