@@ -154,6 +154,43 @@ inbox/ copy/
 }
 
 #[test]
+fn secondary_dir() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    fs::create_dir(d.join("inbox")).unwrap();
+    fs::create_dir(d.join("copy")).unwrap();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+:0
+inbox copy
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+
+    let inbox = d.join("inbox");
+    let copy = d.join("copy");
+
+    let inbox_files: Vec<_> = fs::read_dir(&inbox).unwrap().flatten().collect();
+    let copy_files: Vec<_> = fs::read_dir(&copy).unwrap().flatten().collect();
+    assert_eq!(inbox_files.len(), 1, "expected 1 file in inbox");
+    assert_eq!(copy_files.len(), 1, "expected 1 file in copy");
+
+    let a = fs::read(inbox_files[0].path()).unwrap();
+    let b = fs::read(copy_files[0].path()).unwrap();
+    assert_eq!(a, b, "inbox and copy content differ");
+
+    let ia = fs::metadata(inbox_files[0].path()).unwrap().ino();
+    let ib = fs::metadata(copy_files[0].path()).unwrap().ino();
+    assert_eq!(ia, ib, "expected hard link (same inode)");
+}
+
+#[test]
 fn builtin_defaults_expand() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
