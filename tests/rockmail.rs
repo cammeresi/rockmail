@@ -924,3 +924,36 @@ $DIR/dupes
     assert_eq!(code, 0);
     assert!(dupes.exists(), "duplicate not routed to dupes");
 }
+
+#[test]
+fn invalid_regex_skips_recipe() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let bad = d.join("bad");
+    let good = d.join("good");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+:0
+* [invalid
+$DIR/bad
+
+:0
+* ^Subject
+$DIR/good
+",
+    );
+    let input = b"From: user@host\nSubject: test\n\nBody\n";
+    let (stderr, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(!bad.exists(), "invalid regex recipe should not deliver");
+    assert!(good.exists(), "subsequent recipe should still deliver");
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        err.contains("Invalid regexp"),
+        "should log invalid regex: {err}"
+    );
+}

@@ -1,4 +1,4 @@
-# ROCKMAIL — Rust Only Configurable Keeper of MAIL
+# ROCKMAIL — Rust Only Collator and Keeper of MAIL
 
 ## Licensing
 

@@ -24,7 +24,7 @@ use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
 use crate::field::{Field, FieldList};
 use crate::locking::FileLock;
 use crate::mail::Message;
-use crate::re::{Matcher, PatternError};
+use crate::re::Matcher;
 use crate::rfc2047;
 use crate::util::wait_timeout;
 use crate::variables::{
@@ -63,9 +63,6 @@ pub enum Outcome {
 /// Error during recipe evaluation.
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    /// Regex compilation or matching error.
-    #[error("regex error: {0}")]
-    Regex(#[from] PatternError),
     /// Delivery failure (folder, pipe, or forward).
     #[error("delivery error: {0}")]
     Delivery(#[from] DeliveryError),
@@ -665,7 +662,10 @@ impl Engine {
         &mut self, text: &str, pattern: &str, negate: bool,
         weight: Option<Weight>, case_insens: bool, label: &str,
     ) -> EngineResult<ConditionResult> {
-        let matcher = Matcher::new(pattern, case_insens)?;
+        let Ok(matcher) = Matcher::new(pattern, case_insens) else {
+            eprintln!("Invalid regexp \"{}\"", pattern);
+            return Ok(ConditionResult::simple(false));
+        };
 
         let result = matcher.exec(text);
         if result.matched

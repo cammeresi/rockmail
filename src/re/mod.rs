@@ -1,3 +1,3 @@
 mod matcher;
 
-pub(crate) use matcher::{Matcher, PatternError};
+pub(crate) use matcher::Matcher;

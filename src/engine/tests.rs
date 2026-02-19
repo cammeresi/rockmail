@@ -324,7 +324,7 @@ fn nested_block() {
 }
 
 #[test]
-fn invalid_regex_returns_error() {
+fn invalid_regex_skips_recipe() {
     let mut t = Test::new();
     let items = vec![Item::Recipe {
         recipe: Recipe {
@@ -339,7 +339,7 @@ fn invalid_regex_returns_error() {
         },
         line: 0,
     }];
-    assert!(matches!(t.try_process(&items), Err(EngineError::Regex(_))));
+    assert_eq!(t.process(&items), Outcome::Default);
 }
 
 #[test]

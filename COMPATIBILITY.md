@@ -125,3 +125,12 @@ differently or does not implement:
 
 In all cases, delivery failures produce `EX_CANTCREAT` (73), or
 `EX_TEMPFAIL` (75) with the `-t` flag, matching procmail.
+
+## Invalid regex patterns
+
+Procmail's custom regex engine is lenient with malformed patterns like
+`[invalid` — it logs "Invalid regexp" but compiles the pattern into
+something that may still match. Rockmail uses the Rust `regex` crate,
+which properly rejects invalid patterns. When compilation fails, rockmail
+logs the error and treats the condition as non-matching, continuing with
+subsequent recipes.
