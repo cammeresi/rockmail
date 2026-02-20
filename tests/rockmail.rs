@@ -617,6 +617,40 @@ fn dryrun_filter() {
     assert!(err.contains("filter:"), "expected filter log: {err:?}");
 }
 
+fn dryrun_subst(rc_body: &str, expect: &str) {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        &format!("MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n{rc_body}\n"),
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (stderr, code) = run(d, &["-n", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(err.contains(expect), "expected {expect:?} in: {err:?}");
+}
+
+#[test]
+fn dryrun_subst_no_flags() {
+    dryrun_subst("X=aaa\nX =~ s/a/b/", "s/a/b/ -> ");
+}
+
+#[test]
+fn dryrun_subst_global() {
+    dryrun_subst("X=aaa\nX =~ s/a/b/g", "s/a/b/g -> ");
+}
+
+#[test]
+fn dryrun_subst_icase() {
+    dryrun_subst("X=Hello\nX =~ s/hello/bye/i", "s/hello/bye/i -> ");
+}
+
+#[test]
+fn dryrun_subst_global_icase() {
+    dryrun_subst("X=Foo foo\nX =~ s/foo/bar/gi", "s/foo/bar/gi -> ");
+}
+
 #[test]
 fn header_op_delete_insert() {
     let dir = TempDir::new().unwrap();
@@ -817,6 +851,60 @@ $DIR/dupes
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
     assert!(dupes.exists(), "duplicate not routed to dupes");
+}
+
+#[test]
+fn dedup_invalid_size() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+:0 Wh:
+@D notanumber $DIR/msgid.cache
+
+:0
+* DUPLICATE ?? yes
+$DIR/dupes
+",
+    );
+    let input = b"From: user@host\nMessage-ID: <x@example>\n\nBody\n";
+    let (stderr, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let s = String::from_utf8_lossy(&stderr);
+    assert!(s.contains("@D: bad maxlen"), "expected bad maxlen: {s}");
+    assert!(d.join("inbox").exists(), "not delivered to inbox");
+    assert!(!d.join("dupes").exists(), "routed to dupes on bad size");
+}
+
+#[test]
+fn dedup_invalid_path() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+:0 Wh:
+@D 8192 /nonexistent/dir/cache
+
+:0
+* DUPLICATE ?? yes
+$DIR/dupes
+",
+    );
+    let input = b"From: user@host\nMessage-ID: <y@example>\n\nBody\n";
+    let (stderr, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let s = String::from_utf8_lossy(&stderr);
+    assert!(s.contains("@D: cache error"), "expected cache error: {s}");
+    assert!(d.join("inbox").exists(), "not delivered to inbox");
+    assert!(!d.join("dupes").exists(), "routed to dupes on bad path");
 }
 
 #[test]

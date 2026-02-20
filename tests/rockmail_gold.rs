@@ -1377,6 +1377,20 @@ matched
 }
 
 #[test]
+fn weighted_divergent_zero_width() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 1^2 ^
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
 fn invalid_maildir() {
     let rc = "\
 MAILDIR=/nonexistent/path
