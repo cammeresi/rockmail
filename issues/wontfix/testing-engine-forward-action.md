@@ -11,3 +11,8 @@ Missing coverage:
 - Multiple addresses
 - SENDMAILFLAGS behavior
 - Error handling (sendmail not found, exit code)
+
+## Comments
+
+This feature is difficult to test automatically.  It has been manually
+tested and found to work.
