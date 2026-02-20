@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use nix::sys::stat::{self, Mode};
 use nix::unistd::dup2;
-
 use regex::RegexBuilder;
 
 use crate::config::{
@@ -76,6 +75,19 @@ pub enum EngineError {
     #[error("INCLUDERC recursion depth exceeded")]
     RecursionLimit,
 }
+
+impl PartialEq for EngineError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Delivery(a), Self::Delivery(b)) => a == b,
+            (Self::Io(a), Self::Io(b)) => a.kind() == b.kind(),
+            (Self::Lock(a), Self::Lock(b)) => a == b,
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for EngineError {}
 
 /// Result of engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;

@@ -211,7 +211,7 @@ fn capture_then_anchor() {
 fn pattern_too_long() {
     let long = "a".repeat(MAX_PATTERN_LEN + 1);
     let err = Matcher::new(&long, false).unwrap_err();
-    assert!(matches!(err, PatternError::TooLong(_)));
+    assert_eq!(err, PatternError::TooLong(MAX_PATTERN_LEN + 1));
 }
 
 #[test]
@@ -380,14 +380,18 @@ fn pattern_too_long_after_expansion() {
     let n = MAX_PATTERN_LEN / FROMD_SUBSTITUTE.len() + 1;
     let pat = "^FROM_DAEMON".repeat(n);
     assert!(pat.len() < MAX_PATTERN_LEN);
+    let expanded = FROMD_SUBSTITUTE.len() * n;
     let err = Matcher::new(&pat, false).unwrap_err();
-    assert!(matches!(err, PatternError::TooLong(_)));
+    assert_eq!(err, PatternError::TooLong(expanded));
 }
 
 #[test]
 fn invalid_regex() {
     let err = Matcher::new("[invalid", false).unwrap_err();
-    assert!(matches!(err, PatternError::Regex(_)));
+    assert_eq!(
+        err,
+        PatternError::Regex(regex::Error::Syntax(String::new()))
+    );
 }
 
 #[test]

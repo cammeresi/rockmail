@@ -50,6 +50,43 @@ impl Test {
     }
 }
 
+fn delivered(o: Outcome) -> String {
+    let Outcome::Delivered(p) = o else {
+        panic!("expected Outcome::Delivered, got {o:?}");
+    };
+    p
+}
+
+#[test]
+#[should_panic(expected = "expected Outcome::Delivered")]
+fn delivered_panics_on_default() {
+    delivered(Outcome::Default);
+}
+
+fn err_delivery(r: Result<Outcome, EngineError>) {
+    let Err(EngineError::Delivery(_)) = r else {
+        panic!("expected EngineError::Delivery, got {r:?}");
+    };
+}
+
+#[test]
+#[should_panic(expected = "expected EngineError::Delivery")]
+fn err_delivery_panics_on_ok() {
+    err_delivery(Ok(Outcome::Default));
+}
+
+fn err_lock(r: Result<Outcome, EngineError>) {
+    let Err(EngineError::Lock(_)) = r else {
+        panic!("expected EngineError::Lock, got {r:?}");
+    };
+}
+
+#[test]
+#[should_panic(expected = "expected EngineError::Lock")]
+fn err_lock_panics_on_ok() {
+    err_lock(Ok(Outcome::Default));
+}
+
 fn regex_recipe(pattern: &str, folder: &str) -> Item {
     Item::Recipe {
         recipe: Recipe {
@@ -92,9 +129,8 @@ fn no_recipes_returns_default() {
 fn matching_regex_delivers() {
     let mut t = Test::new();
     let items = vec![regex_recipe("Subject:", &t.maildir("inbox"))];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("inbox"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("inbox"));
 }
 
 #[test]
@@ -120,7 +156,7 @@ fn negated_regex() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -140,7 +176,7 @@ fn size_condition_less() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -188,7 +224,7 @@ fn variable_assignment() {
             line: 0,
         },
     ];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -232,9 +268,8 @@ fn else_flag_runs_when_prev_false() {
             line: 0,
         },
     ];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("else"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("else"));
 }
 
 #[test]
@@ -256,7 +291,7 @@ fn body_flag_greps_body() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -287,9 +322,8 @@ fn copy_flag_continues() {
             line: 0,
         },
     ];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("second"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("second"));
 }
 
 #[test]
@@ -318,9 +352,8 @@ fn nested_block() {
         },
         line: 0,
     }];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("inner"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("inner"));
 }
 
 #[test]
@@ -356,10 +389,7 @@ fn delivery_to_unwritable_path_returns_error() {
         },
         line: 0,
     }];
-    assert!(matches!(
-        t.try_process(&items),
-        Err(EngineError::Delivery(_))
-    ));
+    err_delivery(t.try_process(&items));
 }
 
 #[test]
@@ -381,7 +411,7 @@ fn subst_negation_inverts_match() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -404,7 +434,7 @@ fn subst_expands_variables() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -425,7 +455,7 @@ fn regex_without_subst_no_expansion() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Default));
+    assert_eq!(t.process(&items), Outcome::Default);
 }
 
 #[test]
@@ -444,7 +474,7 @@ fn weighted_condition_positive_score_matches() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -501,7 +531,7 @@ fn weighted_negated_nonmatch_adds_weight() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -520,7 +550,7 @@ fn weighted_empty_match_tail_sum() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -537,10 +567,8 @@ fn action_folder_expands_variable() {
         },
         line: 0,
     }];
-    assert!(matches!(
-        t.process(&items),
-        Outcome::Delivered(p) if p.contains("expanded")
-    ));
+    let p = delivered(t.process(&items));
+    assert!(p.contains("expanded"));
 }
 
 #[test]
@@ -559,7 +587,7 @@ fn action_pipe_expands_variable() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -600,7 +628,7 @@ fn positive_fractional_score_rounds_to_one() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
     assert_eq!(t.engine.ctx.last_score, 1);
 }
 
@@ -620,7 +648,7 @@ fn last_score_set_after_weighted_recipe() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
     assert_eq!(t.engine.ctx.last_score, 30);
 }
 
@@ -1021,8 +1049,10 @@ fn recursion_limit() {
         path: rc.to_string_lossy().into(),
         line: 0,
     }];
-    let err = t.try_process(&items).unwrap_err();
-    assert!(matches!(err, EngineError::RecursionLimit));
+    assert_eq!(
+        t.try_process(&items).unwrap_err(),
+        EngineError::RecursionLimit
+    );
 }
 
 #[test]
@@ -1037,8 +1067,7 @@ fn lock_failure() {
         },
         line: 0,
     }];
-    let err = t.try_process(&items).unwrap_err();
-    assert!(matches!(err, EngineError::Lock(_)));
+    err_lock(t.try_process(&items));
 }
 
 #[test]
@@ -1057,8 +1086,7 @@ fn pipe_spawn_failure() {
         },
         line: 0,
     }];
-    let err = t.try_process(&items).unwrap_err();
-    assert!(matches!(err, EngineError::Delivery(_)));
+    err_delivery(t.try_process(&items));
 }
 
 #[test]
@@ -1103,7 +1131,7 @@ fn case_sensitive_flag_matches() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -1137,9 +1165,8 @@ fn ignore_flag_suppresses_delivery_error() {
             line: 0,
         },
     ];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("fallback"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("fallback"));
 }
 
 #[test]
@@ -1162,9 +1189,8 @@ fn else_if_skips_when_prev_matched() {
             line: 0,
         },
     ];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("first"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("first"));
 }
 
 #[test]
@@ -1201,9 +1227,8 @@ fn error_flag_runs_on_failed_action() {
             line: 0,
         },
     ];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("err"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("err"));
 }
 
 #[test]
@@ -1286,7 +1311,7 @@ fn head_and_body_flag_greps_both() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -1343,9 +1368,8 @@ fn copy_and_wait() {
             line: 0,
         },
     ];
-    assert!(
-        matches!(t.process(&items), Outcome::Delivered(p) if p.contains("after"))
-    );
+    let p = delivered(t.process(&items));
+    assert!(p.contains("after"));
 }
 
 #[test]
@@ -1362,7 +1386,7 @@ fn filter_replaces_message() {
                 lockfile: None,
                 conds: vec![],
                 action: Action::Pipe {
-                    cmd: "echo filtered".into(),
+                    cmd: "printf 'X: y\\n\\nfiltered'".into(),
                     capture: None,
                 },
             },
@@ -1378,12 +1402,8 @@ fn filter_replaces_message() {
             line: 0,
         },
     ];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
-    // Message should have been replaced by filter output
-    assert!(
-        !t.msg.body().windows(8).any(|w| w == b"Original"),
-        "original body should be replaced"
-    );
+    delivered(t.process(&items));
+    assert_eq!(t.msg.body(), b"filtered");
 }
 
 #[test]
@@ -1502,7 +1522,7 @@ fn dryrun_log_header_expands_vars() {
 fn shell_true_delivers() {
     let mut t = Test::new();
     let items = vec![shell_recipe("/bin/true", &t.maildir("inbox"))];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -1547,7 +1567,7 @@ fn shell_negated_false_delivers() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
 }
 
 #[test]
@@ -1574,7 +1594,7 @@ fn shell_weighted_exit_zero() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
     assert_eq!(t.engine.ctx.last_score, 5);
 }
 
@@ -1594,7 +1614,7 @@ fn shell_weighted_exit_nonzero() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
     assert_eq!(t.engine.ctx.last_score, 2);
 }
 
@@ -1614,7 +1634,7 @@ fn shell_weighted_negated_loop() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
     assert_eq!(t.engine.ctx.last_score, 6);
 }
 
@@ -1634,7 +1654,7 @@ fn shell_weighted_negated_decay() {
         },
         line: 0,
     }];
-    assert!(matches!(t.process(&items), Outcome::Delivered(_)));
+    delivered(t.process(&items));
     assert_eq!(t.engine.ctx.last_score, 1);
 }
 

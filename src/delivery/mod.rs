@@ -1,5 +1,6 @@
 //! Mail delivery to folders and pipes.
 
+use core::mem;
 use std::fs::{self, Permissions};
 use std::io;
 use std::os::unix::fs::PermissionsExt;
@@ -69,6 +70,31 @@ pub enum DeliveryError {
     #[error("pipe command killed by signal {0}")]
     PipeSignal(i32),
 }
+
+impl PartialEq for DeliveryError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Io {
+                    source: a,
+                    path: pa,
+                    op: oa,
+                },
+                Self::Io {
+                    source: b,
+                    path: pb,
+                    op: ob,
+                },
+            ) => a.kind() == b.kind() && pa == pb && oa == ob,
+            (Self::Lock(a), Self::Lock(b)) => a == b,
+            (Self::PipeExit(a), Self::PipeExit(b)) => a == b,
+            (Self::PipeSignal(a), Self::PipeSignal(b)) => a == b,
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for DeliveryError {}
 
 pub(crate) fn io_err(
     e: io::Error, path: &Path, op: &'static str,

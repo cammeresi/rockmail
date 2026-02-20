@@ -13,7 +13,7 @@ mod tests;
 
 const MAX_DEPTH: usize = 100;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum ParseError {
     #[error("line {0}: unexpected end of file")]
     UnexpectedEof(usize),
@@ -30,6 +30,8 @@ pub enum ParseError {
 mod warnings {
     // false positive from thiserror/miette derives
     #![allow(unused_assignments)]
+
+    use core::mem;
 
     use miette::{Diagnostic, NamedSource, SourceOffset};
     use thiserror::Error;
@@ -99,6 +101,20 @@ mod warnings {
             span: SourceOffset,
         },
     }
+
+    impl PartialEq for ParseWarning {
+        fn eq(&self, other: &Self) -> bool {
+            match (self, other) {
+                (
+                    Self::UnknownFlag { flag: a, .. },
+                    Self::UnknownFlag { flag: b, .. },
+                ) => a == b,
+                _ => mem::discriminant(self) == mem::discriminant(other),
+            }
+        }
+    }
+
+    impl Eq for ParseWarning {}
 }
 
 /// Strip an inline comment: `value  # comment` → `value`.

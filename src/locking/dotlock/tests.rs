@@ -9,7 +9,7 @@ fn create_and_remove() {
 
     assert!(create_lock(&lock).is_ok());
     assert!(lock.exists());
-    assert!(matches!(create_lock(&lock), Err(LockError::Exists)));
+    assert_eq!(create_lock(&lock).unwrap_err(), LockError::Exists);
     assert!(remove_lock(&lock).is_ok());
     assert!(!lock.exists());
 }
@@ -36,13 +36,16 @@ fn mtime_nonexistent() {
 fn remove_nonexistent() {
     let dir = tempdir().unwrap();
     let lock = dir.path().join("nonexistent.lock");
-    assert!(matches!(remove_lock(&lock), Err(LockError::Io(_))));
+    assert_eq!(
+        remove_lock(&lock).unwrap_err(),
+        LockError::Io(std::io::ErrorKind::NotFound.into()),
+    );
 }
 
 #[test]
 fn missing_directory() {
     let lock = Path::new("/nonexistent/dir/test.lock");
-    assert!(matches!(create_lock(lock), Err(LockError::Unavailable)));
+    assert_eq!(create_lock(lock).unwrap_err(), LockError::Unavailable);
 }
 
 #[test]

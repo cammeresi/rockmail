@@ -1,7 +1,17 @@
 use std::path::PathBuf;
 
+use miette::SourceOffset;
+
 use super::*;
 use crate::config::{Grep, HeaderOp};
+
+fn dummy_src() -> miette::NamedSource<String> {
+    miette::NamedSource::new("", String::new())
+}
+
+fn dummy_span() -> SourceOffset {
+    SourceOffset::from(0)
+}
 
 fn parse_rc(input: &str) -> Result<Vec<Item>, ParseError> {
     parse(input, "test")
@@ -173,13 +183,13 @@ VERBOSE=yes
 #[test]
 fn missing_action() {
     let rc = ":0\n* ^From:.*spam\n";
-    assert!(matches!(parse_rc(rc), Err(ParseError::MissingAction(_))));
+    assert_eq!(parse_rc(rc), Err(ParseError::MissingAction(3)));
 }
 
 #[test]
 fn unclosed_block() {
     let rc = ":0\n{\n:0\nspam/\n";
-    assert!(matches!(parse_rc(rc), Err(ParseError::UnclosedBlock(_))));
+    assert_eq!(parse_rc(rc), Err(ParseError::UnclosedBlock(2)));
 }
 
 #[test]
@@ -557,19 +567,13 @@ fn block_skips_blanks_and_comments() {
 #[test]
 fn block_unclosed() {
     let mut p = Parser::new("VAR=x\n");
-    assert!(matches!(
-        p.parse_block(1),
-        Err(ParseError::UnclosedBlock(_))
-    ));
+    assert_eq!(p.parse_block(1), Err(ParseError::UnclosedBlock(1)));
 }
 
 #[test]
 fn block_unclosed_empty() {
     let mut p = Parser::new("");
-    assert!(matches!(
-        p.parse_block(1),
-        Err(ParseError::UnclosedBlock(_))
-    ));
+    assert_eq!(p.parse_block(1), Err(ParseError::UnclosedBlock(1)));
 }
 
 #[test]
@@ -638,26 +642,27 @@ fn recipe_flags_and_lockfile() {
 #[test]
 fn recipe_missing_action() {
     let mut p = Parser::new(":0\n* ^From:.*x\n");
-    assert!(matches!(
-        p.parse_recipe(),
-        Err(ParseError::MissingAction(_))
-    ));
+    assert_eq!(p.parse_recipe(), Err(ParseError::MissingAction(3)));
 }
 
 #[test]
 fn recipe_eof_immediately() {
     let mut p = Parser::new("");
-    assert!(matches!(
-        p.parse_recipe(),
-        Err(ParseError::UnexpectedEof(_))
-    ));
+    assert_eq!(p.parse_recipe(), Err(ParseError::UnexpectedEof(1)));
 }
 
 #[test]
 fn recipe_with_block_action() {
     let mut p = Parser::new(":0\n{\nVAR=x\n}");
     let r = p.parse_recipe().unwrap();
-    assert!(matches!(r.action, Action::Nested(_)));
+    assert_eq!(
+        r.action,
+        Action::Nested(vec![Item::Assign {
+            name: "VAR".into(),
+            value: "x".into(),
+            line: 3,
+        }]),
+    );
 }
 
 #[test]
@@ -681,7 +686,10 @@ fn warns_on_garbage() {
     let mut p = Parser::new("garbage line here\nVAR=x");
     let items = p.parse().unwrap();
     assert_eq!(items.len(), 1);
-    assert!(matches!(p.warnings(), [ParseWarning::SkippedLine { .. }]));
+    assert_eq!(
+        p.warnings(),
+        [ParseWarning::SkippedLine { src: dummy_src(), span: dummy_span() }],
+    );
 }
 
 #[test]
@@ -689,7 +697,10 @@ fn warns_on_bad_var_name() {
     let mut p = Parser::new("123=value\nVAR=x");
     let items = p.parse().unwrap();
     assert_eq!(items.len(), 1);
-    assert!(matches!(p.warnings(), [ParseWarning::BadVarName { .. }]));
+    assert_eq!(
+        p.warnings(),
+        [ParseWarning::BadVarName { src: dummy_src(), span: dummy_span() }],
+    );
 }
 
 #[test]
@@ -697,7 +708,10 @@ fn warns_on_bad_condition() {
     let mut p = Parser::new(":0\n* < notanumber\n/dev/null");
     let items = p.parse().unwrap();
     assert_eq!(items.len(), 1);
-    assert!(matches!(p.warnings(), [ParseWarning::BadCondition { .. }]));
+    assert_eq!(
+        p.warnings(),
+        [ParseWarning::BadCondition { src: dummy_src(), span: dummy_span() }],
+    );
 }
 
 #[test]
@@ -707,8 +721,14 @@ fn warns_on_unknown_flag() {
     assert_eq!(items.len(), 1);
     let w = p.warnings();
     assert_eq!(w.len(), 2);
-    assert!(matches!(w[0], ParseWarning::UnknownFlag { flag: 'X', .. }));
-    assert!(matches!(w[1], ParseWarning::UnknownFlag { flag: 'z', .. }));
+    assert_eq!(
+        w[0],
+        ParseWarning::UnknownFlag { flag: 'X', src: dummy_src(), span: dummy_span() },
+    );
+    assert_eq!(
+        w[1],
+        ParseWarning::UnknownFlag { flag: 'z', src: dummy_src(), span: dummy_span() },
+    );
 }
 
 #[test]

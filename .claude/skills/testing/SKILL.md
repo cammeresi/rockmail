@@ -45,3 +45,9 @@ cargo clippy --all-targets --all-features
 
 - Test names should not be prefixed with "test_".
 - Messages must have a blank line between headers and body.
+- Prefer `assert_eq!` over `assert!(matches!(`. Using `assert_eq!` exercises
+  `PartialEq` and `Debug` impls, which improves code coverage statistics,
+  whereas `assert!(matches!(` contains hidden regions that will never be
+  tested.  When the exact value is unpredictable (e.g. maildir paths), use an
+  extraction helper that panics on variant mismatch, with a corresponding
+  `#[should_panic]` test.

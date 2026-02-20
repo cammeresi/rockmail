@@ -1,3 +1,4 @@
+use core::mem;
 use std::io;
 use thiserror::Error;
 
@@ -17,3 +18,14 @@ pub enum LockError {
     #[error("permission denied or missing directory")]
     Unavailable,
 }
+
+impl PartialEq for LockError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Io(a), Self::Io(b)) => a.kind() == b.kind(),
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for LockError {}

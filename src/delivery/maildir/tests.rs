@@ -146,7 +146,7 @@ fn retry_exhaustion() {
 
     let m = msg("Subject: Test\n\nBody\n");
     let r = deliver(&mut Namer::new(), &maildir, &m, DeliveryOpts::default());
-    assert!(matches!(r, Err(DeliveryError::UniqueFile)));
+    assert_eq!(r.unwrap_err(), DeliveryError::UniqueFile);
 
     // Restore so tempdir cleanup works
     fs::set_permissions(maildir.join("new"), Permissions::from_mode(0o755))

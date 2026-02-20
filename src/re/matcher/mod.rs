@@ -11,6 +11,7 @@
 //! - `^FROM_DAEMON`: macro for daemon senders
 //! - `^FROM_MAILER`: macro for mailer-daemon senders
 
+use core::mem;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -63,6 +64,17 @@ pub enum PatternError {
     #[error("regex compilation failed: {0}")]
     Regex(#[from] regex::Error),
 }
+
+impl PartialEq for PatternError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::TooLong(a), Self::TooLong(b)) => a == b,
+            _ => mem::discriminant(self) == mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for PatternError {}
 
 /// Result of a regex match, including any captured MATCH text.
 #[derive(Debug, Clone, PartialEq, Eq)]

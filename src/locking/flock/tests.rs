@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -32,11 +32,11 @@ fn hold_lock_briefly(p: &Path, secs: u64) -> Child {
         .spawn()
         .expect("failed to spawn lock holder");
 
-    for _ in 0..50 {
+    for _ in 0..500 {
         if sig.exists() {
             return child;
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(10));
     }
     kill(&mut child);
     panic!("child never acquired lock");
@@ -66,7 +66,7 @@ fn acquire_temp_contention() {
     let mut child = hold_lock(&p);
 
     let r = FileLock::acquire_temp(&p);
-    assert!(matches!(r, Err(LockError::Exists)));
+    assert_eq!(r.unwrap_err(), LockError::Exists);
 
     kill(&mut child);
 }
@@ -96,7 +96,7 @@ fn acquire_temp_retry_timeout() {
     // returns Err), preventing stale removal from firing.
     set_file_mtime(&p, FileTime::from_unix_time(i64::MAX / 2, 0)).unwrap();
     let r = FileLock::acquire_temp_retry(&p, 2, 1);
-    assert!(matches!(r, Err(LockError::Exists)));
+    assert_eq!(r.unwrap_err(), LockError::Exists);
 
     kill(&mut child);
 }
@@ -134,7 +134,7 @@ fn stale_large_file_kept() {
     // prevents forced removal.
     set_file_mtime(&p, FileTime::from_unix_time(0, 0)).unwrap();
     let r = FileLock::acquire_temp_retry(&p, 2, 1);
-    assert!(matches!(r, Err(LockError::Exists)));
+    assert_eq!(r.unwrap_err(), LockError::Exists);
     assert!(p.exists());
 
     kill(&mut child);
@@ -146,10 +146,11 @@ fn stale_dir_kept() {
     let p = dir.path().join("dir.lock");
     fs::create_dir(&p).unwrap();
 
-    // Opening a directory with O_RDWR fails immediately with an
-    // I/O error, so acquire_temp_retry returns without retrying.
     let r = FileLock::acquire_temp_retry(&p, 2, 1);
-    assert!(matches!(r, Err(LockError::Io(_))));
+    assert_eq!(
+        r.unwrap_err(),
+        LockError::Io(io::ErrorKind::IsADirectory.into()),
+    );
     assert!(p.exists());
 }
 
@@ -157,5 +158,12 @@ fn stale_dir_kept() {
 fn missing_directory() {
     let p = Path::new("/nonexistent/dir/test.lock");
     let r = FileLock::acquire_temp(p);
-    assert!(matches!(r, Err(LockError::Unavailable)));
+    assert_eq!(r.unwrap_err(), LockError::Unavailable);
+}
+
+#[test]
+#[should_panic(expected = "child never acquired lock")]
+fn hold_lock_briefly_panics_on_failure() {
+    let _ =
+        hold_lock_briefly(Path::new("/nonexistent/dir/test.lock"), 1).wait();
 }
