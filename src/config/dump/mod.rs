@@ -3,15 +3,15 @@
 use std::cmp::Ordering;
 
 use super::parser::ParseError;
-use super::{Action, Condition, Flags, Grep, Item, Recipe, Weight, parse};
+use super::{Action, Condition, Flags, Item, MailParts, Recipe, Weight, parse};
 
 fn fmt_flags(f: &Flags) -> String {
     let mut p = Vec::new();
 
     match f.grep {
-        Grep::Full => p.push("HB (grep header+body)"),
-        Grep::Headers => p.push("H (grep header)"),
-        Grep::Body => p.push("B (grep body)"),
+        MailParts::Full => p.push("HB (grep header+body)"),
+        MailParts::Headers => p.push("H (grep header)"),
+        MailParts::Body => p.push("B (grep body)"),
     }
 
     if f.case {
@@ -29,11 +29,10 @@ fn fmt_flags(f: &Flags) -> String {
     if f.err {
         p.push("e (error handler)");
     }
-    if !f.pass_head {
-        p.push("!h (no header)");
-    }
-    if !f.pass_body {
-        p.push("!b (no body)");
+    match f.pass {
+        MailParts::Headers => p.push("h (header only)"),
+        MailParts::Body => p.push("b (body only)"),
+        MailParts::Full => {}
     }
     if f.filter {
         p.push("f (filter)");

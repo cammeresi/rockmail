@@ -1336,3 +1336,42 @@ TRAP=\"cat > $MAILDIR/stdin_dump\"
     let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nTrapBody\n"];
     GoldTest::new(rc, msgs).run();
 }
+
+#[test]
+fn pass_header_only() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 h
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody text\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn pass_body_only() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 b
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody text\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn pass_header_and_body() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 hb
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody text\n"];
+    GoldTest::new(rc, msgs).run();
+}

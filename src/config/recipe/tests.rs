@@ -5,27 +5,26 @@ use super::*;
 #[test]
 fn flags_default() {
     let f = Flags::new();
-    assert_eq!(f.grep, Grep::Headers);
-    assert!(f.pass_head);
-    assert!(f.pass_body);
+    assert_eq!(f.grep, MailParts::Headers);
+    assert_eq!(f.pass, MailParts::Full);
 }
 
 #[test]
 fn flag_h() {
     let f = Flags::parse("H");
-    assert_eq!(f.grep, Grep::Headers);
+    assert_eq!(f.grep, MailParts::Headers);
 }
 
 #[test]
 fn flag_b() {
     let f = Flags::parse("B");
-    assert_eq!(f.grep, Grep::Body);
+    assert_eq!(f.grep, MailParts::Body);
 }
 
 #[test]
 fn flag_hb() {
     let f = Flags::parse("HB");
-    assert_eq!(f.grep, Grep::Full);
+    assert_eq!(f.grep, MailParts::Full);
 }
 
 #[test]
@@ -61,13 +60,19 @@ fn flag_err() {
 #[test]
 fn flag_pass_head() {
     let f = Flags::parse("h");
-    assert!(f.pass_head);
+    assert_eq!(f.pass, MailParts::Headers);
 }
 
 #[test]
 fn flag_pass_body() {
     let f = Flags::parse("b");
-    assert!(f.pass_body);
+    assert_eq!(f.pass, MailParts::Body);
+}
+
+#[test]
+fn flag_pass_both() {
+    let f = Flags::parse("hb");
+    assert_eq!(f.pass, MailParts::Full);
 }
 
 #[test]
@@ -111,9 +116,8 @@ fn flag_raw() {
 #[test]
 fn flag_empty() {
     let f = Flags::parse("");
-    assert_eq!(f.grep, Grep::Headers);
-    assert!(f.pass_head);
-    assert!(f.pass_body);
+    assert_eq!(f.grep, MailParts::Headers);
+    assert_eq!(f.pass, MailParts::Full);
     assert!(!f.case);
     assert!(!f.chain);
     assert!(!f.succ);
@@ -137,14 +141,13 @@ fn flag_whitespace_ignored() {
 #[test]
 fn flag_all_combined() {
     let f = Flags::parse("HBDAaEehbfcwWir");
-    assert_eq!(f.grep, Grep::Full);
+    assert_eq!(f.grep, MailParts::Full);
     assert!(f.case);
     assert!(f.chain);
     assert!(f.succ);
     assert!(f.r#else);
     assert!(f.err);
-    assert!(f.pass_head);
-    assert!(f.pass_body);
+    assert_eq!(f.pass, MailParts::Full);
     assert!(f.filter);
     assert!(f.copy);
     assert!(f.wait);

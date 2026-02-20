@@ -49,34 +49,44 @@ fn write_body(
     w: &mut BufWriter<&File>, msg: &Message, sender: &str, opts: DeliveryOpts,
 ) -> io::Result<usize> {
     let mut bytes = 0;
+    let has_head = !msg.fields().is_empty();
+    let body = msg.body();
 
-    let skip = if let Some(fl) = msg.from_line() {
-        w.write_all(fl)?;
-        w.write_all(b"\n")?;
-        bytes += fl.len() + 1;
-        1
-    } else {
-        let line = from_line(sender);
-        w.write_all(&line)?;
-        bytes += line.len();
-        0
-    };
-    for f in msg.fields().iter().skip(skip) {
-        bytes += write_escaped(w, f.as_bytes())?;
+    // Body-only delivery (h/b flag) has no fields, so no From_ line or
+    // headers are written.  This matches procmail's mailfold.c behavior.
+    if has_head {
+        let skip = if let Some(fl) = msg.from_line() {
+            w.write_all(fl)?;
+            w.write_all(b"\n")?;
+            bytes += fl.len() + 1;
+            1
+        } else {
+            let line = from_line(sender);
+            w.write_all(&line)?;
+            bytes += line.len();
+            0
+        };
+        for f in msg.fields().iter().skip(skip) {
+            bytes += write_escaped(w, f.as_bytes())?;
+        }
     }
 
-    w.write_all(b"\n")?;
-    bytes += 1;
-
-    bytes += write_escaped(w, msg.body())?;
-
-    if !opts.raw && !msg.body().ends_with(b"\n") {
+    if body.is_empty() {
+        w.write_all(b"\n")?;
+        bytes += 1;
+    } else {
+        if has_head {
+            w.write_all(b"\n")?;
+            bytes += 1;
+        }
+        bytes += write_escaped(w, body)?;
+        if !opts.raw && !body.ends_with(b"\n") {
+            w.write_all(b"\n")?;
+            bytes += 1;
+        }
         w.write_all(b"\n")?;
         bytes += 1;
     }
-
-    w.write_all(b"\n")?;
-    bytes += 1;
 
     w.flush()?;
     Ok(bytes)

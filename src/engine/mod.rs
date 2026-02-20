@@ -16,7 +16,7 @@ use nix::unistd::dup2;
 use regex::RegexBuilder;
 
 use crate::config::{
-    self, Action, Condition, Flags, Grep, HeaderOp, Item, Recipe, Weight,
+    self, Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, Weight,
 };
 use crate::dedup;
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
@@ -524,12 +524,12 @@ impl Engine {
         msg: &'a Message, flags: &Flags, decoded: &'a str,
     ) -> Cow<'a, str> {
         match flags.grep {
-            Grep::Full => {
+            MailParts::Full => {
                 let b = String::from_utf8_lossy(msg.body());
                 Cow::Owned(format!("{decoded}{b}"))
             }
-            Grep::Body => String::from_utf8_lossy(msg.body()),
-            Grep::Headers => Cow::Borrowed(decoded),
+            MailParts::Body => String::from_utf8_lossy(msg.body()),
+            MailParts::Headers => Cow::Borrowed(decoded),
         }
     }
 
@@ -552,18 +552,15 @@ impl Engine {
     fn message_for_delivery<'a>(
         &self, recipe: &Recipe, msg: &'a Message,
     ) -> Cow<'a, Message> {
-        match (recipe.flags.pass_head, recipe.flags.pass_body) {
-            (true, true) => Cow::Borrowed(msg),
-            (true, false) => {
+        match recipe.flags.pass {
+            MailParts::Full => Cow::Borrowed(msg),
+            MailParts::Headers => {
                 Cow::Owned(Message::from_fields(msg.fields().clone(), vec![]))
             }
-            (false, true) => Cow::Owned(Message::from_fields(
+            MailParts::Body => Cow::Owned(Message::from_fields(
                 FieldList::new(),
                 msg.body().to_vec(),
             )),
-            (false, false) => {
-                Cow::Owned(Message::from_fields(FieldList::new(), vec![]))
-            }
         }
     }
 

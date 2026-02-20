@@ -7,7 +7,7 @@ mod recipe;
 pub use action::Action;
 pub use condition::{Condition, Weight};
 pub use parser::{ParseWarning, parse};
-pub use recipe::{Flags, Grep, HeaderOp, Item, Recipe};
+pub use recipe::{Flags, HeaderOp, Item, MailParts, Recipe};
 
 /// Check if a string is a valid variable name (letters, digits, underscore,
 /// starting with letter or underscore)

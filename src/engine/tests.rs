@@ -6,7 +6,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 use crate::config::{
-    Action, Condition, Flags, Grep, HeaderOp, Item, Recipe, Weight,
+    Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, Weight,
 };
 use crate::mail::Message;
 use crate::re::Matcher;
@@ -370,7 +370,7 @@ fn else_flag_runs_when_prev_false() {
 fn body_flag_greps_body() {
     let mut t = Test::with_msg("Subject: test\n\nThis is the body");
     let mut flags = Flags::new();
-    flags.grep = Grep::Body;
+    flags.grep = MailParts::Body;
 
     let items = vec![Item::Recipe {
         recipe: Recipe {
@@ -1389,7 +1389,7 @@ fn quiet_flag_suppresses_pipe_error_message() {
 fn head_and_body_flag_greps_both() {
     let mut t = Test::with_msg("Subject: test\n\nBody has keyword");
     let mut flags = Flags::new();
-    flags.grep = Grep::Full;
+    flags.grep = MailParts::Full;
 
     // Pattern in body, grepping both H and B
     let items = vec![Item::Recipe {
@@ -1412,7 +1412,7 @@ fn head_and_body_flag_greps_both() {
 fn head_and_body_case_sensitive() {
     let mut t = Test::with_msg("Subject: TEST\n\nBODY");
     let mut flags = Flags::new();
-    flags.grep = Grep::Full;
+    flags.grep = MailParts::Full;
     flags.case = true;
 
     let items = vec![Item::Recipe {

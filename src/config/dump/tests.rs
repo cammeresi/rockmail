@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::config::{
-    Action, Condition, Flags, Grep, HeaderOp, Item, Recipe, Weight,
+    Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, Weight,
 };
 
 fn flags() -> Flags {
@@ -22,7 +22,7 @@ fn flags_default() {
 #[test]
 fn flags_hb() {
     let f = Flags {
-        grep: Grep::Full,
+        grep: MailParts::Full,
         ..Flags::new()
     };
     assert!(fmt_flags(&f).contains("HB"));
@@ -31,14 +31,13 @@ fn flags_hb() {
 #[test]
 fn flags_all() {
     let f = Flags {
-        grep: Grep::Body,
+        grep: MailParts::Body,
         case: true,
         chain: true,
         succ: true,
         r#else: true,
         err: true,
-        pass_head: false,
-        pass_body: false,
+        pass: MailParts::Headers,
         filter: true,
         copy: true,
         wait: true,
@@ -49,8 +48,7 @@ fn flags_all() {
     };
     let s = fmt_flags(&f);
     for kw in [
-        "B ", "D ", "A ", "a ", "E ", "e ", "!h", "!b", "f ", "c ", "W ", "i ",
-        "r ",
+        "B ", "D ", "A ", "a ", "E ", "e ", "h ", "f ", "c ", "W ", "i ", "r ",
     ] {
         assert!(s.contains(kw), "missing {kw:?} in {s:?}");
     }

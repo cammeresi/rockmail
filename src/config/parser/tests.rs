@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use miette::SourceOffset;
 
 use super::*;
-use crate::config::{Grep, HeaderOp};
+use crate::config::{HeaderOp, MailParts};
 
 fn dummy_src() -> miette::NamedSource<String> {
     miette::NamedSource::new("", String::new())
@@ -63,7 +63,7 @@ fn simple_recipe() {
     let items = parse_rc(rc).unwrap();
     assert_eq!(items.len(), 1);
     let r = recipe(&items[0]);
-    assert_eq!(r.flags.grep, Grep::Headers);
+    assert_eq!(r.flags.grep, MailParts::Headers);
     assert_eq!(r.conds.len(), 1);
     assert_eq!(r.action, Action::Folder(vec![PathBuf::from("/dev/null")]));
 }
@@ -73,7 +73,7 @@ fn recipe_with_flags() {
     let rc = ":0 Bc:\n* ^Subject:.*test\nspam/";
     let items = parse_rc(rc).unwrap();
     let r = recipe(&items[0]);
-    assert_eq!(r.flags.grep, Grep::Body);
+    assert_eq!(r.flags.grep, MailParts::Body);
     assert!(r.flags.copy);
     assert!(r.lockfile.is_some());
 }
@@ -211,7 +211,7 @@ fn explicit_lockfile() {
     let rc = ":0 HB:mylock\n* ^Subject:.*\nspam/";
     let items = parse_rc(rc).unwrap();
     let r = recipe(&items[0]);
-    assert_eq!(r.flags.grep, Grep::Full);
+    assert_eq!(r.flags.grep, MailParts::Full);
     assert_eq!(r.lockfile.as_deref(), Some("mylock"));
 }
 
@@ -433,7 +433,7 @@ fn assign_value_with_equals() {
 fn header_minimal() {
     let mut p = Parser::new("");
     let (flags, lock) = p.parse_recipe_header(":0", 1, 0).unwrap();
-    assert_eq!(flags.grep, Grep::Headers);
+    assert_eq!(flags.grep, MailParts::Headers);
     assert!(lock.is_none());
 }
 
@@ -441,7 +441,7 @@ fn header_minimal() {
 fn header_with_flags() {
     let mut p = Parser::new("");
     let (flags, lock) = p.parse_recipe_header(":0 Bc", 1, 0).unwrap();
-    assert_eq!(flags.grep, Grep::Body);
+    assert_eq!(flags.grep, MailParts::Body);
     assert!(flags.copy);
     assert!(lock.is_none());
 }
@@ -464,7 +464,7 @@ fn header_explicit_lockfile() {
 fn header_flags_and_lockfile() {
     let mut p = Parser::new("");
     let (flags, lock) = p.parse_recipe_header(":0 HBc:mylock", 1, 0).unwrap();
-    assert_eq!(flags.grep, Grep::Full);
+    assert_eq!(flags.grep, MailParts::Full);
     assert!(flags.copy);
     assert_eq!(lock.as_deref(), Some("mylock"));
 }
@@ -482,14 +482,14 @@ fn header_flags_and_auto_lockfile() {
 fn header_leading_whitespace() {
     let mut p = Parser::new("");
     let (flags, _) = p.parse_recipe_header("  :0 B", 1, 0).unwrap();
-    assert_eq!(flags.grep, Grep::Body);
+    assert_eq!(flags.grep, MailParts::Body);
 }
 
 #[test]
 fn header_legacy_number() {
     let mut p = Parser::new("");
     let (flags, lock) = p.parse_recipe_header(":27 Bc:", 1, 0).unwrap();
-    assert_eq!(flags.grep, Grep::Body);
+    assert_eq!(flags.grep, MailParts::Body);
     assert!(flags.copy);
     assert_eq!(lock.as_deref(), Some(""));
 }
@@ -634,7 +634,7 @@ fn recipe_blanks_between_conds_and_action() {
 fn recipe_flags_and_lockfile() {
     let mut p = Parser::new(":0 Bc:mylock\n* ^Subject:.*x\nspam/");
     let r = p.parse_recipe().unwrap();
-    assert_eq!(r.flags.grep, Grep::Body);
+    assert_eq!(r.flags.grep, MailParts::Body);
     assert!(r.flags.copy);
     assert_eq!(r.lockfile.as_deref(), Some("mylock"));
 }
@@ -688,7 +688,10 @@ fn warns_on_garbage() {
     assert_eq!(items.len(), 1);
     assert_eq!(
         p.warnings(),
-        [ParseWarning::SkippedLine { src: dummy_src(), span: dummy_span() }],
+        [ParseWarning::SkippedLine {
+            src: dummy_src(),
+            span: dummy_span()
+        }],
     );
 }
 
@@ -699,7 +702,10 @@ fn warns_on_bad_var_name() {
     assert_eq!(items.len(), 1);
     assert_eq!(
         p.warnings(),
-        [ParseWarning::BadVarName { src: dummy_src(), span: dummy_span() }],
+        [ParseWarning::BadVarName {
+            src: dummy_src(),
+            span: dummy_span()
+        }],
     );
 }
 
@@ -710,7 +716,10 @@ fn warns_on_bad_condition() {
     assert_eq!(items.len(), 1);
     assert_eq!(
         p.warnings(),
-        [ParseWarning::BadCondition { src: dummy_src(), span: dummy_span() }],
+        [ParseWarning::BadCondition {
+            src: dummy_src(),
+            span: dummy_span()
+        }],
     );
 }
 
@@ -723,11 +732,19 @@ fn warns_on_unknown_flag() {
     assert_eq!(w.len(), 2);
     assert_eq!(
         w[0],
-        ParseWarning::UnknownFlag { flag: 'X', src: dummy_src(), span: dummy_span() },
+        ParseWarning::UnknownFlag {
+            flag: 'X',
+            src: dummy_src(),
+            span: dummy_span()
+        },
     );
     assert_eq!(
         w[1],
-        ParseWarning::UnknownFlag { flag: 'z', src: dummy_src(), span: dummy_span() },
+        ParseWarning::UnknownFlag {
+            flag: 'z',
+            src: dummy_src(),
+            span: dummy_span()
+        },
     );
 }
 

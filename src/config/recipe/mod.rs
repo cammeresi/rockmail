@@ -3,15 +3,15 @@ use super::{Action, Condition};
 #[cfg(test)]
 mod tests;
 
-/// Which parts of the message to grep against conditions.
+/// Which parts of the message to operate on (grep or delivery).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub enum Grep {
-    /// `H` — grep headers only (default).
-    #[default]
+pub enum MailParts {
+    /// Headers only.
     Headers,
-    /// `B` — grep body only.
+    /// Body only.
     Body,
-    /// `HB` — grep both headers and body.
+    /// Both headers and body.
+    #[default]
     Full,
 }
 
@@ -19,7 +19,7 @@ pub enum Grep {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Flags {
     /// `H`/`B` — which message parts to grep.
-    pub grep: Grep,
+    pub grep: MailParts,
     /// `D` — case sensitive.
     pub case: bool,
     /// `A` — chain on prior condition match.
@@ -30,10 +30,8 @@ pub struct Flags {
     pub r#else: bool,
     /// `e` — error handler.
     pub err: bool,
-    /// `h` — pass header (default true).
-    pub pass_head: bool,
-    /// `b` — pass body (default true).
-    pub pass_body: bool,
+    /// `h`/`b` — which message parts to pass for delivery.
+    pub pass: MailParts,
     /// `f` — filter mode.
     pub filter: bool,
     /// `c` — continue after delivery.
@@ -51,11 +49,10 @@ pub struct Flags {
 }
 
 impl Flags {
-    /// Default flags: grep headers, pass_head, and pass_body enabled.
+    /// Default flags: grep headers, pass full message.
     pub fn new() -> Self {
         Self {
-            pass_head: true,
-            pass_body: true,
+            grep: MailParts::Headers,
             ..Default::default()
         }
     }
@@ -63,23 +60,28 @@ impl Flags {
     /// Parse flags from the colon line of a recipe.
     pub fn parse(s: &str) -> Self {
         let mut f = Flags::new();
-        let has_h = s.contains('H');
-        let has_b = s.contains('B');
-        f.grep = match (has_h, has_b) {
-            (true, true) => Grep::Full,
-            (false, true) => Grep::Body,
-            _ => Grep::Headers,
+        let (uh, ub) = (s.contains('H'), s.contains('B'));
+        f.grep = match (uh, ub) {
+            (true, true) => MailParts::Full,
+            (false, true) => MailParts::Body,
+            _ => MailParts::Headers,
         };
+        let (lh, lb) = (s.contains('h'), s.contains('b'));
+        if lh || lb {
+            f.pass = match (lh, lb) {
+                (true, true) => MailParts::Full,
+                (true, false) => MailParts::Headers,
+                (false, _) => MailParts::Body,
+            };
+        }
         for c in s.chars() {
             match c {
-                'H' | 'B' => {}
+                'H' | 'B' | 'h' | 'b' => {}
                 'D' => f.case = true,
                 'A' => f.chain = true,
                 'a' => f.succ = true,
                 'E' => f.r#else = true,
                 'e' => f.err = true,
-                'h' => f.pass_head = true,
-                'b' => f.pass_body = true,
                 'f' => f.filter = true,
                 'c' => f.copy = true,
                 'w' => f.wait = true,

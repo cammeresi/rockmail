@@ -6,6 +6,7 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::delivery::tests::msg;
+use crate::field::FieldList;
 
 fn escaped(data: &[u8]) -> (Vec<u8>, usize) {
     let mut buf = Vec::new();
@@ -183,4 +184,34 @@ fn open_failure_returns_error() {
 
     // Restore so tempdir cleanup works
     fs::set_permissions(&sub, Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn deliver_body_only() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mbox");
+
+    let m = Message::from_fields(FieldList::new(), b"Body text\n".to_vec());
+    deliver_test(&path, &m, "user@host").unwrap();
+
+    let content = fs::read(&path).unwrap();
+    assert_eq!(content, b"Body text\n\n");
+}
+
+#[test]
+fn deliver_header_only() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mbox");
+
+    let m = Message::from_fields(
+        msg("Subject: Test\n\nBody\n").fields().clone(),
+        vec![],
+    );
+    deliver_test(&path, &m, "user@host").unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(content.starts_with("From user@host "));
+    assert!(content.contains("Subject: Test"));
+    assert!(!content.contains("Body"));
+    assert!(content.ends_with("\n"));
 }

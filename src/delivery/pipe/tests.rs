@@ -96,7 +96,10 @@ fn timeout_kills_hung_command() {
     let elapsed = start.elapsed().as_secs();
 
     assert!(elapsed < 4);
-    assert_eq!(r.unwrap_err(), DeliveryError::PipeSignal(nix::libc::SIGTERM));
+    assert_eq!(
+        r.unwrap_err(),
+        DeliveryError::PipeSignal(nix::libc::SIGTERM)
+    );
 }
 
 #[test]
