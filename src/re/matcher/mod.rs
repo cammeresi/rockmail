@@ -87,7 +87,7 @@ pub struct MatchResult<'a> {
 
 fn expand_macros(pat: &str) -> String {
     // Longest key first so ^FROM_DAEMON matches before ^FROM_MAILER, etc.
-    let macros = [
+    const MACROS: [(&str, &str); 4] = [
         (FROMD_KEY, FROMD_SUBSTITUTE),
         (FROMM_KEY, FROMM_SUBSTITUTE),
         (TO_KEY, TO_SUBSTITUTE),
@@ -95,21 +95,21 @@ fn expand_macros(pat: &str) -> String {
     ];
 
     let mut out = String::with_capacity(pat.len());
-    let bytes = pat.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'^'
-            && let Some((key, sub)) = macros
-                .iter()
-                .find(|(key, _)| bytes[i..].starts_with(key.as_bytes()))
+    let mut rest = pat;
+    while let Some(i) = rest.find('^') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        if let Some((key, sub)) =
+            MACROS.iter().find(|(key, _)| rest.starts_with(key))
         {
             out.push_str(sub);
-            i += key.len();
-            continue;
+            rest = &rest[key.len()..];
+        } else {
+            out.push('^');
+            rest = &rest[1..];
         }
-        out.push(bytes[i] as char);
-        i += 1;
     }
+    out.push_str(rest);
     out
 }
 
