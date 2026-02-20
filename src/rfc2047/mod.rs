@@ -2,22 +2,30 @@
 //!
 //! This is a rockmail extension beyond procmail compatibility.
 
-#[cfg(test)]
-mod tests;
-
 use std::borrow::Cow;
 use std::fmt::Write;
 use std::str;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use encoding_rs::Encoding;
+use encoding_rs::{Encoding, UTF_8};
+
+#[cfg(test)]
+mod tests;
 
 // =?UTF-8?B?...?= — 10-char prefix + 2-char suffix = 12 overhead.
 // RFC 2047 §2: encoded-word max 75 chars, so 63 chars for base64 payload,
 // which encodes floor(63/4)*3 = 45 raw bytes.
 const MAX_WORD: usize = 75;
 const MAX_B_RAW: usize = 45;
+
+fn find_pair(haystack: &[u8], needle: &[u8; 2]) -> Option<usize> {
+    haystack.windows(2).position(|w| w == needle)
+}
+
+fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
+    haystack.iter().position(|&b| b == needle)
+}
 
 /// Encoding type for RFC 2047 encoded words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +34,17 @@ pub enum Enc {
     B,
     /// Quoted-Printable encoding.
     Q,
+}
+
+impl Enc {
+    /// Detect the encoding used in a raw header value.
+    pub fn detect(raw: &[u8]) -> Option<Enc> {
+        let start = find_pair(raw, b"=?")?;
+        let rest = &raw[start + 2..];
+        let q1 = find_byte(rest, b'?')?;
+        let enc = *rest.get(q1 + 1)?;
+        Enc::try_from(enc).ok()
+    }
 }
 
 impl TryFrom<u8> for Enc {
@@ -38,25 +57,6 @@ impl TryFrom<u8> for Enc {
             _ => Err(()),
         }
     }
-}
-
-impl Enc {
-    /// Detect the encoding used in a raw header value.
-    pub fn detect(raw: &[u8]) -> Option<Enc> {
-        let start = find_pair(raw, b"=?")?;
-        let rest = &raw[start + 2..];
-        let q1 = find_byte(rest, b'?')?;
-        let enc_byte = *rest.get(q1 + 1)?;
-        Enc::try_from(enc_byte).ok()
-    }
-}
-
-fn find_pair(haystack: &[u8], needle: &[u8; 2]) -> Option<usize> {
-    haystack.windows(2).position(|w| w == needle)
-}
-
-fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
-    haystack.iter().position(|&b| b == needle)
 }
 
 fn is_all_whitespace(s: &[u8]) -> bool {
@@ -78,9 +78,8 @@ fn hex_pair(hi: u8, lo: u8) -> Option<u8> {
 
 fn convert_charset(charset: &[u8], raw: &[u8]) -> String {
     let name = str::from_utf8(charset).unwrap_or("UTF-8");
-    let enc =
-        Encoding::for_label(name.as_bytes()).unwrap_or(encoding_rs::UTF_8);
-    if enc == encoding_rs::UTF_8 {
+    let enc = Encoding::for_label(name.as_bytes()).unwrap_or(UTF_8);
+    if enc == UTF_8 {
         return String::from_utf8_lossy(raw).into_owned();
     }
     let (cow, _) = enc.decode_without_bom_handling(raw);
@@ -183,18 +182,10 @@ fn find_encoded_word(input: &[u8]) -> Option<(usize, Enc, String)> {
 
 /// Find the largest split point <= `at` on a UTF-8 char boundary.
 fn utf8_floor(s: &str, at: usize) -> usize {
-    if at >= s.len() {
-        return s.len();
-    }
-    // floor_char_boundary is nightly; do it manually
-    let mut i = at;
-    while !s.is_char_boundary(i) {
-        i -= 1;
-    }
+    let i = s.floor_char_boundary(at);
     // If we rounded down to 0 but at > 0, include the whole first char
     if i == 0 && at > 0 {
-        let c = s.chars().next().unwrap();
-        c.len_utf8()
+        s.chars().next().unwrap().len_utf8()
     } else {
         i
     }
@@ -244,6 +235,19 @@ fn encode_q(text: &str) -> String {
     out
 }
 
+/// Encode a UTF-8 string as an RFC 2047 encoded word.
+///
+/// Folds into multiple encoded words at ~76 chars per line.
+pub fn encode(text: &str, enc: Enc) -> String {
+    if text.is_ascii() {
+        return text.to_owned();
+    }
+    match enc {
+        Enc::B => encode_b(text),
+        Enc::Q => encode_q(text),
+    }
+}
+
 /// Decode RFC 2047 encoded words in a header value.
 ///
 /// Scans for `=?charset?encoding?text?=` tokens, decodes them to UTF-8.
@@ -284,17 +288,4 @@ pub fn decode(input: &[u8]) -> Cow<'_, str> {
         Ok(s) => s,
         Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
     })
-}
-
-/// Encode a UTF-8 string as an RFC 2047 encoded word.
-///
-/// Folds into multiple encoded words at ~76 chars per line.
-pub fn encode(text: &str, enc: Enc) -> String {
-    if text.is_ascii() {
-        return text.to_owned();
-    }
-    match enc {
-        Enc::B => encode_b(text),
-        Enc::Q => encode_q(text),
-    }
 }

@@ -200,6 +200,100 @@ fn size_condition_greater_fails() {
 }
 
 #[test]
+fn size_weighted_negated_flips_ratio() {
+    // msg is 20 bytes.  Condition: !1^1 < 100.
+    // Procmail: (<)^negate=1^1=0 -> sizecheck/pivot = 20/100 = 0.2
+    // score = 1.0 * 0.2 = 0.2, rounds up to last_score=1
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Size {
+                op: std::cmp::Ordering::Less,
+                bytes: 100,
+                negate: true,
+                weight: Some(Weight { w: 1.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+    assert_eq!(t.engine.ctx.last_score, 1);
+}
+
+#[test]
+fn size_weighted_negated_greater() {
+    // msg is 20 bytes.  Condition: !10^1 > 5.
+    // Procmail: (>)^negate=0^1=1 -> pivot/sizecheck = 5/20 = 0.25
+    // score = 10 * 0.25 = 2.5, last_score=2
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Size {
+                op: std::cmp::Ordering::Greater,
+                bytes: 5,
+                negate: true,
+                weight: Some(Weight { w: 10.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+    assert_eq!(t.engine.ctx.last_score, 2);
+}
+
+#[test]
+fn size_weighted_zero_size() {
+    // Empty msg (0 bytes).  Condition: 1^1 < 100.
+    // Procmail: (<)^0=1 -> pivot/sizecheck, sizecheck=0, pivot>0 -> plusinfty
+    let mut t = Test::with_msg("");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Size {
+                op: std::cmp::Ordering::Less,
+                bytes: 100,
+                negate: false,
+                weight: Some(Weight { w: 1.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+    assert_eq!(t.engine.ctx.last_score, super::MAX32 as i64);
+}
+
+#[test]
+fn size_weighted_zero_pivot() {
+    // msg is 20 bytes.  Condition: 1^1 > 0.
+    // Procmail: (>)^0=0 -> sizecheck/pivot, pivot=0 -> plusinfty
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Size {
+                op: std::cmp::Ordering::Greater,
+                bytes: 0,
+                negate: false,
+                weight: Some(Weight { w: 1.0, x: 1.0 }),
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("w"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+    assert_eq!(t.engine.ctx.last_score, super::MAX32 as i64);
+}
+
+#[test]
 fn variable_assignment() {
     let mut t = Test::new();
     let items = vec![

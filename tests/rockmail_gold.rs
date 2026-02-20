@@ -612,6 +612,23 @@ matched/
 }
 
 #[test]
+fn weighted_size_negated() {
+    // Negate flips the ratio.  Combined with a positive regex weight
+    // so the outcome depends on getting the size ratio right.
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* 5^1 test
+* -10^1 ! > 5
+matched/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
 fn refresh_from_line_preserves_timestamp() {
     let rc = "\
 MAILDIR=$MAILDIR

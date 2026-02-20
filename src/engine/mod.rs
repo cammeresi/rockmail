@@ -625,13 +625,21 @@ impl Engine {
             return Ok(ConditionResult::simple(matched));
         };
 
-        // Weighted size: w * (M/L)^x or w * (L/M)^x
-        let ratio = match op {
-            Ordering::Less => bytes as f64 / size.max(1) as f64,
-            Ordering::Equal => 1.0,
-            Ordering::Greater => size as f64 / bytes.max(1) as f64,
+        // misc.c:602-613: XOR the '<'/'>' direction with negate.
+        let flipped = (op == Ordering::Less) ^ negate;
+        let score = if op == Ordering::Equal {
+            wt.w
+        } else if flipped {
+            if size == 0 {
+                if bytes > 0 { MAX32 } else { MIN32 }
+            } else {
+                wt.w * (bytes as f64 / size as f64).powf(wt.x)
+            }
+        } else if bytes == 0 {
+            MAX32
+        } else {
+            wt.w * (size as f64 / bytes as f64).powf(wt.x)
         };
-        let score = wt.w * ratio.powf(wt.x);
         Ok(ConditionResult::scored(score))
     }
 
