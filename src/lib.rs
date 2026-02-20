@@ -12,7 +12,7 @@ pub mod dedup;
 pub mod delivery;
 /// Recipe evaluation loop and condition matching.
 pub mod engine;
-/// Header field manipulation (formail).
+/// Header field manipulation (what was previously formail).
 pub mod field;
 /// Dotlock (NFS-safe) and flock file locking.
 pub mod locking;

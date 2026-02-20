@@ -20,7 +20,6 @@ Extensions are described in `ENHANCEMENTS.md`.
 ## Binaries (`src/bin/`)
 
 - `rockmail` — main MDA (drop-in for Procmail)
-- `formail` — header manipulation and mailbox splitting
 - `lockfile` — NFS-safe file locking utility
 - `mailstat` — log statistics
 - `rcparse` — debug utility for parsing rcfiles
@@ -28,23 +27,26 @@ Extensions are described in `ENHANCEMENTS.md`.
 ## Library modules (`src/`)
 
 - `config/` — rcfile parsing: parser, recipe, condition, action
-- `engine/` — recipe evaluation loop, condition matching, scoring
+- `dedup/` — Message-ID duplicate detection cache
 - `delivery/` — mbox, maildir, MH, dir, pipe delivery
+- `engine/` — recipe evaluation loop, condition matching, scoring
+- `field/` — header field parsing and manipulation
+- `locking/` — dotlock (NFS-safe) and flock
 - `mail/` — message parsing, headers, From_ line handling
 - `re/` — regex compiler/matcher with Procmail extensions (`^^`, `\/`, `\<`, `\>`)
-- `variables/` — builtins, substitution (`$var`, `${var:-default}`)
-- `locking/` — dotlock (NFS-safe) and flock
-- `formail/` — formail-specific field manipulation
+- `rfc2047/` — MIME encoded-word decoding and encoding
 - `util/` — exit codes, error types, signal handling
+- `variables/` — builtins, substitution (`$var`, `${var:-default}`)
 
 ## Tests
 
 - Unit tests: colocated `tests.rs` files in each module
-- Integration tests: `tests/rockmail.rs`, `tests/formail.rs`
-- Gold tests: `tests/rockmail_gold.rs`, `tests/formail_gold.rs` —
+- Integration tests: `tests/rockmail.rs`
+- Gold tests: `tests/rockmail_gold.rs` —
   run both Rockmail and Procmail, compare output
+- Property tests: `tests/rockmail_proptest.rs`
 - Regressions: `tests/regressions.rs`
-- Common helpers: `tests/common/mod.rs`
+- Common helpers: `tests/common/mod.rs`, `tests/gold/mod.rs`
 
 ## Other files
 
@@ -65,13 +67,7 @@ The original C source is at `/home/sac/src/procmail/src/`.  Key files:
 - `comsat.c` — biff notification
 - `man/procmailrc.man` — rcfile format docs
 
-# Known Major Gaps
-
-Weighted scoring is the largest incomplete area.  See `issues/engine-*.md`
-for details.  The implementation uses a closed-form formula instead of
-Procmail's iterative match-by-match accumulation and is missing:
-tail sums for convergent series, exit-code-based shell scoring,
-correct negated-weighted logic, empty-match handling, and score clamping.
+# Known Gaps
 
 See the `issues/` directory for the full list.
 

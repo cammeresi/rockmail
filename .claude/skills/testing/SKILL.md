@@ -9,7 +9,6 @@ description: How to run tests in the rockmail project.  Use when running or writ
 
 - `cargo test` — run all tests including gold tests (gold is a default feature)
 - `cargo test --no-default-features` — run tests without gold tests
-- `cargo test --test formail_gold` — run formail gold tests only
 - `cargo test --test rockmail_gold` — run rockmail gold tests only
 - `cargo test PATTERN` — run tests matching a name pattern
 
@@ -20,7 +19,6 @@ procmail to be installed. The gold binaries are found automatically; override
 with `PROCMAIL_FORMAIL` or `PROCMAIL_ROCKMAIL` environment variables.
 
 Gold test files:
-- `tests/formail_gold.rs`
 - `tests/rockmail_gold.rs`
 
 Helpers are in `tests/common/mod.rs`. Key functions:
