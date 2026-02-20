@@ -1375,3 +1375,13 @@ matched
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody text\n"];
     GoldTest::new(rc, msgs).run();
 }
+
+#[test]
+fn invalid_maildir() {
+    let rc = "\
+MAILDIR=/nonexistent/path
+DEFAULT=$DEFAULT
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
