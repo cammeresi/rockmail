@@ -8,8 +8,8 @@ and delivering mail on Unix systems.
 
 The goal is a near-100% backward-compatible drop-in replacement.
 Most existing `.procmailrc` files should work without modification.
-A small number of features are deliberately not implemented; they are
-documented in `COMPATIBILITY.md`.
+A small number of features are deliberately not implemented and a small
+number of differences exist.  They are documented in `COMPATIBILITY.md`.
 
 Some extensions beyond Procmail are also available; see `ENHANCEMENTS.md`.
 
@@ -47,17 +47,27 @@ differences.
 Test coverage exceeds 96% as of 2026-02-18.  Most of the coverage gaps are
 in error situations that are difficult to test in automation.
 
-On 2026-02-18, the following interesting statistics were observed:
+On 2026-02-19, the following interesting statistics were observed:
 
 - 12K lines of C in the original Procmail (as of version 3.24)
 - 19K lines of Rust code
 - of which 11K lines are tests (compared to zero in Procmail)
 - for 8K lines of net software
 
-(But remember that the original code contained custom memory management,
-string manipulation, and a regular expression engine, all of which, 35
-years later, can now be safely left behind as no longer needed thanks
-to the Rust standard library and crate ecosystem.)
+(But remember what the original code contains, to wit:  custom memory
+management, string manipulation, a regular expression engine, etc.
+Although once necessary, all of that code can now, 35 years later,
+be left behind thanks to the Rust standard library and crate ecosystem.)
+
+The 860 tests that were present comprised:
+
+- 725 unit tests
+- 41 integration tests
+- 90 gold tests
+- 4 regression tests
+
+"Gold" means an integration test that compares Rockmail output to Procmail
+output (the gold standard) and ensures they are byte identical.
 
 ## Licensing
 
