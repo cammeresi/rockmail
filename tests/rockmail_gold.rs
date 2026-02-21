@@ -1778,6 +1778,41 @@ short_matched
 }
 
 #[test]
+fn lockfile_global() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOCKFILE=$MAILDIR/global.lock
+
+:0 wc
+| test -f $MAILDIR/global.lock && echo locked >> $MAILDIR/status
+
+LOCKFILE=$MAILDIR/other.lock
+
+:0 wc
+| test ! -f $MAILDIR/global.lock && test -f $MAILDIR/other.lock && echo reassigned >> $MAILDIR/status
+
+LOCKFILE=
+
+:0 wc
+| test ! -f $MAILDIR/global.lock && test ! -f $MAILDIR/other.lock && echo cleared >> $MAILDIR/status
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .post(|g| {
+            let r =
+                fs::read_to_string(g.rust_dir.path().join("maildir/status"))
+                    .unwrap();
+            let p =
+                fs::read_to_string(g.proc_dir.path().join("maildir/status"))
+                    .unwrap();
+            assert_eq!(r, p, "lockfile lifecycle differs");
+        })
+        .run();
+}
+
+#[test]
 fn host_mismatch_stops_processing() {
     let rc = "\
 MAILDIR=$MAILDIR
