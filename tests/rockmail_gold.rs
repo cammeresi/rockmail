@@ -1776,3 +1776,17 @@ short_matched
         })
         .run();
 }
+
+#[test]
+fn host_mismatch_stops_processing() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+HOST=no.such.host.invalid
+
+:0
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).no_log().run();
+}

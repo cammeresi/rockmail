@@ -398,7 +398,7 @@ fn run(
         engine.set_rcfile(&name);
 
         match engine.process(&items, &mut msg)? {
-            Outcome::Delivered(_) => delivered = true,
+            Outcome::Delivered(_) | Outcome::Abort => delivered = true,
             Outcome::Default | Outcome::Continue => {}
         }
     }

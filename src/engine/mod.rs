@@ -64,6 +64,8 @@ pub enum Outcome {
     Default,
     /// Processing should continue (copy flag was set).
     Continue,
+    /// HOST mismatch; skip default delivery.
+    Abort,
 }
 
 /// Error during recipe evaluation.
@@ -1414,7 +1416,7 @@ impl Engine {
                     self.process_assign(name, value, *line, msg);
                     if self.abort {
                         self.abort = false;
-                        return Ok(Outcome::Default);
+                        return Ok(Outcome::Abort);
                     }
                 }
                 Item::Subst {

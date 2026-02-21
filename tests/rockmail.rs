@@ -221,35 +221,6 @@ DEFAULT=$DIR/default
 }
 
 #[test]
-fn host_mismatch_stops_processing() {
-    let dir = TempDir::new().unwrap();
-    let d = dir.path();
-    let rc = write_rc(
-        d,
-        "\
-MAILDIR=$DIR
-DEFAULT=$DIR/default
-HOST=no.such.host.invalid
-
-:0
-$DIR/matched
-",
-    );
-    let input = b"From: user@host\nSubject: Test\n\nBody\n";
-    let (stderr, code) = run(d, &["-f", "sender@test", &rc], input);
-    assert_eq!(code, 0);
-    let err = String::from_utf8_lossy(&stderr);
-    assert!(
-        err.contains("HOST mismatch"),
-        "expected HOST mismatch warning: {err:?}"
-    );
-    assert!(
-        !d.join("matched").exists(),
-        "recipe after HOST mismatch should not run"
-    );
-}
-
-#[test]
 fn lockfile_global_acquired() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
