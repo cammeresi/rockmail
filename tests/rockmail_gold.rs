@@ -1488,3 +1488,24 @@ LOG=world
         })
         .run();
 }
+
+#[test]
+fn log_multiline_quote() {
+    let rc = "MAILDIR=$MAILDIR\n\
+              DEFAULT=$DEFAULT\n\
+              LOGFILE=$MAILDIR/log\n\
+              \n\
+              LOG=\"\n\
+              \"\n";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .post(|g| {
+            let r = fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                .unwrap();
+            let p = fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                .unwrap();
+            assert_eq!(r, p, "log content differs");
+        })
+        .run();
+}

@@ -868,3 +868,42 @@ fn header_op_in_block() {
         }]),
     );
 }
+
+#[test]
+fn multiline_double_quote() {
+    let items = parse_rc("FOO=\"hello\nworld\"").unwrap();
+    assert_eq!(
+        items[0],
+        Item::Assign {
+            name: "FOO".into(),
+            value: "\"hello\nworld\"".into(),
+            line: 1,
+        },
+    );
+}
+
+#[test]
+fn multiline_single_quote() {
+    let items = parse_rc("FOO='hello\nworld'").unwrap();
+    assert_eq!(
+        items[0],
+        Item::Assign {
+            name: "FOO".into(),
+            value: "'hello\nworld'".into(),
+            line: 1,
+        },
+    );
+}
+
+#[test]
+fn unclosed_quote_eof() {
+    let items = parse_rc("FOO=\"hello\nworld").unwrap();
+    assert_eq!(
+        items[0],
+        Item::Assign {
+            name: "FOO".into(),
+            value: "\"hello\nworld".into(),
+            line: 1,
+        },
+    );
+}

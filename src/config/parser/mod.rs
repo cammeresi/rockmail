@@ -117,6 +117,30 @@ mod warnings {
     impl Eq for ParseWarning {}
 }
 
+/// True if `s` contains an unmatched `"` or `'`.
+/// Tracks quote state the same way procmail does: `'` inside `"` is
+/// literal and vice versa, `\"` escapes only outside single quotes.
+fn has_unclosed_quote(s: &str) -> bool {
+    let mut q = None; // None, Some('"'), Some('\'')
+    let mut esc = false;
+    for c in s.chars() {
+        if esc {
+            esc = false;
+            continue;
+        }
+        if c == '\\' && q != Some('\'') {
+            esc = true;
+            continue;
+        }
+        match q {
+            None if c == '"' || c == '\'' => q = Some(c),
+            Some(open) if c == open => q = None,
+            _ => {}
+        }
+    }
+    q.is_some()
+}
+
 /// Strip an inline comment: `value  # comment` → `value`.
 /// Matches procmail (`goodies.c:184`): `#` starts a comment only at a word
 /// boundary, i.e. when preceded by whitespace.  Mid-word `#` is literal.
@@ -221,6 +245,15 @@ impl<'a> Parser<'a> {
             result.pop();
             if let Some(next) = self.advance() {
                 result.push_str(next.trim());
+            } else {
+                break;
+            }
+        }
+
+        while has_unclosed_quote(&result) {
+            if let Some(next) = self.advance() {
+                result.push('\n');
+                result.push_str(next);
             } else {
                 break;
             }
@@ -497,24 +530,25 @@ impl<'a> Parser<'a> {
 
             let off = self.cur_offset();
             self.advance();
+            let full = self.collect_continuation(trimmed);
 
-            if trimmed.starts_with('@')
-                && let Some(item) = Self::parse_header_op(trimmed, ln)
+            if full.starts_with('@')
+                && let Some(item) = Self::parse_header_op(&full, ln)
             {
                 return Ok(Some(item));
             }
 
-            if let Some(item) = Self::parse_subst(trimmed, ln) {
+            if let Some(item) = Self::parse_subst(&full, ln) {
                 return Ok(Some(item));
             }
 
-            if let Some(item) = self.parse_assignment(trimmed, ln) {
+            if let Some(item) = self.parse_assignment(&full, ln) {
                 return Ok(Some(item));
             }
 
             let src = self.src();
             let span = SourceOffset::from(off);
-            if trimmed.contains('=') {
+            if full.contains('=') {
                 self.warn(ParseWarning::BadVarName { src, span });
             } else {
                 self.warn(ParseWarning::SkippedLine { src, span });
