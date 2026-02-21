@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, Permissions};
+use std::os::unix::fs::PermissionsExt;
 
 use tempfile::tempdir;
 
@@ -71,6 +72,24 @@ fn empty_body_no_extra_newline() {
     deliver_test(&mh, &m).unwrap();
     let content = fs::read(mh.join("1")).unwrap();
     assert_eq!(content, b"Subject: Test\n\n");
+}
+
+#[test]
+fn readonly_dir_returns_error() {
+    let dir = tempdir().unwrap();
+    let parent = dir.path().join("readonly");
+    fs::create_dir(&parent).unwrap();
+    fs::set_permissions(&parent, Permissions::from_mode(0o444)).unwrap();
+
+    let mh = parent.join("inbox");
+    let m = msg("Subject: Test\n\nBody\n");
+    let r = deliver_test(&mh, &m);
+    let Err(crate::delivery::DeliveryError::Io { op, .. }) = r else {
+        panic!("expected Io error, got {r:?}");
+    };
+    assert_eq!(op, "create");
+
+    fs::set_permissions(&parent, Permissions::from_mode(0o755)).unwrap();
 }
 
 #[test]

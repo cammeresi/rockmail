@@ -3,7 +3,7 @@ use std::time::Instant;
 use super::*;
 use crate::delivery::DeliveryError;
 use crate::delivery::tests::msg;
-use crate::variables::TIMEOUT;
+use crate::variables::{SHELL, TIMEOUT};
 
 fn to_bytes(msg: &Message) -> Vec<u8> {
     let mut buf = Vec::new();
@@ -119,4 +119,17 @@ fn filter_large_message() {
     let m = msg(&format!("Subject: Test\n\n{body}\n"));
     let r = deliver_test("cat", &m, true).unwrap();
     assert_eq!(r.output.unwrap(), to_bytes(&m));
+}
+
+#[test]
+fn spawn_failure() {
+    let m = msg("Subject: Test\n\nBody\n");
+    let mut env = Environment::from_process();
+    env.set(SHELL.name, "/nonexistent");
+
+    let r = deliver("true", &m, false, false, false, &env);
+    let Err(DeliveryError::Io { op, .. }) = r else {
+        panic!("expected Io error, got {r:?}");
+    };
+    assert_eq!(op, "spawn");
 }

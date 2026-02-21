@@ -199,6 +199,19 @@ fn deliver_body_only() {
 }
 
 #[test]
+fn missing_parent_returns_error() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("nonexistent").join("mbox");
+
+    let m = msg("Subject: Test\n\nBody\n");
+    let r = deliver_inner(&path, &m, "user@host", DeliveryOpts::default());
+    let Err(crate::delivery::DeliveryError::Io { op, .. }) = r else {
+        panic!("expected Io error, got {r:?}");
+    };
+    assert_eq!(op, "open");
+}
+
+#[test]
 fn deliver_header_only() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("mbox");
