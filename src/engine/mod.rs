@@ -1,7 +1,6 @@
 //! Recipe evaluation engine.
 
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
@@ -16,7 +15,8 @@ use nix::unistd::dup2;
 use regex::RegexBuilder;
 
 use crate::config::{
-    self, Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, Weight,
+    self, Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, SizeOp,
+    Weight,
 };
 use crate::dedup;
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
@@ -602,21 +602,19 @@ impl Engine {
     }
 
     fn eval_size(
-        &self, op: Ordering, bytes: u64, negate: bool, weight: Option<Weight>,
+        &self, op: SizeOp, bytes: u64, negate: bool, weight: Option<Weight>,
         msg: &Message,
     ) -> EngineResult<ConditionResult> {
         let size = msg.len() as u64;
         let matched = match op {
-            Ordering::Less => size < bytes,
-            Ordering::Equal => size == bytes,
-            Ordering::Greater => size > bytes,
+            SizeOp::Less => size < bytes,
+            SizeOp::Greater => size > bytes,
         };
         let matched = matched ^ negate;
 
         let sym = match op {
-            Ordering::Less => '<',
-            Ordering::Greater => '>',
-            Ordering::Equal => '=',
+            SizeOp::Less => '<',
+            SizeOp::Greater => '>',
         };
         let label = format!("\"{sym} {bytes}\"");
 
@@ -632,10 +630,8 @@ impl Engine {
         };
 
         // misc.c:602-613: XOR the '<'/'>' direction with negate.
-        let flipped = (op == Ordering::Less) ^ negate;
-        let score = if op == Ordering::Equal {
-            wt.w
-        } else if flipped {
+        let flipped = (op == SizeOp::Less) ^ negate;
+        let score = if flipped {
             if size == 0 {
                 if bytes > 0 { MAX32 } else { MIN32 }
             } else {

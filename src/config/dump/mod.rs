@@ -1,9 +1,9 @@
 //! Parse and pretty-print an rcfile.
 
-use std::cmp::Ordering;
-
 use super::parser::ParseError;
-use super::{Action, Condition, Flags, Item, MailParts, Recipe, Weight, parse};
+use super::{
+    Action, Condition, Flags, Item, MailParts, Recipe, SizeOp, Weight, parse,
+};
 
 fn fmt_flags(f: &Flags) -> String {
     let mut p = Vec::new();
@@ -82,9 +82,8 @@ fn fmt_cond(c: &Condition) -> String {
             let pre = fmt_weight(*weight);
             let neg = if *negate { "!" } else { "" };
             let cmp = match op {
-                Ordering::Less => "<",
-                Ordering::Greater => ">",
-                Ordering::Equal => "=",
+                SizeOp::Less => "<",
+                SizeOp::Greater => ">",
             };
             format!("{pre}{neg}size {cmp} {bytes} bytes")
         }

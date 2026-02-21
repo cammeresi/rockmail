@@ -6,7 +6,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 use crate::config::{
-    Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, Weight,
+    Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, SizeOp, Weight,
 };
 use crate::mail::Message;
 use crate::re::Matcher;
@@ -167,7 +167,7 @@ fn size_condition_less() {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![Condition::Size {
-                op: std::cmp::Ordering::Less,
+                op: SizeOp::Less,
                 bytes: 1000,
                 negate: false,
                 weight: None,
@@ -187,7 +187,7 @@ fn size_condition_greater_fails() {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![Condition::Size {
-                op: std::cmp::Ordering::Greater,
+                op: SizeOp::Greater,
                 bytes: 1000,
                 negate: false,
                 weight: None,
@@ -210,7 +210,7 @@ fn size_weighted_negated_flips_ratio() {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![Condition::Size {
-                op: std::cmp::Ordering::Less,
+                op: SizeOp::Less,
                 bytes: 100,
                 negate: true,
                 weight: Some(Weight { w: 1.0, x: 1.0 }),
@@ -234,7 +234,7 @@ fn size_weighted_negated_greater() {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![Condition::Size {
-                op: std::cmp::Ordering::Greater,
+                op: SizeOp::Greater,
                 bytes: 5,
                 negate: true,
                 weight: Some(Weight { w: 10.0, x: 1.0 }),
@@ -257,7 +257,7 @@ fn size_weighted_zero_size() {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![Condition::Size {
-                op: std::cmp::Ordering::Less,
+                op: SizeOp::Less,
                 bytes: 100,
                 negate: false,
                 weight: Some(Weight { w: 1.0, x: 1.0 }),
@@ -280,7 +280,7 @@ fn size_weighted_zero_pivot() {
             flags: Flags::new(),
             lockfile: None,
             conds: vec![Condition::Size {
-                op: std::cmp::Ordering::Greater,
+                op: SizeOp::Greater,
                 bytes: 0,
                 negate: false,
                 weight: Some(Weight { w: 1.0, x: 1.0 }),

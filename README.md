@@ -69,6 +69,13 @@ The 860 tests that were present comprised:
 "Gold" means an integration test that compares Rockmail output to Procmail
 output (the gold standard) and ensures they are byte identical.
 
+If running the tests yourself, it would be well to:
+
+- Use `cargo nextest run` instead of `cargo test`
+- Compile a custom procmail with the ssleep set to zero in `mailfold.c`
+
+These two steps speed up the tests by a factor of five.
+
 ## Licensing
 
 Most of this repository is a translation of procmail's C code into Rust.

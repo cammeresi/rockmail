@@ -1,9 +1,8 @@
-use std::cmp::Ordering;
 use std::path::PathBuf;
 
 use super::*;
 use crate::config::{
-    Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, Weight,
+    Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, SizeOp, Weight,
 };
 
 fn flags() -> Flags {
@@ -89,7 +88,7 @@ fn cond_regex_negated() {
 
 #[test]
 fn cond_size() {
-    for op in [Ordering::Less, Ordering::Greater, Ordering::Equal] {
+    for op in [SizeOp::Less, SizeOp::Greater] {
         let c = Condition::Size {
             op,
             bytes: 100,
@@ -104,7 +103,7 @@ fn cond_size() {
 #[test]
 fn cond_size_negated() {
     let c = Condition::Size {
-        op: Ordering::Less,
+        op: SizeOp::Less,
         bytes: 50,
         negate: true,
         weight: None,
@@ -367,7 +366,7 @@ fn recipe_with_conditions() {
             weight: None,
         },
         Condition::Size {
-            op: Ordering::Less,
+            op: SizeOp::Less,
             bytes: 500,
             negate: false,
             weight: None,

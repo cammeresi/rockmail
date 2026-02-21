@@ -1,7 +1,14 @@
-use std::cmp::Ordering;
-
 #[cfg(test)]
 mod tests;
+
+/// Size comparison operator: procmail only supports `<` and `>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeOp {
+    /// `<` (message smaller than threshold).
+    Less,
+    /// `>` (message larger than threshold).
+    Greater,
+}
 
 /// Weight and exponent for scored conditions (w^x syntax).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -47,7 +54,7 @@ fn parse_shell(
 }
 
 fn parse_size(
-    rest: &str, negate: bool, weight: Option<Weight>, op: Ordering,
+    rest: &str, negate: bool, weight: Option<Weight>, op: SizeOp,
 ) -> Option<Condition> {
     let bytes = rest.trim().parse().ok()?;
     Some(Condition::Size {
@@ -62,14 +69,14 @@ fn parse_size_less(
     s: &str, negate: bool, weight: Option<Weight>,
 ) -> Option<Condition> {
     let rest = s.strip_prefix('<')?;
-    parse_size(rest, negate, weight, Ordering::Less)
+    parse_size(rest, negate, weight, SizeOp::Less)
 }
 
 fn parse_size_greater(
     s: &str, negate: bool, weight: Option<Weight>,
 ) -> Option<Condition> {
     let rest = s.strip_prefix('>')?;
-    parse_size(rest, negate, weight, Ordering::Greater)
+    parse_size(rest, negate, weight, SizeOp::Greater)
 }
 
 fn parse_variable(s: &str, weight: Option<Weight>) -> Option<Condition> {
@@ -161,7 +168,7 @@ pub enum Condition {
     /// Size comparison (`<` or `>` bytes).
     Size {
         /// `Less` for `<`, `Greater` for `>`.
-        op: Ordering,
+        op: SizeOp,
         /// Threshold in bytes.
         bytes: u64,
         /// `!` prefix inverts the test.

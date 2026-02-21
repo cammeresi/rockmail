@@ -5,7 +5,7 @@ mod parser;
 mod recipe;
 
 pub use action::Action;
-pub use condition::{Condition, Weight};
+pub use condition::{Condition, SizeOp, Weight};
 pub use parser::{ParseWarning, parse};
 pub use recipe::{Flags, HeaderOp, Item, MailParts, Recipe};
 

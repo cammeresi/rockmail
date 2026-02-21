@@ -29,7 +29,7 @@ fn size() {
     assert_eq!(
         Condition::parse("< 10000").unwrap(),
         Condition::Size {
-            op: Ordering::Less,
+            op: SizeOp::Less,
             bytes: 10000,
             negate: false,
             weight: None,
@@ -108,7 +108,7 @@ fn size_greater() {
     assert_eq!(
         Condition::parse("> 50000").unwrap(),
         Condition::Size {
-            op: Ordering::Greater,
+            op: SizeOp::Greater,
             bytes: 50000,
             negate: false,
             weight: None,
@@ -168,7 +168,7 @@ fn weighted_size() {
     assert_eq!(
         Condition::parse("-100^3 > 2000").unwrap(),
         Condition::Size {
-            op: Ordering::Greater,
+            op: SizeOp::Greater,
             bytes: 2000,
             negate: false,
             weight: Some(Weight { w: -100.0, x: 3.0 }),
