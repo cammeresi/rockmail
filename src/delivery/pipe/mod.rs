@@ -131,13 +131,15 @@ pub fn deliver(
 
     let (bytes, captured) = if grab {
         let mut data = Vec::new();
-        msg.write_to(&mut data, false).expect("Vec write");
+        // ft_forceblank: force trailing \n (mailfold.c:115-118)
+        msg.write_to_forceblank(&mut data).expect("Vec write");
         let out = pump(&mut child, &data).map_err(|e| me(e, "pipe"))?;
         (data.len(), Some(out))
     } else {
         let mut n = 0;
         if let Some(mut w) = child.stdin.take() {
-            let r = msg.write_to(&mut w, false);
+            // ft_forceblank: force trailing \n (mailfold.c:115-118)
+            let r = msg.write_to_forceblank(&mut w);
             drop(w);
             match r {
                 Ok(written) => n = written,

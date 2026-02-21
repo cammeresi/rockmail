@@ -7,7 +7,7 @@ use crate::variables::TIMEOUT;
 
 fn to_bytes(msg: &Message) -> Vec<u8> {
     let mut buf = Vec::new();
-    msg.write_to(&mut buf, false).expect("Vec write");
+    msg.write_to_forceblank(&mut buf).expect("Vec write");
     buf
 }
 
@@ -22,7 +22,8 @@ fn pipe_exit(r: Result<PipeResult, DeliveryError>) -> i32 {
 fn pipe_to_cat() {
     let m = msg("Subject: Test\n\nBody content\n");
     let r = deliver_test("cat > /dev/null", &m, false).unwrap();
-    assert_eq!(r.bytes, m.len());
+    // +1 for ft_forceblank trailing \n (mailfold.c:115-118)
+    assert_eq!(r.bytes, m.len() + 1);
 }
 
 #[test]

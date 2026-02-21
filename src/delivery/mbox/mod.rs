@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::{DeliveryError, DeliveryOpts, DeliveryResult, io_err};
 use crate::locking::FileLock;
-use crate::mail::{Message, generate as from_line};
+use crate::mail::{Message, forceblank, generate as from_line};
 use crate::variables::DEV_NULL;
 
 #[cfg(test)]
@@ -80,12 +80,9 @@ fn write_body(
             bytes += 1;
         }
         bytes += write_escaped(w, body)?;
-        if !opts.raw && !body.ends_with(b"\n") {
-            w.write_all(b"\n")?;
-            bytes += 1;
+        if !opts.raw {
+            bytes += forceblank(w, body)?;
         }
-        w.write_all(b"\n")?;
-        bytes += 1;
     }
 
     w.flush()?;

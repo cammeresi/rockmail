@@ -20,7 +20,7 @@ use crate::config::{
 };
 use crate::dedup;
 use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
-use crate::field::{Field, FieldList};
+use crate::field::{self, Field, FieldList};
 use crate::locking::FileLock;
 use crate::mail::Message;
 use crate::re::{Matcher, expand_macros};
@@ -1015,7 +1015,17 @@ impl Engine {
 
         if let Some(ref output) = result.output {
             if filter {
-                *msg = Message::parse(output);
+                *msg = match recipe.flags.pass {
+                    MailParts::Full => Message::parse(output),
+                    MailParts::Headers => Message::from_fields(
+                        field::parse_bytes(output),
+                        msg.body().to_vec(),
+                    ),
+                    MailParts::Body => Message::from_fields(
+                        msg.fields().clone(),
+                        output.clone(),
+                    ),
+                };
                 return Ok(Outcome::Continue);
             }
             if let Some(var) = capture {
@@ -1570,7 +1580,7 @@ impl Engine {
             return;
         };
         if let Some(mut w) = child.stdin.take() {
-            let r = msg.write_to_trap(&mut w);
+            let r = msg.write_to_forceblank(&mut w);
             drop(w);
             if let Err(e) = r
                 && e.kind() != ErrorKind::BrokenPipe

@@ -1500,6 +1500,56 @@ fn filter_replaces_message() {
 }
 
 #[test]
+fn filter_h_preserves_body() {
+    let mut t = Test::with_msg("Subject: test\n\nOriginal body");
+    let mut flags = Flags::new();
+    flags.filter = true;
+    flags.wait = true;
+    flags.pass = MailParts::Headers;
+
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![],
+            action: Action::Pipe {
+                cmd: "printf 'Subject: test\\nX-Added: yes\\n'".into(),
+                capture: None,
+            },
+        },
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.body(), b"Original body");
+    assert_eq!(t.msg.get_header("X-Added").unwrap(), "yes");
+}
+
+#[test]
+fn filter_b_preserves_headers() {
+    let mut t = Test::with_msg("Subject: test\n\nOriginal body");
+    let mut flags = Flags::new();
+    flags.filter = true;
+    flags.wait = true;
+    flags.pass = MailParts::Body;
+
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![],
+            action: Action::Pipe {
+                cmd: "printf 'New body'".into(),
+                capture: None,
+            },
+        },
+        line: 0,
+    }];
+    t.process(&items);
+    assert_eq!(t.msg.body(), b"New body");
+    assert_eq!(t.msg.get_header("Subject").unwrap(), "test");
+}
+
+#[test]
 fn backtick_spawn_failure_returns_empty() {
     let mut env = Environment::new();
     env.set("SHELL", "/no/such/shell");

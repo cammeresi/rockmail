@@ -202,12 +202,16 @@ impl Message {
         Ok(n)
     }
 
-    /// Write message to TRAP stdin, forcing a trailing newline
-    /// (procmail's rawnonl=0 + ft_forceblank; pipes.c:293, mailfold.c:115-118).
-    pub fn write_to_trap<W: Write>(&self, w: &mut W) -> io::Result<usize> {
+    /// Write message forcing a trailing blank line
+    /// (procmail's rawnonl=0 + ft_forceblank; mailfold.c:115-118).
+    pub fn write_to_forceblank<W>(&self, w: &mut W) -> io::Result<usize>
+    where
+        W: Write,
+    {
         let mut n = self.write_to(w, false)?;
-        let body = self.body();
-        if body.is_empty() || !body.ends_with(b"\n\n") {
+        // write_to already wrote separator \n after headers, so we only
+        // need one more \n if the body doesn't already end with \n.
+        if !self.ends_with_blank_line() {
             w.write_all(b"\n")?;
             n += 1;
         }
@@ -300,4 +304,22 @@ impl Message {
             self.fields.remove(0);
         }
     }
+}
+
+/// Append `\n` bytes so that the written body ends with `\n\n`
+/// (procmail's ft_forceblank; mailfold.c:115-118).
+pub fn forceblank<W>(w: &mut W, body: &[u8]) -> io::Result<usize>
+where
+    W: Write,
+{
+    let n = if body.is_empty() || !body.ends_with(b"\n") {
+        w.write_all(b"\n\n")?;
+        2
+    } else if !body.ends_with(b"\n\n") {
+        w.write_all(b"\n")?;
+        1
+    } else {
+        0
+    };
+    Ok(n)
 }

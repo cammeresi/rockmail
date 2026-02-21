@@ -812,6 +812,38 @@ matched
 }
 
 #[test]
+fn filter_h_preserves_body() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 fhw
+| /bin/formail -a 'X-Test: yes'
+
+:0
+result/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nOriginal body\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn filter_b_preserves_headers() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 fbw
+| /bin/sed 's/Original/Replaced/'
+
+:0
+result/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nOriginal body\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
 fn pipe_stderr_in_logfile() {
     let rc = "\
 MAILDIR=$MAILDIR
