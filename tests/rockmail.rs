@@ -932,3 +932,70 @@ fn rcfile_crlf() {
     let content = fs::read_to_string(&mbox).unwrap();
     assert!(content.contains("Body"), "message body missing");
 }
+
+#[test]
+fn delivery_error_cantcreat() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=/nonexistent/path\nORGMAIL=/nonexistent/path\n",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 73, "expected EX_CANTCREAT without -t");
+}
+
+#[test]
+fn delivery_error_tempfail() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=/nonexistent/path\nORGMAIL=/nonexistent/path\n",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-t", "-f", "sender@test", &rc], input);
+    assert_eq!(code, 75, "expected EX_TEMPFAIL with -t");
+}
+
+#[test]
+fn from_override_without_o() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n");
+    let input = b"From original@test Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "override@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(
+        content.starts_with("From original@test"),
+        "without -o, original From_ should be kept: {content:?}"
+    );
+}
+
+#[test]
+fn from_override_with_o() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n");
+    let input = b"From original@test Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-o", "-f", "override@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    assert!(
+        content.starts_with("From override@test"),
+        "with -o, From_ should be overridden: {content:?}"
+    );
+}
+
+#[test]
+fn invalid_arg_exits_usage() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["--bogus"], input);
+    assert_eq!(code, 64, "expected EX_USAGE for invalid argument");
+}
