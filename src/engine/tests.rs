@@ -747,9 +747,9 @@ fn last_score_set_after_weighted_recipe() {
 }
 
 #[test]
-fn no_short_circuit_accumulates_score() {
-    // A failing non-weighted condition followed by a weighted condition:
-    // score should still be accumulated even though the recipe fails.
+fn short_circuit_skips_scored_after_fail() {
+    // misc.c:441: a failing non-weighted condition short-circuits, so
+    // a subsequent weighted condition is never evaluated.
     let mut t = Test::with_msg("Subject: test test\n\nBody");
     let items = vec![Item::Recipe {
         recipe: Recipe {
@@ -772,8 +772,7 @@ fn no_short_circuit_accumulates_score() {
         line: 0,
     }];
     assert_eq!(t.process(&items), Outcome::Default);
-    // Score was accumulated despite the non-weighted failure
-    assert_eq!(t.engine.ctx.last_score, 20);
+    assert_eq!(t.engine.ctx.last_score, 0);
 }
 
 #[test]

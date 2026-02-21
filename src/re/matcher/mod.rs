@@ -227,7 +227,7 @@ fn compile(pat: &str) -> (String, Option<usize>) {
         result.push_str(r"\A");
     }
     result.push_str(&out);
-    if anchor_end {
+    if anchor_end && !out.is_empty() {
         result.push_str(r"\z");
     }
     (result, capture)

@@ -477,12 +477,14 @@ impl Engine {
         &mut self, cond: &Condition, msg: &Message,
     ) -> Condition {
         match cond {
+            // misc.c:444-449: procmail strips trailing whitespace from
+            // each condition line after variable expansion.
             Condition::Regex {
                 pattern,
                 negate,
                 weight,
             } => Condition::Regex {
-                pattern: self.expand(pattern, Some(msg)),
+                pattern: self.expand(pattern, Some(msg)).trim_end().to_string(),
                 negate: *negate,
                 weight: *weight,
             },
@@ -491,7 +493,7 @@ impl Engine {
                 negate,
                 weight,
             } => Condition::Shell {
-                cmd: self.expand(cmd, Some(msg)),
+                cmd: self.expand(cmd, Some(msg)).trim_end().to_string(),
                 negate: *negate,
                 weight: *weight,
             },
@@ -803,6 +805,11 @@ impl Engine {
         let mut failed = false;
 
         for cond in &recipe.conds {
+            // misc.c:441: procmail skips remaining conditions after a
+            // non-scored failure.
+            if failed {
+                break;
+            }
             let r = self.eval_condition(cond, recipe, msg, &decoded)?;
             if !r.matched {
                 failed = true;
