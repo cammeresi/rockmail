@@ -2,7 +2,7 @@ use std::io;
 
 use nix::libc;
 
-use crate::util::LockError;
+use crate::util::{LockError, warning};
 
 #[cfg(feature = "nfs")]
 mod dotlock;
@@ -33,7 +33,7 @@ fn map_io_err(e: io::Error) -> LockError {
 pub fn truncate_lock_path(p: &mut String) -> bool {
     let b = p.as_bytes();
     if b.len() > 1 && b[b.len() - 2] != b'/' {
-        eprintln!("Truncating \"{p}\" and retrying lock");
+        warning!("Truncating \"{p}\" and retrying lock");
         p.pop();
         true
     } else {

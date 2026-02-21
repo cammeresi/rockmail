@@ -15,6 +15,15 @@ mod tests;
 
 pub use error::*;
 
+/// Log with program-name prefix, matching procmail's `nlog()`.
+macro_rules! warning {
+    ($($arg:tt)*) => {
+        eprint!("{}: ", env!("CARGO_PKG_NAME"));
+        eprintln!($($arg)*);
+    };
+}
+pub(crate) use warning;
+
 /// Light is green; trap is clean.
 pub const EX_OK: u8 = 0;
 /// Bad usage (command-line error).

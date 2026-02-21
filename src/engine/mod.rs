@@ -38,13 +38,7 @@ use crate::variables::{
 #[cfg(test)]
 mod tests;
 
-/// Log with program-name prefix, matching procmail's `nlog()`.
-macro_rules! warning {
-    ($($arg:tt)*) => {
-        eprint!("{}: ", env!("CARGO_PKG_NAME"));
-        eprintln!($($arg)*);
-    };
-}
+use crate::util::warning;
 
 const MAX_INCLUDE_DEPTH: usize = 32;
 const MAX32: f64 = i32::MAX as f64;
@@ -226,7 +220,7 @@ fn run_backtick(
         .stderr(Stdio::null())
         .spawn();
     let Ok(mut child) = child else {
-        eprintln!("Failed forking \"{}\"", cmd);
+        warning!("Failed forking \"{}\"", cmd);
         return String::new();
     };
     if let Some(mut w) = child.stdin.take()
@@ -380,7 +374,7 @@ impl Engine {
             }
             VAR_MAILDIR => {
                 if let Err(e) = env::set_current_dir(value) {
-                    eprintln!("can't chdir to {:?}: {}", value, e);
+                    warning!("can't chdir to {:?}: {}", value, e);
                     let cur = env::current_dir()
                         .map(|p| p.to_string_lossy().into_owned())
                         .unwrap_or_else(|_| ".".into());
@@ -397,9 +391,10 @@ impl Engine {
             }
             VAR_HOST => {
                 if value != self.real_host {
-                    eprintln!(
+                    warning!(
                         "HOST mismatch: \"{}\" strstrstr \"{}\"",
-                        self.real_host, value,
+                        self.real_host,
+                        value,
                     );
                     self.abort = true;
                 }
@@ -432,11 +427,11 @@ impl Engine {
         }
         let Ok(f) = OpenOptions::new().create(true).append(true).open(path)
         else {
-            eprintln!("failed to open logfile: {}", path);
+            warning!("failed to open logfile: {}", path);
             return;
         };
         if dup2(f.as_raw_fd(), io::stderr().as_raw_fd()).is_err() {
-            eprintln!("failed to redirect stderr to logfile: {}", path);
+            warning!("failed to redirect stderr to logfile: {}", path);
             return;
         }
         self.logfile = Some(f);
@@ -453,7 +448,7 @@ impl Engine {
         match FileLock::acquire_temp_retry(Path::new(path), timeout, sleep) {
             Ok(lock) => self.globlock = Some(lock),
             Err(e) => {
-                eprintln!("failed to lock \"{}\": {}", path, e);
+                warning!("failed to lock \"{}\": {}", path, e);
                 self.env.remove(VAR_LOCKFILE);
             }
         }
@@ -709,7 +704,7 @@ impl Engine {
         weight: Option<Weight>, case_insens: bool, label: &str,
     ) -> EngineResult<ConditionResult> {
         let Ok(matcher) = Matcher::new(pattern, case_insens) else {
-            eprintln!("Invalid regexp \"{}\"", pattern);
+            warning!("Invalid regexp \"{}\"", pattern);
             return Ok(ConditionResult::simple(false));
         };
 
@@ -916,7 +911,7 @@ impl Engine {
         }
         if primary_ft == FolderType::File {
             for sec in paths {
-                eprintln!("Skipped \"{}\": can't link from mbox", sec);
+                warning!("Skipped \"{}\": can't link from mbox", sec);
             }
             return;
         }
@@ -924,7 +919,7 @@ impl Engine {
         for sec in paths {
             let (ft, dir) = FolderType::parse(sec);
             if ft == FolderType::File {
-                eprintln!("Skipped \"{}\"", sec);
+                warning!("Skipped \"{}\"", sec);
                 continue;
             }
             match delivery::link_secondary(
@@ -939,7 +934,7 @@ impl Engine {
                     folder.push_str(&p);
                 }
                 Err(e) => {
-                    eprintln!("Couldn't make link to \"{}\": {}", sec, e);
+                    warning!("Couldn't make link to \"{}\": {}", sec, e);
                 }
             }
         }
@@ -1016,15 +1011,16 @@ impl Engine {
             Err(DeliveryError::PipeExit(code)) if wait => {
                 self.ctx.last_exit = code;
                 if !quiet {
-                    eprintln!("Program failure ({}) of \"{}\"", code, cmd);
+                    warning!("Program failure ({}) of \"{}\"", code, cmd);
                 }
                 return Ok(Outcome::Default);
             }
             Err(DeliveryError::PipeSignal(sig)) if wait => {
                 if !quiet {
-                    eprintln!(
+                    warning!(
                         "Program terminated by signal {} \"{}\"",
-                        sig, cmd
+                        sig,
+                        cmd
                     );
                 }
                 return Ok(Outcome::Default);
@@ -1143,7 +1139,7 @@ impl Engine {
             None
         } else if let Some(p) = self.resolve_lockfile(recipe, msg) {
             if self.env.get(VAR_LOCKFILE).is_some_and(|gl| gl == p) {
-                eprintln!("Deadlock attempted on \"{p}\"");
+                warning!("Deadlock attempted on \"{p}\"");
                 None
             } else {
                 let timeout = self.env.get_num(&LOCKTIMEOUT) as u64;
@@ -1151,7 +1147,7 @@ impl Engine {
                 Some(
                     FileLock::acquire_temp_retry(Path::new(&p), timeout, sleep)
                         .map_err(|e| {
-                            eprintln!("failed to acquire lock {}: {}", p, e);
+                            warning!("failed to acquire lock {}: {}", p, e);
                             EngineError::Lock(p)
                         })?,
                 )
@@ -1244,7 +1240,7 @@ impl Engine {
             Ok(c) => c,
             Err(e) => {
                 if e.kind() != ErrorKind::NotFound && path != DEV_NULL {
-                    eprintln!("failed to read rcfile {}: {}", path, e);
+                    warning!("failed to read rcfile {}: {}", path, e);
                 }
                 return None;
             }
@@ -1253,7 +1249,7 @@ impl Engine {
         match config::parse(&content, path) {
             Ok(items) => Some(items),
             Err(e) => {
-                eprintln!("failed to parse rcfile {}: {}", path, e);
+                warning!("failed to parse rcfile {}: {}", path, e);
                 None
             }
         }
@@ -1300,7 +1296,7 @@ impl Engine {
             .case_insensitive(case_insensitive)
             .build()
         else {
-            eprintln!("bad regex in =~: {pat}");
+            warning!("bad regex in =~: {pat}");
             return;
         };
         let val = self.env.get_or_default(name).to_owned();
@@ -1325,7 +1321,7 @@ impl Engine {
         }
 
         let Ok(maxlen) = maxlen.parse::<usize>() else {
-            eprintln!("@D: bad maxlen: {maxlen}");
+            warning!("@D: bad maxlen: {maxlen}");
             self.set_var("DUPLICATE", "");
             return;
         };
@@ -1339,7 +1335,7 @@ impl Engine {
             Ok(true) => self.set_var("DUPLICATE", "yes"),
             Ok(false) => self.set_var("DUPLICATE", ""),
             Err(e) => {
-                eprintln!("@D: cache error: {e}");
+                warning!("@D: cache error: {e}");
                 self.set_var("DUPLICATE", "");
             }
         }
@@ -1595,7 +1591,7 @@ impl Engine {
             .stderr(Stdio::inherit())
             .spawn();
         let Ok(mut child) = child else {
-            eprintln!("Failed forking \"{}\"", cmd);
+            warning!("Failed forking \"{}\"", cmd);
             return;
         };
         if let Some(mut w) = child.stdin.take() {
