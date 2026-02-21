@@ -1509,3 +1509,70 @@ fn log_multiline_quote() {
         })
         .run();
 }
+
+#[test]
+fn shell_reassign_backtick() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SHELL=/bin/bash
+FOO=`/bin/echo captured`
+
+:0
+* FOO ?? captured
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn shell_reassign_pipe() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+SHELL=/bin/bash
+
+:0 fw
+| /bin/sed 's/original/replaced/'
+
+:0
+* ^Subject:.*replaced
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: original stuff\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn path_reassign() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+PATH=/usr/bin:/bin
+
+FOO=`expr 2 + 3`
+
+:0
+* FOO ?? 5
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn shellmetas_metachar() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+FOO=`/bin/echo hello; /bin/echo world`
+
+:0
+* FOO ?? hello
+matched
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
