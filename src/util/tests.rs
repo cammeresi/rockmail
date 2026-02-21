@@ -1,3 +1,4 @@
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
 use super::*;
@@ -21,6 +22,7 @@ fn wait_timeout_kills_slow() {
     let mut child = Command::new("sleep")
         .arg("60")
         .stdin(Stdio::null())
+        .process_group(0)
         .spawn()
         .unwrap();
 
@@ -47,6 +49,7 @@ fn sigkill_after_sigterm_ignored() {
         .arg("-c")
         .arg("trap '' TERM; while true; do :; done")
         .stdin(Stdio::null())
+        .process_group(0)
         .spawn()
         .unwrap();
 

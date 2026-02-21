@@ -62,7 +62,8 @@ pub fn exit(code: u8) -> ExitCode {
 /// hanging forever on processes in uninterruptible sleep (D state).
 fn terminate(child: &mut Child, cmd: &str) -> io::Result<ExitStatus> {
     let pid = Pid::from_raw(child.id() as i32);
-    if kill(pid, Signal::SIGTERM).is_ok() {
+    let pgid = Pid::from_raw(-(pid.as_raw()));
+    if kill(pgid, Signal::SIGTERM).is_ok() {
         eprintln!("Timeout, terminating \"{}\"", cmd);
     } else {
         eprintln!("Timeout, was waiting for \"{}\"", cmd);
@@ -71,7 +72,7 @@ fn terminate(child: &mut Child, cmd: &str) -> io::Result<ExitStatus> {
     if let Some(s) = child.try_wait()? {
         return Ok(s);
     }
-    let _ = kill(pid, Signal::SIGKILL);
+    let _ = kill(pgid, Signal::SIGKILL);
     for _ in 0..50 {
         thread::sleep(Duration::from_millis(100));
         if let Some(s) = child.try_wait()? {

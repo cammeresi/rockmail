@@ -6,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
 use std::mem;
 use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -235,6 +236,7 @@ fn run_backtick(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .process_group(0)
         .spawn();
     let Ok(mut child) = child else {
         let _ = writeln!(&*stderr, "rockmail: Failed forking \"{}\"", cmd);
@@ -581,7 +583,7 @@ impl Engine {
     /// Build a Command with a clean env from our Environment.
     fn spawn(&self, prog: &str) -> Command {
         let mut cmd = Command::new(prog);
-        cmd.env_clear().envs(self.env.iter());
+        cmd.env_clear().envs(self.env.iter()).process_group(0);
         cmd
     }
 

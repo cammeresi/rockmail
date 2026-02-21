@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsFd, AsRawFd};
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
@@ -131,6 +132,7 @@ pub fn deliver(
         .stdin(Stdio::piped())
         .stdout(if grab { Stdio::piped() } else { Stdio::null() })
         .stderr(child_stderr)
+        .process_group(0)
         .spawn()
         .map_err(|e| me(e, "spawn"))?;
 
