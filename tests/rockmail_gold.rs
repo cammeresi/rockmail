@@ -812,6 +812,34 @@ matched
 }
 
 #[test]
+fn pipe_stderr_in_logfile() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=log
+
+:0
+| echo child_stderr >&2
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .post(|g| {
+            for (label, dir) in
+                [("rust", g.rust_dir.path()), ("proc", g.proc_dir.path())]
+            {
+                let log = dir.join("maildir/log");
+                let c = fs::read_to_string(&log).unwrap();
+                assert!(
+                    c.contains("child_stderr"),
+                    "{label}: child stderr not in logfile: {c:?}"
+                );
+            }
+        })
+        .run();
+}
+
+#[test]
 fn backtick_assignment() {
     let rc = "\
 MAILDIR=$MAILDIR
