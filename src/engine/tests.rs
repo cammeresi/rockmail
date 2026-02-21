@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{Error as IoError, ErrorKind};
 use std::path::PathBuf;
 use std::str;
 use std::time::Duration;
@@ -8,6 +9,7 @@ use tempfile::TempDir;
 use crate::config::{
     Action, Condition, Flags, HeaderOp, Item, MailParts, Recipe, SizeOp, Weight,
 };
+use crate::delivery::DeliveryError;
 use crate::mail::Message;
 use crate::re::Matcher;
 use crate::variables::{Environment, SubstCtx};
@@ -318,6 +320,158 @@ fn variable_assignment() {
             line: 0,
         },
     ];
+    delivered(t.process(&items));
+}
+
+#[test]
+fn variable_h_matches_headers() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody text");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "H".to_string(),
+                pattern: "Subject: hello".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("h"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+}
+
+#[test]
+fn variable_h_does_not_match_body() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody text");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "H".to_string(),
+                pattern: "Body text".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("h"))]),
+        },
+        line: 0,
+    }];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn variable_b_matches_body() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody text");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "B".to_string(),
+                pattern: "Body text".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("b"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+}
+
+#[test]
+fn variable_b_does_not_match_headers() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody text");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "B".to_string(),
+                pattern: "Subject:".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("b"))]),
+        },
+        line: 0,
+    }];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn variable_hb_matches_headers() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody text");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "HB".to_string(),
+                pattern: "Subject: hello".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("hb"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+}
+
+#[test]
+fn variable_hb_matches_body() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody text");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "HB".to_string(),
+                pattern: "Body text".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("hb"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+}
+
+#[test]
+fn variable_bh_matches_body() {
+    let mut t = Test::with_msg("Subject: hello\n\nBody text");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "BH".to_string(),
+                pattern: "Body text".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("bh"))]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+}
+
+#[test]
+fn variable_unset_matches_empty() {
+    let mut t = Test::new();
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![Condition::Variable {
+                name: "UNSET_VAR".to_string(),
+                pattern: "^$".to_string(),
+                weight: None,
+            }],
+            action: Action::Folder(vec![PathBuf::from(t.maildir("empty"))]),
+        },
+        line: 0,
+    }];
     delivered(t.process(&items));
 }
 
@@ -1180,6 +1334,62 @@ fn pipe_spawn_failure() {
         line: 0,
     }];
     err_delivery(t.try_process(&items));
+}
+
+#[test]
+fn engine_error_eq_delivery() {
+    assert_eq!(
+        EngineError::Delivery(DeliveryError::PipeExit(1)),
+        EngineError::Delivery(DeliveryError::PipeExit(1))
+    );
+    assert_ne!(
+        EngineError::Delivery(DeliveryError::PipeExit(1)),
+        EngineError::Delivery(DeliveryError::PipeExit(2))
+    );
+    assert_ne!(
+        EngineError::Delivery(DeliveryError::PipeExit(1)),
+        EngineError::Delivery(DeliveryError::UniqueFile)
+    );
+}
+
+#[test]
+fn engine_error_eq_recursion() {
+    assert_eq!(EngineError::RecursionLimit, EngineError::RecursionLimit);
+}
+
+#[test]
+fn engine_error_eq_lock() {
+    assert_eq!(
+        EngineError::Lock("a".into()),
+        EngineError::Lock("a".into())
+    );
+    assert_ne!(
+        EngineError::Lock("a".into()),
+        EngineError::Lock("b".into())
+    );
+}
+
+#[test]
+fn engine_error_eq_io() {
+    let a = EngineError::Io(IoError::new(ErrorKind::NotFound, "x"));
+    let b = EngineError::Io(IoError::new(ErrorKind::NotFound, "y"));
+    let c = EngineError::Io(IoError::new(ErrorKind::PermissionDenied, "x"));
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+}
+
+#[test]
+fn engine_error_ne_cross_variant() {
+    let del = EngineError::Delivery(DeliveryError::UniqueFile);
+    let io = EngineError::Io(IoError::new(ErrorKind::Other, ""));
+    let lock = EngineError::Lock("x".into());
+    let rec = EngineError::RecursionLimit;
+    assert_ne!(del, io);
+    assert_ne!(del, lock);
+    assert_ne!(del, rec);
+    assert_ne!(io, lock);
+    assert_ne!(io, rec);
+    assert_ne!(lock, rec);
 }
 
 #[test]

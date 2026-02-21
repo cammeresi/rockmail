@@ -365,7 +365,7 @@ impl Engine {
     fn apply_side_effect(&mut self, name: &str, value: &str) {
         match name {
             VAR_VERBOSE => {
-                self.verbose = value_is_true(value);
+                self.set_verbose(value_is_true(value));
             }
             VAR_UMASK => {
                 if let Ok(m) = u32::from_str_radix(value, 8) {
@@ -1352,11 +1352,8 @@ impl Engine {
     }
 
     /// Apply `@X Header: value` manipulation on the in-flight message.
-    fn apply_header_ops(&mut self, ops: &[Item], msg: &mut Message) {
-        for item in ops {
-            let Item::HeaderOp { op, .. } = item else {
-                unreachable!("expected HeaderOp");
-            };
+    fn apply_header_ops(&mut self, ops: &[&HeaderOp], msg: &mut Message) {
+        for op in ops {
             let value = self.expand(op.value(), None);
             let value = rfc2047::encode(&value, rfc2047::Enc::Q);
             apply_op_to_fields(op, &value, msg.fields_mut());
@@ -1400,15 +1397,18 @@ impl Engine {
         &mut self, items: &[Item], start: usize, msg: &mut Message,
     ) -> usize {
         let mut i = start;
-        while i < items.len() && matches!(items[i], Item::HeaderOp { .. }) {
-            if let Item::HeaderOp { op, line } = &items[i]
-                && self.dryrun
-            {
+        let mut ops = Vec::new();
+        while i < items.len() {
+            let Item::HeaderOp { op, line } = &items[i] else {
+                break;
+            };
+            if self.dryrun {
                 self.log_header_op(op, *line);
             }
+            ops.push(op);
             i += 1;
         }
-        self.apply_header_ops(&items[start..i], msg);
+        self.apply_header_ops(&ops, msg);
         i
     }
 

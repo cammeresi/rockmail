@@ -52,6 +52,20 @@ fn decode_invalid_passthrough() {
 }
 
 #[test]
+fn decode_missing_question_after_enc() {
+    // encoding letter not followed by '?'
+    let input = b"=?UTF-8?Bxdata?=";
+    assert_eq!(decode(input), "=?UTF-8?Bxdata?=");
+}
+
+#[test]
+fn decode_invalid_utf8_lossy() {
+    // Invalid UTF-8 bytes with =? to enter the main decode loop
+    let input = b"\xff=?bogus";
+    assert_eq!(decode(input), "\u{FFFD}=?bogus");
+}
+
+#[test]
 fn decode_case_insensitive_encoding() {
     let input = b"=?utf-8?b?Y2Fmw6k=?=";
     assert_eq!(decode(input), "café");
@@ -99,11 +113,56 @@ fn enc_detect_none() {
 }
 
 #[test]
+fn utf8_floor_first_char_wider_than_at() {
+    // 'é' is 2 bytes; at=1 rounds down to 0, triggering the i==0 branch
+    assert_eq!(utf8_floor("é", 1), 2);
+}
+
+#[test]
+fn enc_try_from_invalid() {
+    assert_eq!(Enc::try_from(b'X'), Err(()));
+}
+
+#[test]
+fn q_decode_invalid_hex_pair() {
+    assert_eq!(q_decode(b"=ZZ"), b"=ZZ");
+}
+
+#[test]
 fn q_roundtrip() {
     let data = b"caf\xc3\xa9 l\xc3\xa0";
     let encoded = q_encode(data);
     let decoded = q_decode(encoded.as_bytes());
     assert_eq!(decoded, data);
+}
+
+#[test]
+fn hex_val_digits() {
+    for b in b'0'..=b'9' {
+        assert_eq!(hex_val(b), Some(b - b'0'));
+    }
+}
+
+#[test]
+fn hex_val_upper() {
+    for (i, b) in (b'A'..=b'F').enumerate() {
+        assert_eq!(hex_val(b), Some(i as u8 + 10));
+    }
+}
+
+#[test]
+fn hex_val_lower() {
+    for (i, b) in (b'a'..=b'f').enumerate() {
+        assert_eq!(hex_val(b), Some(i as u8 + 10));
+    }
+}
+
+#[test]
+fn hex_val_invalid() {
+    assert_eq!(hex_val(b'g'), None);
+    assert_eq!(hex_val(b'G'), None);
+    assert_eq!(hex_val(b'/'), None);
+    assert_eq!(hex_val(b':'), None);
 }
 
 proptest! {
