@@ -341,7 +341,10 @@ unsafe fn init_env(
     env.set(VAR_DEFAULT, &orgmail);
     env.set(VAR_HOST, &host);
     env.set(VAR_USER_SHELL, &shell);
-    env.set(VAR_PROCMAIL_VERSION, rockmail::VERSION);
+    env.set(
+        VAR_PROCMAIL_VERSION,
+        format!("rockmail {}", rockmail::VERSION),
+    );
 
     env.set_all_defaults();
 

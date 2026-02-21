@@ -1465,3 +1465,26 @@ DEFAULT=$DEFAULT
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
     GoldTest::new(rc, msgs).run();
 }
+
+#[test]
+fn log_variable() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=$MAILDIR/log
+
+LOG=hello
+LOG=world
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .post(|g| {
+            let r = fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                .unwrap();
+            let p = fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                .unwrap();
+            assert_eq!(r, p, "log content differs");
+        })
+        .run();
+}
