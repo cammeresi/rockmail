@@ -446,6 +446,15 @@ fn multiple_capture_markers() {
 }
 
 #[test]
+fn capture_greedy_prefix_made_lazy() {
+    // `.*` before `\/` must be lazy so capture gets maximal text
+    let m = Matcher::new(r"^Subject:.*\/[^ ]+", false).unwrap();
+    let r = m.exec("Subject: magic stuff");
+    assert!(r.matched);
+    assert_eq!(r.capture, Some("magic"));
+}
+
+#[test]
 fn word_boundaries_with_capture() {
     let m = Matcher::new(r"\/\<hello\>", false).unwrap();
     let r = m.exec("say hello there");

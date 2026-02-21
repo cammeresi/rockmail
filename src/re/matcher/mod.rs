@@ -153,6 +153,59 @@ fn push_char(
     false
 }
 
+/// Make greedy quantifiers lazy so `\/` captures maximally.
+///
+/// Procmail's NFA tries the leftmost match, so quantifiers before `\/`
+/// effectively act non-greedy.  We replicate this by post-processing the
+/// prefix to add `?` after each greedy `*`, `+`, `?`, or `}`.
+fn make_lazy(s: &mut String) {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(s.len() + 16);
+    let mut i = 0;
+    while i < bytes.len() {
+        out.push(bytes[i]);
+        match bytes[i] {
+            b'\\' => {
+                i += 1;
+                if i < bytes.len() {
+                    out.push(bytes[i]);
+                }
+            }
+            b'[' => {
+                i += 1;
+                if i < bytes.len() && bytes[i] == b'^' {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+                if i < bytes.len() && bytes[i] == b']' {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+                while i < bytes.len() && bytes[i] != b']' {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    out.push(bytes[i]);
+                }
+            }
+            b'*' | b'+' | b'}' => {
+                if i + 1 >= bytes.len() || bytes[i + 1] != b'?' {
+                    out.push(b'?');
+                }
+            }
+            b'?' if i > 0 && bytes[i - 1] != b'\\' && bytes[i - 1] != b'(' => {
+                if i + 1 >= bytes.len() || bytes[i + 1] != b'?' {
+                    out.push(b'?');
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    *s = String::from_utf8(out).unwrap();
+}
+
 /// Handle backslash escapes during compilation.
 fn handle_escape(
     chars: &mut Peekable<Chars>, out: &mut String, group_count: &mut usize,
@@ -165,6 +218,7 @@ fn handle_escape(
         }
         Some('/') => {
             chars.next();
+            make_lazy(out);
             *group_count += 1;
             *capture = Some(*group_count);
             out.push('(');

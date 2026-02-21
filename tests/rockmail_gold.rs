@@ -1668,3 +1668,63 @@ loose
         })
         .run();
 }
+
+#[test]
+fn lastfolder_after_delivery() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^Subject:.*first
+first
+
+:0
+* $ LASTFOLDER ?? first
+got_first
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: first\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn match_from_extraction() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^Subject:.*\\/[^ ]+
+{
+    :0
+    * $ MATCH ?? magic
+    matched
+}
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: magic stuff\n\nBody\n",
+        b"From: b@host\nSubject: other stuff\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn match_cleared_between_recipes() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 c
+* ^From:.*\\/[^@]+
+/dev/null
+
+:0
+* MATCH ?? .
+has_match
+";
+    let msgs: &[&[u8]] = &[b"From: alice@host\nSubject: test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
