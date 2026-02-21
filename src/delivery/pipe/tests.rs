@@ -3,6 +3,7 @@ use std::time::Instant;
 use super::*;
 use crate::delivery::DeliveryError;
 use crate::delivery::tests::msg;
+use crate::engine;
 use crate::variables::{SHELL, TIMEOUT};
 
 fn to_bytes(msg: &Message) -> Vec<u8> {
@@ -58,6 +59,7 @@ fn exit_code_ignored_without_wait() {
 fn exit_code_error_with_wait() {
     let m = msg("Subject: Test\n\nBody\n");
     // With wait flag, non-zero exit returns error
+    let stderr = engine::dup_stderr();
     let r = deliver(
         "exit 1",
         &m,
@@ -65,6 +67,7 @@ fn exit_code_error_with_wait() {
         true,
         false,
         &Environment::from_process(),
+        &stderr,
     );
 
     assert_eq!(pipe_exit(r), 1);
@@ -93,7 +96,8 @@ fn timeout_kills_hung_command() {
     env.set(TIMEOUT.name, "1");
 
     let start = Instant::now();
-    let r = deliver("exec sleep 60", &m, false, true, false, &env);
+    let stderr = engine::dup_stderr();
+    let r = deliver("exec sleep 60", &m, false, true, false, &env, &stderr);
     let elapsed = start.elapsed().as_secs();
 
     assert!(elapsed < 4);
@@ -127,7 +131,8 @@ fn spawn_failure() {
     let mut env = Environment::from_process();
     env.set(SHELL.name, "/nonexistent");
 
-    let r = deliver("true", &m, false, false, false, &env);
+    let stderr = engine::dup_stderr();
+    let r = deliver("true", &m, false, false, false, &env, &stderr);
     let Err(DeliveryError::Io { op, .. }) = r else {
         panic!("expected Io error, got {r:?}");
     };

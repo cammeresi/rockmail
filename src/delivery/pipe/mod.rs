@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::Path;
@@ -111,13 +112,17 @@ fn pump(child: &mut Child, data: &[u8]) -> std::io::Result<Vec<u8>> {
 /// If `wait` is false, ignores exit status (original behavior for non-w recipes).
 pub fn deliver(
     cmd: &str, msg: &Message, filter: bool, wait: bool, capture: bool,
-    env: &Environment,
+    env: &Environment, stderr: &File,
 ) -> Result<PipeResult, DeliveryError> {
     let grab = filter || capture;
     let p = Path::new(cmd);
     let me = |e, op| io_err(e, p, op);
     let shell = env.get_or_default(&SHELL);
     let flags = env.get_or_default(&SHELLFLAGS);
+    let child_stderr = stderr
+        .try_clone()
+        .map(Stdio::from)
+        .unwrap_or_else(|_| Stdio::null());
     let mut child = Command::new(shell)
         .arg(flags)
         .arg(cmd)
@@ -125,7 +130,7 @@ pub fn deliver(
         .envs(env.iter())
         .stdin(Stdio::piped())
         .stdout(if grab { Stdio::piped() } else { Stdio::null() })
-        .stderr(Stdio::inherit())
+        .stderr(child_stderr)
         .spawn()
         .map_err(|e| me(e, "spawn"))?;
 
@@ -179,5 +184,13 @@ pub fn deliver(
 pub fn deliver_test(
     cmd: &str, msg: &Message, filter: bool,
 ) -> Result<PipeResult, DeliveryError> {
-    deliver(cmd, msg, filter, false, false, &Environment::from_process())
+    deliver(
+        cmd,
+        msg,
+        filter,
+        false,
+        false,
+        &Environment::from_process(),
+        &crate::engine::dup_stderr(),
+    )
 }

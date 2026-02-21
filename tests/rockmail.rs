@@ -965,7 +965,8 @@ fn from_override_without_o() {
     let d = dir.path();
     let mbox = d.join("inbox");
     let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n");
-    let input = b"From original@test Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n";
+    let input =
+        b"From original@test Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n";
     let (_, code) = run(d, &["-f", "override@test", &rc], input);
     assert_eq!(code, 0);
     let content = fs::read_to_string(&mbox).unwrap();
@@ -981,7 +982,8 @@ fn from_override_with_o() {
     let d = dir.path();
     let mbox = d.join("inbox");
     let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n");
-    let input = b"From original@test Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n";
+    let input =
+        b"From original@test Mon Jan  1 00:00:00 2024\nSubject: Test\n\nBody\n";
     let (_, code) = run(d, &["-o", "-f", "override@test", &rc], input);
     assert_eq!(code, 0);
     let content = fs::read_to_string(&mbox).unwrap();

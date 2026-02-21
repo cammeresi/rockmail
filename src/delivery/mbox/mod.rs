@@ -90,7 +90,7 @@ fn write_body(
 }
 
 fn deliver_inner(
-    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
+    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts, stderr: &File,
 ) -> Result<DeliveryResult, DeliveryError> {
     let me = |e, op| io_err(e, path, op);
     let mut file = OpenOptions::new()
@@ -117,7 +117,7 @@ fn deliver_inner(
         Err(e) => {
             drop(w);
             if let Err(te) = file.set_len(saved) {
-                eprintln!("truncate {}: {te}", path.display());
+                let _ = writeln!(&*stderr, "truncate {}: {te}", path.display());
             }
             Err(me(e, "write"))
         }
@@ -130,7 +130,7 @@ fn deliver_inner(
 /// prepended if the message doesn't start with one.
 /// Acquires flock before writing for concurrent safety.
 pub fn deliver(
-    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
+    path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts, stderr: &File,
 ) -> Result<DeliveryResult, DeliveryError> {
     // Locking /dev/null would be silly (matches procmail behavior).
     let _guard = if path != Path::new(DEV_NULL) {
@@ -138,12 +138,18 @@ pub fn deliver(
     } else {
         None
     };
-    deliver_inner(path, msg, sender, opts)
+    deliver_inner(path, msg, sender, opts, stderr)
 }
 
 #[cfg(test)]
 pub fn deliver_test(
     path: &Path, msg: &Message, sender: &str,
 ) -> Result<DeliveryResult, DeliveryError> {
-    deliver(path, msg, sender, DeliveryOpts::default())
+    deliver(
+        path,
+        msg,
+        sender,
+        DeliveryOpts::default(),
+        &crate::engine::dup_stderr(),
+    )
 }

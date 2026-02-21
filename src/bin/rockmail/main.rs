@@ -275,6 +275,7 @@ fn deliver_default(
         .get_var(MSGPREFIX.name)
         .unwrap_or(MSGPREFIX.def.unwrap())
         .to_owned();
+    let stderr = engine.stderr().try_clone()?;
     for name in [VAR_DEFAULT, VAR_ORGMAIL] {
         let path = engine.get_var(name).unwrap_or("").to_owned();
         if !path.is_empty() {
@@ -286,9 +287,10 @@ fn deliver_default(
                 DeliveryOpts::default(),
                 engine.namer(),
                 &prefix,
+                &stderr,
             ) {
                 Ok(r) => {
-                    delivery::update_perms(Path::new(stripped), umask);
+                    delivery::update_perms(Path::new(stripped), umask, &stderr);
                     return Ok(r.path);
                 }
                 Err(e) => last_err = Some(e.into()),

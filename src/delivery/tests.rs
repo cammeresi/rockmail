@@ -1,6 +1,7 @@
 use tempfile::TempDir;
 
 use super::*;
+use crate::engine::dup_stderr;
 use crate::mail::Message;
 
 pub fn msg(s: &str) -> Message {
@@ -64,7 +65,7 @@ fn update_perms_sets_execute_other() {
     fs::write(&p, b"").unwrap();
     fs::set_permissions(&p, Permissions::from_mode(0o644)).unwrap();
 
-    update_perms(&p, 0);
+    update_perms(&p, 0, &dup_stderr());
 
     let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o645);
@@ -77,7 +78,7 @@ fn update_perms_skipped_when_umask_blocks() {
     fs::write(&p, b"").unwrap();
     fs::set_permissions(&p, Permissions::from_mode(0o644)).unwrap();
 
-    update_perms(&p, 0o001);
+    update_perms(&p, 0o001, &dup_stderr());
 
     let mode = fs::metadata(&p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o644);
@@ -85,7 +86,7 @@ fn update_perms_skipped_when_umask_blocks() {
 
 #[test]
 fn update_perms_skipped_for_dev() {
-    update_perms(Path::new("/dev/null"), 0);
+    update_perms(Path::new("/dev/null"), 0, &dup_stderr());
 }
 
 #[test]

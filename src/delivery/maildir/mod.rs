@@ -139,6 +139,7 @@ pub fn deliver_dir(
 /// Retries with a fresh filename on EEXIST (matching procmail).
 pub fn deliver(
     namer: &mut Namer, path: &Path, msg: &Message, opts: DeliveryOpts,
+    stderr: &File,
 ) -> Result<DeliveryResult, DeliveryError> {
     ensure_dirs(path)?;
 
@@ -159,7 +160,11 @@ pub fn deliver(
         match fs::hard_link(&tmp, &new) {
             Ok(()) => {
                 if let Err(e) = fs::remove_file(&tmp) {
-                    eprintln!("error unlinking {}: {e}", tmp.display());
+                    let _ = writeln!(
+                        &*stderr,
+                        "error unlinking {}: {e}",
+                        tmp.display()
+                    );
                 }
                 return Ok(DeliveryResult {
                     bytes,
@@ -205,7 +210,13 @@ pub(super) fn link_unique(
 pub fn deliver_test(
     path: &Path, msg: &Message,
 ) -> Result<DeliveryResult, DeliveryError> {
-    deliver(&mut Namer::new(), path, msg, DeliveryOpts::default())
+    deliver(
+        &mut Namer::new(),
+        path,
+        msg,
+        DeliveryOpts::default(),
+        &crate::engine::dup_stderr(),
+    )
 }
 
 #[cfg(test)]

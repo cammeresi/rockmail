@@ -5,6 +5,7 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::delivery::{DeliveryError, tests::msg};
+use crate::engine;
 
 #[test]
 fn dir_creates_dir() {
@@ -145,7 +146,14 @@ fn retry_exhaustion() {
         .unwrap();
 
     let m = msg("Subject: Test\n\nBody\n");
-    let r = deliver(&mut Namer::new(), &maildir, &m, DeliveryOpts::default());
+    let stderr = engine::dup_stderr();
+    let r = deliver(
+        &mut Namer::new(),
+        &maildir,
+        &m,
+        DeliveryOpts::default(),
+        &stderr,
+    );
     assert_eq!(r.unwrap_err(), DeliveryError::UniqueFile);
 
     // Restore so tempdir cleanup works

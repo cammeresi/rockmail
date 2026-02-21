@@ -5,12 +5,12 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
 use std::mem;
-use std::os::unix::io::AsRawFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use nix::unistd::dup2;
+use nix::unistd::dup;
 use regex::RegexBuilder;
 
 use crate::config::{
@@ -39,7 +39,22 @@ use crate::variables::{
 #[cfg(test)]
 mod tests;
 
-use crate::util::warning;
+use nix::libc::STDERR_FILENO;
+
+/// Write a prefixed warning to the engine's stderr (`self.stderr`).
+macro_rules! ewarn {
+    ($self:expr, $($arg:tt)*) => {
+        let _ = write!(&$self.stderr, "rockmail: ");
+        let _ = writeln!(&$self.stderr, $($arg)*);
+    };
+}
+
+/// Write a line to the engine's stderr.
+macro_rules! elog {
+    ($self:expr, $($arg:tt)*) => {
+        let _ = writeln!(&$self.stderr, $($arg)*);
+    };
+}
 
 const MAX_INCLUDE_DEPTH: usize = 32;
 const MAX32: f64 = i32::MAX as f64;
@@ -208,6 +223,7 @@ fn unfold_and_decode(fields: &FieldList) -> String {
 /// strip trailing newlines (pipes.c:277).
 fn run_backtick(
     env: &Environment, cmd: &str, input: &[u8], timeout: Duration,
+    stderr: &File,
 ) -> String {
     let shell = env.get_or_default(&SHELL);
     let flags = env.get_or_default(&SHELLFLAGS);
@@ -221,23 +237,24 @@ fn run_backtick(
         .stderr(Stdio::null())
         .spawn();
     let Ok(mut child) = child else {
-        warning!("Failed forking \"{}\"", cmd);
+        let _ = writeln!(&*stderr, "rockmail: Failed forking \"{}\"", cmd);
         return String::new();
     };
     if let Some(mut w) = child.stdin.take()
         && let Err(e) = w.write_all(input)
         && e.kind() != ErrorKind::BrokenPipe
     {
-        eprintln!("Error writing to \"{}\" stdin: {}", cmd, e);
+        let _ = writeln!(&*stderr, "Error writing to \"{}\" stdin: {}", cmd, e);
     }
     let mut buf = Vec::new();
     if let Some(mut r) = child.stdout.take()
         && let Err(e) = io::Read::read_to_end(&mut r, &mut buf)
     {
-        eprintln!("Error reading from \"{}\" stdout: {}", cmd, e);
+        let _ =
+            writeln!(&*stderr, "Error reading from \"{}\" stdout: {}", cmd, e);
     }
     if let Err(e) = wait_timeout(&mut child, timeout, cmd) {
-        eprintln!("Error waiting for \"{}\": {}", cmd, e);
+        let _ = writeln!(&*stderr, "Error waiting for \"{}\": {}", cmd, e);
     }
     while buf.last() == Some(&b'\n') {
         buf.pop();
@@ -275,8 +292,10 @@ pub struct Engine {
     ctx: SubstCtx,
     verbose: bool,
     dryrun: bool,
-    /// Kept alive so the fd backing stderr remains valid.
-    logfile: Option<File>,
+    /// Engine's own stderr stream; logging and child processes use this.
+    stderr: File,
+    /// Whether a logfile is currently active (LOGFILE was set).
+    has_logfile: bool,
     namer: Namer,
     /// Whether EXITCODE was explicitly assigned.
     exit_was_set: bool,
@@ -292,16 +311,29 @@ pub struct Engine {
     umask: u32,
 }
 
+/// Dup real stderr so the engine owns its own fd.
+pub fn dup_stderr() -> File {
+    let fd = dup(STDERR_FILENO).expect("dup(stderr)");
+    // SAFETY: dup() returned a fresh valid fd that we now own.
+    File::from(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
 impl Engine {
     /// Create an engine with the given environment and substitution context.
     pub fn new(env: Environment, ctx: SubstCtx) -> Self {
+        Self::with_stderr(env, ctx, dup_stderr())
+    }
+
+    /// Create an engine that logs to the given file instead of stderr.
+    pub fn with_stderr(env: Environment, ctx: SubstCtx, stderr: File) -> Self {
         let real_host = env.get_or_default(&HOST).to_owned();
         Self {
             env,
             ctx,
             verbose: false,
             dryrun: false,
-            logfile: None,
+            stderr,
+            has_logfile: false,
             namer: Namer::new(),
             exit_was_set: false,
             real_host,
@@ -310,6 +342,11 @@ impl Engine {
             rcfile: String::new(),
             umask: DEF_UMASK,
         }
+    }
+
+    /// Borrow the engine's stderr stream.
+    pub fn stderr(&self) -> &File {
+        &self.stderr
     }
 
     /// Whether EXITCODE was explicitly assigned in an rcfile.
@@ -348,7 +385,7 @@ impl Engine {
     }
 
     fn drylog(&self, line: usize, msg: &str) {
-        eprintln!("[{}:{}] {}", self.rcfile, line, msg);
+        elog!(self, "[{}:{}] {}", self.rcfile, line, msg);
     }
 
     /// Look up a variable by name.
@@ -375,7 +412,7 @@ impl Engine {
             }
             VAR_MAILDIR => {
                 if let Err(e) = env::set_current_dir(value) {
-                    warning!("can't chdir to {:?}: {}", value, e);
+                    ewarn!(self, "can't chdir to {:?}: {}", value, e);
                     let cur = env::current_dir()
                         .map(|p| p.to_string_lossy().into_owned())
                         .unwrap_or_else(|_| ".".into());
@@ -392,7 +429,8 @@ impl Engine {
             }
             VAR_HOST => {
                 if value != self.real_host {
-                    warning!(
+                    ewarn!(
+                        self,
                         "HOST mismatch: \"{}\" strstrstr \"{}\"",
                         self.real_host,
                         value,
@@ -409,7 +447,7 @@ impl Engine {
             }
             VAR_LOCKFILE => self.set_globlock(value),
             VAR_LOG => {
-                eprint!("{value}");
+                let _ = write!(&self.stderr, "{value}");
             }
             VAR_LOGFILE => {
                 if !self.dryrun {
@@ -420,22 +458,22 @@ impl Engine {
         }
     }
 
-    /// Open a logfile and redirect stderr to it.
+    /// Open a logfile and redirect the engine's stderr to it.
     fn open_logfile(&mut self, path: &str) {
         if path.is_empty() {
-            self.logfile = None;
+            if let Ok(f) = OpenOptions::new().write(true).open(DEV_NULL) {
+                self.stderr = f;
+            }
+            self.has_logfile = false;
             return;
         }
         let Ok(f) = OpenOptions::new().create(true).append(true).open(path)
         else {
-            warning!("failed to open logfile: {}", path);
+            ewarn!(self, "failed to open logfile: {}", path);
             return;
         };
-        if dup2(f.as_raw_fd(), io::stderr().as_raw_fd()).is_err() {
-            warning!("failed to redirect stderr to logfile: {}", path);
-            return;
-        }
-        self.logfile = Some(f);
+        self.stderr = f;
+        self.has_logfile = true;
     }
 
     /// Acquire or release the global lockfile.
@@ -449,7 +487,7 @@ impl Engine {
         match FileLock::acquire_temp_retry(Path::new(path), timeout, sleep) {
             Ok(lock) => self.globlock = Some(lock),
             Err(e) => {
-                warning!("failed to lock \"{}\": {}", path, e);
+                ewarn!(self, "failed to lock \"{}\": {}", path, e);
                 self.env.remove(VAR_LOCKFILE);
             }
         }
@@ -468,7 +506,9 @@ impl Engine {
     fn expand_inner(
         &mut self, s: &str, msg: Option<&Message>, f: SubstFn,
     ) -> String {
-        let Self { env, ctx, .. } = &*self;
+        let Self {
+            env, ctx, stderr, ..
+        } = &*self;
 
         let limit = env.get_num(&LINEBUF) as usize;
         let run;
@@ -480,7 +520,9 @@ impl Engine {
             let mut buf = Vec::new();
             msg.write_to(&mut buf, false).expect("Vec write");
             input = buf;
-            run = move |cmd: &str| run_backtick(env, cmd, &input, timeout);
+            run = move |cmd: &str| {
+                run_backtick(env, cmd, &input, timeout, stderr)
+            };
             Some(&run as BacktickFn)
         } else {
             None
@@ -488,7 +530,7 @@ impl Engine {
 
         let (res, overflow) = f(env, ctx, s, limit, runner);
         if overflow {
-            warning!("Exceeded LINEBUF");
+            ewarn!(self, "Exceeded LINEBUF");
             self.env.set(VAR_PROCMAIL_OVERFLOW, "yes");
         }
         res
@@ -636,7 +678,8 @@ impl Engine {
         let Some(wt) = weight else {
             if self.verbose {
                 let neg = if negate { " !" } else { "" };
-                eprintln!(
+                elog!(
+                    self,
                     "{} on{neg} {label}",
                     if matched { "Match" } else { "No match" },
                 );
@@ -674,7 +717,8 @@ impl Engine {
         let Some(wt) = weight else {
             if self.verbose {
                 let neg = if negate { " !" } else { "" };
-                eprintln!(
+                elog!(
+                    self,
                     "{} on{neg} {label}",
                     if ok { "Match" } else { "No match" },
                 );
@@ -705,7 +749,7 @@ impl Engine {
         weight: Option<Weight>, case_insens: bool, label: &str,
     ) -> EngineResult<ConditionResult> {
         let Ok(matcher) = Matcher::new(pattern, case_insens) else {
-            warning!("Invalid regexp \"{}\"", pattern);
+            ewarn!(self, "Invalid regexp \"{}\"", pattern);
             return Ok(ConditionResult::simple(false));
         };
 
@@ -720,7 +764,8 @@ impl Engine {
             let matched = result.matched ^ negate;
             if self.verbose {
                 let neg = if negate { " !" } else { "" };
-                eprintln!(
+                elog!(
+                    self,
                     "{} on{neg} {label}",
                     if matched { "Match" } else { "No match" },
                 );
@@ -838,9 +883,12 @@ impl Engine {
                 has_score = true;
                 if self.verbose {
                     let neg = if r.negate { " !" } else { "" };
-                    eprintln!(
+                    elog!(
+                        self,
                         "Score: {:>7} {:>7}{neg} {}",
-                        r.score as i64, score as i64, r.label,
+                        r.score as i64,
+                        score as i64,
+                        r.label,
                     );
                 }
             }
@@ -912,7 +960,7 @@ impl Engine {
         }
         if primary_ft == FolderType::File {
             for sec in paths {
-                warning!("Skipped \"{}\": can't link from mbox", sec);
+                ewarn!(self, "Skipped \"{}\": can't link from mbox", sec);
             }
             return;
         }
@@ -921,7 +969,7 @@ impl Engine {
         for sec in paths {
             let (ft, dir) = FolderType::parse(sec);
             if ft == FolderType::File {
-                warning!("Skipped \"{}\"", sec);
+                ewarn!(self, "Skipped \"{}\"", sec);
                 continue;
             }
             match delivery::link_secondary(
@@ -932,12 +980,16 @@ impl Engine {
                 &prefix,
             ) {
                 Ok(p) => {
-                    delivery::update_perms(Path::new(dir), self.umask);
+                    delivery::update_perms(
+                        Path::new(dir),
+                        self.umask,
+                        &self.stderr,
+                    );
                     folder.push(' ');
                     folder.push_str(&p);
                 }
                 Err(e) => {
-                    warning!("Couldn't make link to \"{}\": {}", sec, e);
+                    ewarn!(self, "Couldn't make link to \"{}\": {}", sec, e);
                 }
             }
         }
@@ -970,18 +1022,19 @@ impl Engine {
             opts,
             &mut self.namer,
             &prefix,
+            &self.stderr,
         );
 
         let result = match result {
             Ok(r) => r,
             Err(e) if recipe.flags.ignore => {
-                eprintln!("Ignoring delivery error: {}", e);
+                elog!(self, "Ignoring delivery error: {}", e);
                 return Ok(Outcome::Continue);
             }
             Err(e) => return Err(e.into()),
         };
 
-        delivery::update_perms(Path::new(path), self.umask);
+        delivery::update_perms(Path::new(path), self.umask, &self.stderr);
 
         let mut folder = result.path.clone();
         self.deliver_secondaries(&paths[1..], &result.path, ft, &mut folder);
@@ -990,7 +1043,7 @@ impl Engine {
         self.ctx.lastfolder = folder.clone();
 
         if self.verbose {
-            eprintln!("Delivered to {}", folder);
+            elog!(self, "Delivered to {}", folder);
         }
 
         Ok(Outcome::Delivered(folder))
@@ -1013,6 +1066,7 @@ impl Engine {
             wait,
             capture.is_some(),
             &self.env,
+            &self.stderr,
         );
 
         // Handle pipe errors based on w/W flags
@@ -1021,13 +1075,14 @@ impl Engine {
             Err(DeliveryError::PipeExit(code)) if wait => {
                 self.ctx.last_exit = code;
                 if !quiet {
-                    warning!("Program failure ({}) of \"{}\"", code, cmd);
+                    ewarn!(self, "Program failure ({}) of \"{}\"", code, cmd);
                 }
                 return Ok(Outcome::Default);
             }
             Err(DeliveryError::PipeSignal(sig)) if wait => {
                 if !quiet {
-                    warning!(
+                    ewarn!(
+                        self,
                         "Program terminated by signal {} \"{}\"",
                         sig,
                         cmd
@@ -1064,7 +1119,7 @@ impl Engine {
         self.ctx.lastfolder = cmd.to_string();
 
         if self.verbose {
-            eprintln!("Piped to \"{}\"", cmd);
+            elog!(self, "Piped to \"{}\"", cmd);
         }
 
         Ok(Outcome::Delivered(cmd.to_string()))
@@ -1134,7 +1189,7 @@ impl Engine {
         self.ctx.lastfolder = dest.clone();
 
         if self.verbose {
-            eprintln!("Forwarded to {}", dest);
+            elog!(self, "Forwarded to {}", dest);
         }
 
         Ok(Outcome::Delivered(dest))
@@ -1149,18 +1204,22 @@ impl Engine {
             None
         } else if let Some(p) = self.resolve_lockfile(recipe, msg) {
             if self.env.get(VAR_LOCKFILE).is_some_and(|gl| gl == p) {
-                warning!("Deadlock attempted on \"{p}\"");
+                ewarn!(self, "Deadlock attempted on \"{p}\"");
                 None
             } else {
                 let timeout = self.env.get_num(&LOCKTIMEOUT) as u64;
                 let sleep = self.env.get_num(&LOCKSLEEP) as u64;
-                Some(
-                    FileLock::acquire_temp_retry(Path::new(&p), timeout, sleep)
-                        .map_err(|e| {
-                            warning!("failed to acquire lock {}: {}", p, e);
-                            EngineError::Lock(p)
-                        })?,
-                )
+                match FileLock::acquire_temp_retry(
+                    Path::new(&p),
+                    timeout,
+                    sleep,
+                ) {
+                    Ok(lock) => Some(lock),
+                    Err(e) => {
+                        ewarn!(self, "failed to acquire lock {}: {}", p, e);
+                        return Err(EngineError::Lock(p));
+                    }
+                }
             }
         } else {
             None
@@ -1250,7 +1309,7 @@ impl Engine {
             Ok(c) => c,
             Err(e) => {
                 if e.kind() != ErrorKind::NotFound && path != DEV_NULL {
-                    warning!("failed to read rcfile {}: {}", path, e);
+                    ewarn!(self, "failed to read rcfile {}: {}", path, e);
                 }
                 return None;
             }
@@ -1259,7 +1318,7 @@ impl Engine {
         match config::parse(&content, path) {
             Ok(items) => Some(items),
             Err(e) => {
-                warning!("failed to parse rcfile {}: {}", path, e);
+                ewarn!(self, "failed to parse rcfile {}: {}", path, e);
                 None
             }
         }
@@ -1306,7 +1365,7 @@ impl Engine {
             .case_insensitive(case_insensitive)
             .build()
         else {
-            warning!("bad regex in =~: {pat}");
+            ewarn!(self, "bad regex in =~: {pat}");
             return;
         };
         let val = self.env.get_or_default(name).to_owned();
@@ -1331,7 +1390,7 @@ impl Engine {
         }
 
         let Ok(maxlen) = maxlen.parse::<usize>() else {
-            warning!("@D: bad maxlen: {maxlen}");
+            ewarn!(self, "@D: bad maxlen: {maxlen}");
             self.set_var("DUPLICATE", "");
             return;
         };
@@ -1345,7 +1404,7 @@ impl Engine {
             Ok(true) => self.set_var("DUPLICATE", "yes"),
             Ok(false) => self.set_var("DUPLICATE", ""),
             Err(e) => {
-                warning!("@D: cache error: {e}");
+                ewarn!(self, "@D: cache error: {e}");
                 self.set_var("DUPLICATE", "");
             }
         }
@@ -1534,12 +1593,12 @@ impl Engine {
     /// Log delivery abstract (From_ line, Subject, Folder, size).
     pub fn log_abstract(&self, folder: &str, msg: &Message) {
         let la = self.env.get_num(&LOGABSTRACT);
-        if !(la > 0 || (self.logfile.is_some() || self.verbose) && la != 0) {
+        if !(la > 0 || (self.has_logfile || self.verbose) && la != 0) {
             return;
         }
 
         if let Some(from) = msg.from_line() {
-            eprintln!("{}", String::from_utf8_lossy(from));
+            elog!(self, "{}", String::from_utf8_lossy(from));
         }
 
         if let Some(subj) = msg.get_header("Subject") {
@@ -1553,7 +1612,7 @@ impl Engine {
             } else {
                 &line
             };
-            eprintln!(" {line}");
+            elog!(self, " {line}");
         }
 
         let detabbed: String = folder
@@ -1567,7 +1626,7 @@ impl Engine {
         let pad: String = "\t".repeat(tabs.max(1));
         // mailfold.c:87,116-118: +1 for forced trailing blank line
         let size = msg.len() + usize::from(!msg.ends_with_blank_line());
-        eprintln!("  Folder: {detabbed}{pad}{:>7}", size);
+        elog!(self, "  Folder: {detabbed}{pad}{:>7}", size);
     }
 
     /// Execute TRAP command before exit (pipes.c:288-312).
@@ -1592,16 +1651,17 @@ impl Engine {
         let cmd = self.expand(&trap, Some(msg));
         let shell = self.env.get_or_default(&SHELL).to_owned();
         let flags = self.env.get_or_default(&SHELLFLAGS);
+        let dup = self.stderr.try_clone().ok().map(Stdio::from);
         let child = self
             .spawn(&shell)
             .arg(flags)
             .arg(&cmd)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
+            .stderr(dup.unwrap_or_else(Stdio::null))
             .spawn();
         let Ok(mut child) = child else {
-            warning!("Failed forking \"{}\"", cmd);
+            ewarn!(self, "Failed forking \"{}\"", cmd);
             return;
         };
         if let Some(mut w) = child.stdin.take() {
@@ -1610,7 +1670,7 @@ impl Engine {
             if let Err(e) = r
                 && e.kind() != ErrorKind::BrokenPipe
             {
-                eprintln!("Error writing to \"{}\" stdin: {}", cmd, e);
+                elog!(self, "Error writing to \"{}\" stdin: {}", cmd, e);
             }
         }
         let timeout = self.timeout();

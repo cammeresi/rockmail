@@ -6,6 +6,7 @@ use tempfile::tempdir;
 
 use super::*;
 use crate::delivery::tests::msg;
+use crate::engine;
 use crate::field::FieldList;
 
 fn escaped(data: &[u8]) -> (Vec<u8>, usize) {
@@ -204,7 +205,9 @@ fn missing_parent_returns_error() {
     let path = dir.path().join("nonexistent").join("mbox");
 
     let m = msg("Subject: Test\n\nBody\n");
-    let r = deliver_inner(&path, &m, "user@host", DeliveryOpts::default());
+    let stderr = engine::dup_stderr();
+    let r =
+        deliver_inner(&path, &m, "user@host", DeliveryOpts::default(), &stderr);
     let Err(crate::delivery::DeliveryError::Io { op, .. }) = r else {
         panic!("expected Io error, got {r:?}");
     };

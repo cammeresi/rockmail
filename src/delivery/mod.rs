@@ -1,8 +1,8 @@
 //! Mail delivery to folders and pipes.
 
 use core::mem;
-use std::fs::{self, Permissions};
-use std::io;
+use std::fs::{self, File, Permissions};
+use std::io::{self, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -162,14 +162,17 @@ impl FolderType {
     }
 
     /// Deliver a message to this folder type.
+    #[allow(clippy::too_many_arguments)]
     pub fn deliver(
         self, path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
-        namer: &mut Namer, prefix: &str,
+        namer: &mut Namer, prefix: &str, stderr: &File,
     ) -> Result<DeliveryResult, DeliveryError> {
         match self {
-            FolderType::File => mbox::deliver(path, msg, sender, opts),
+            FolderType::File => mbox::deliver(path, msg, sender, opts, stderr),
             FolderType::Mh => mh::deliver(path, msg, opts),
-            FolderType::Maildir => maildir::deliver(namer, path, msg, opts),
+            FolderType::Maildir => {
+                maildir::deliver(namer, path, msg, opts, stderr)
+            }
             FolderType::Dir => maildir::deliver_dir(path, msg, opts, prefix),
         }
     }
@@ -177,7 +180,7 @@ impl FolderType {
 
 /// Set the "new mail" permission bit on a folder after delivery.
 /// Skipped when the umask already blocks the bit (matches procmail).
-pub fn update_perms(path: &Path, umask: u32) {
+pub fn update_perms(path: &Path, umask: u32, stderr: &File) {
     if path.starts_with("/dev/") {
         return;
     }
@@ -189,7 +192,7 @@ pub fn update_perms(path: &Path, umask: u32) {
             Permissions::from_mode(mode | UPDATE_MASK),
         )
     {
-        eprintln!("chmod {}: {}", path.display(), e);
+        let _ = writeln!(&*stderr, "chmod {}: {}", path.display(), e);
     }
 }
 

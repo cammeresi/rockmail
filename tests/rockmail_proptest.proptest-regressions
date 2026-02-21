@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b7a501fb9a39d958c30781de78486a28db0f1660a5d0f1d5e92db9a11d49f1a5 # shrinks to rc = RcSpec { folder: 0, rules: [RuleSpec { kind: Spam, copy: false, negate: false }] }, msgs = [MsgSpec { from: 0, to: 0, subj: 0, extra: 0, body: 0 }, MsgSpec { from: 0, to: 1, subj: 4, extra: 2, body: 0 }, MsgSpec { from: 2, to: 5, subj: 3, extra: 2, body: 1 }]

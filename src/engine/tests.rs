@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Error as IoError, ErrorKind};
+use std::io::{Error as IoError, ErrorKind, Read, Seek, Write};
 use std::path::PathBuf;
 use std::str;
 use std::time::Duration;
@@ -1359,14 +1359,8 @@ fn engine_error_eq_recursion() {
 
 #[test]
 fn engine_error_eq_lock() {
-    assert_eq!(
-        EngineError::Lock("a".into()),
-        EngineError::Lock("a".into())
-    );
-    assert_ne!(
-        EngineError::Lock("a".into()),
-        EngineError::Lock("b".into())
-    );
+    assert_eq!(EngineError::Lock("a".into()), EngineError::Lock("a".into()));
+    assert_ne!(EngineError::Lock("a".into()), EngineError::Lock("b".into()));
 }
 
 #[test]
@@ -1381,7 +1375,7 @@ fn engine_error_eq_io() {
 #[test]
 fn engine_error_ne_cross_variant() {
     let del = EngineError::Delivery(DeliveryError::UniqueFile);
-    let io = EngineError::Io(IoError::new(ErrorKind::Other, ""));
+    let io = EngineError::Io(IoError::other(""));
     let lock = EngineError::Lock("x".into());
     let rec = EngineError::RecursionLimit;
     assert_ne!(del, io);
@@ -1763,26 +1757,41 @@ fn filter_b_preserves_headers() {
 fn backtick_spawn_failure_returns_empty() {
     let mut env = Environment::new();
     env.set("SHELL", "/no/such/shell");
-    let r = super::run_backtick(&env, "echo hi", b"", Duration::from_secs(5));
+    let stderr = super::dup_stderr();
+    let r = super::run_backtick(
+        &env,
+        "echo hi",
+        b"",
+        Duration::from_secs(5),
+        &stderr,
+    );
     assert_eq!(r, "");
 }
 
 #[test]
 fn backtick_captures_stdout() {
     let env = Environment::new();
-    let r =
-        super::run_backtick(&env, "echo hello", b"", Duration::from_secs(5));
+    let stderr = super::dup_stderr();
+    let r = super::run_backtick(
+        &env,
+        "echo hello",
+        b"",
+        Duration::from_secs(5),
+        &stderr,
+    );
     assert_eq!(r, "hello");
 }
 
 #[test]
 fn backtick_strips_trailing_newlines() {
     let env = Environment::new();
+    let stderr = super::dup_stderr();
     let r = super::run_backtick(
         &env,
         "printf 'abc\\n\\n\\n'",
         b"",
         Duration::from_secs(5),
+        &stderr,
     );
     assert_eq!(r, "abc");
 }
@@ -2138,4 +2147,49 @@ fn trap_spawn_failure() {
     t.engine.set_var("TRAP", "true");
     t.engine.run_trap(&t.msg);
     assert_eq!(t.engine.get_var("EXITCODE"), Some("77"));
+}
+
+#[test]
+fn logfile_redirects_stderr() {
+    let dir = TempDir::new().unwrap();
+    let logpath = dir.path().join("log");
+    let stderr = tempfile::tempfile().unwrap();
+    let mut engine =
+        Engine::with_stderr(Environment::new(), SubstCtx::default(), stderr);
+    engine.set_var("LOGFILE", logpath.to_str().unwrap());
+
+    // Write via engine's stderr; should go to the logfile
+    writeln!(engine.stderr(), "hello from logfile").unwrap();
+
+    let got = fs::read_to_string(&logpath).unwrap();
+    assert!(got.contains("hello from logfile"));
+}
+
+#[test]
+fn logfile_invalid_path_warns() {
+    let stderr = tempfile::tempfile().unwrap();
+    let read = stderr.try_clone().unwrap();
+    let mut engine =
+        Engine::with_stderr(Environment::new(), SubstCtx::default(), stderr);
+
+    engine.set_var("LOGFILE", "/no/such/dir/logfile");
+
+    let mut got = String::new();
+    // Rewind and read the original stderr fd
+    let mut read = read;
+    read.seek(std::io::SeekFrom::Start(0)).unwrap();
+    read.read_to_string(&mut got).unwrap();
+    assert!(got.contains("failed to open logfile"), "got: {got:?}");
+}
+
+#[test]
+fn logfile_empty_silences() {
+    let stderr = tempfile::tempfile().unwrap();
+    let mut engine =
+        Engine::with_stderr(Environment::new(), SubstCtx::default(), stderr);
+
+    engine.set_var("LOGFILE", "");
+
+    // Writes should succeed but go to /dev/null
+    writeln!(engine.stderr(), "should vanish").unwrap();
 }
