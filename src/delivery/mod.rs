@@ -164,13 +164,13 @@ impl FolderType {
     /// Deliver a message to this folder type.
     pub fn deliver(
         self, path: &Path, msg: &Message, sender: &str, opts: DeliveryOpts,
-        namer: &mut Namer,
+        namer: &mut Namer, prefix: &str,
     ) -> Result<DeliveryResult, DeliveryError> {
         match self {
             FolderType::File => mbox::deliver(path, msg, sender, opts),
             FolderType::Mh => mh::deliver(path, msg, opts),
             FolderType::Maildir => maildir::deliver(namer, path, msg, opts),
-            FolderType::Dir => maildir::deliver_dir(path, msg, opts),
+            FolderType::Dir => maildir::deliver_dir(path, msg, opts, prefix),
         }
     }
 }
@@ -195,7 +195,7 @@ pub fn update_perms(path: &Path, umask: u32) {
 
 /// Hard-link a delivered file into a secondary directory folder.
 pub fn link_secondary(
-    src: &Path, dir: &Path, ft: FolderType, namer: &mut Namer,
+    src: &Path, dir: &Path, ft: FolderType, namer: &mut Namer, prefix: &str,
 ) -> Result<String, DeliveryError> {
     match ft {
         FolderType::Maildir => maildir::link_unique(namer, dir, src),
@@ -205,7 +205,7 @@ pub fn link_secondary(
         }
         FolderType::Dir => {
             fs::create_dir_all(dir).map_err(|e| io_err(e, dir, "create"))?;
-            let name = format!("msg.{}", Namer::new().filename()?);
+            let name = format!("{prefix}{}", Namer::new().filename()?);
             let dest = dir.join(&name);
             fs::hard_link(src, &dest).map_err(|e| io_err(e, &dest, "link"))?;
             Ok(dest.display().to_string())

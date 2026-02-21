@@ -27,12 +27,13 @@ use crate::rfc2047;
 use crate::util::wait_timeout;
 use crate::variables::{
     BacktickFn, DEF_LINEBUF, DEF_UMASK, DEV_NULL, Environment, HOST, LINEBUF,
-    LOCKEXT, LOCKSLEEP, LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, SENDMAIL,
-    SENDMAILFLAGS, SHELL, SHELLFLAGS, SubstCtx, SubstFn, VAR_EXITCODE,
-    VAR_HOST, VAR_INCLUDERC, VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE,
-    VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW,
-    VAR_SHIFT, VAR_SWITCHRC, VAR_TRAP, VAR_UMASK, VAR_VERBOSE, is_builtin,
-    subst_limited, subst_quoted, value_as_int, value_is_true,
+    LOCKEXT, LOCKSLEEP, LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, MSGPREFIX,
+    SENDMAIL, SENDMAILFLAGS, SHELL, SHELLFLAGS, SubstCtx, SubstFn,
+    VAR_EXITCODE, VAR_HOST, VAR_INCLUDERC, VAR_LASTFOLDER, VAR_LINEBUF,
+    VAR_LOCKFILE, VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_MATCH,
+    VAR_PROCMAIL_OVERFLOW, VAR_SHIFT, VAR_SWITCHRC, VAR_TRAP, VAR_UMASK,
+    VAR_VERBOSE, is_builtin, subst_limited, subst_quoted, value_as_int,
+    value_is_true,
 };
 
 #[cfg(test)]
@@ -915,6 +916,7 @@ impl Engine {
             }
             return;
         }
+        let prefix = self.env.get_or_default(&MSGPREFIX).to_owned();
         let src = Path::new(src);
         for sec in paths {
             let (ft, dir) = FolderType::parse(sec);
@@ -927,6 +929,7 @@ impl Engine {
                 Path::new(dir),
                 ft,
                 &mut self.namer,
+                &prefix,
             ) {
                 Ok(p) => {
                     delivery::update_perms(Path::new(dir), self.umask);
@@ -959,8 +962,15 @@ impl Engine {
         };
 
         let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
-        let result =
-            ft.deliver(Path::new(path), &msg, sender, opts, &mut self.namer);
+        let prefix = self.env.get_or_default(&MSGPREFIX).to_owned();
+        let result = ft.deliver(
+            Path::new(path),
+            &msg,
+            sender,
+            opts,
+            &mut self.namer,
+            &prefix,
+        );
 
         let result = match result {
             Ok(r) => r,

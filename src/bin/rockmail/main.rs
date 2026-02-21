@@ -271,6 +271,10 @@ fn deliver_default(
     let mut last_err: Option<Box<dyn Error>> = None;
 
     let umask = engine.umask();
+    let prefix = engine
+        .get_var(MSGPREFIX.name)
+        .unwrap_or(MSGPREFIX.def.unwrap())
+        .to_owned();
     for name in [VAR_DEFAULT, VAR_ORGMAIL] {
         let path = engine.get_var(name).unwrap_or("").to_owned();
         if !path.is_empty() {
@@ -281,6 +285,7 @@ fn deliver_default(
                 sender,
                 DeliveryOpts::default(),
                 engine.namer(),
+                &prefix,
             ) {
                 Ok(r) => {
                     delivery::update_perms(Path::new(stripped), umask);

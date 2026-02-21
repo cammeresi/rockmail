@@ -111,12 +111,12 @@ fn write_msg(path: &Path, msg: &Message, opts: WriteOpts) -> io::Result<usize> {
 /// Unlike Maildir, writes directly without tmp/new/cur structure.
 /// Unlike Maildir, preserves From_ lines (matching procmail ft_DIR).
 pub fn deliver_dir(
-    path: &Path, msg: &Message, opts: DeliveryOpts,
+    path: &Path, msg: &Message, opts: DeliveryOpts, prefix: &str,
 ) -> Result<DeliveryResult, DeliveryError> {
     fs::create_dir_all(path).map_err(|e| io_err(e, path, "create"))?;
 
     let name = Namer::new().filename()?;
-    let dest = path.join(format!("msg.{}", name));
+    let dest = path.join(format!("{prefix}{name}"));
 
     let wo = WriteOpts {
         raw: opts.raw,
@@ -212,5 +212,5 @@ pub fn deliver_test(
 pub fn deliver_dir_test(
     path: &Path, msg: &Message,
 ) -> Result<DeliveryResult, DeliveryError> {
-    deliver_dir(path, msg, DeliveryOpts::default())
+    deliver_dir(path, msg, DeliveryOpts::default(), "msg.")
 }
