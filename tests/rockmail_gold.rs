@@ -9,6 +9,7 @@
 #![cfg(feature = "gold")]
 
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use rand::Rng;
@@ -1609,4 +1610,61 @@ DEFAULT=
 ORGMAIL=$MAILDIR/backup
 ";
     GoldTest::new(rc, MSGS).no_log().run();
+}
+
+#[test]
+fn umask_mbox() {
+    let rc = "MAILDIR=$MAILDIR\nDEFAULT=$DEFAULT\nUMASK=022\n";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .post(|g| {
+            let r = fs::metadata(g.rust_dir.path().join("maildir/default"))
+                .unwrap()
+                .mode()
+                & 0o777;
+            let p = fs::metadata(g.proc_dir.path().join("maildir/default"))
+                .unwrap()
+                .mode()
+                & 0o777;
+            assert_eq!(r, p, "mbox perms: rust={r:03o}, proc={p:03o}");
+        })
+        .run();
+}
+
+#[test]
+fn umask_change_between_deliveries() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+UMASK=077
+
+:0 c
+tight
+UMASK=022
+
+:0
+loose
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .post(|g| {
+            for name in ["tight", "loose"] {
+                let r = fs::metadata(
+                    g.rust_dir.path().join(format!("maildir/{name}")),
+                )
+                .unwrap()
+                .mode()
+                    & 0o777;
+                let p = fs::metadata(
+                    g.proc_dir.path().join(format!("maildir/{name}")),
+                )
+                .unwrap()
+                .mode()
+                    & 0o777;
+                assert_eq!(r, p, "{name} perms: rust={r:03o}, proc={p:03o}");
+            }
+        })
+        .run();
 }

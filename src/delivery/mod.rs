@@ -176,13 +176,14 @@ impl FolderType {
 }
 
 /// Set the "new mail" permission bit on a folder after delivery.
-pub fn update_perms(path: &Path) {
+/// Skipped when the umask already blocks the bit (matches procmail).
+pub fn update_perms(path: &Path, umask: u32) {
     if path.starts_with("/dev/") {
         return;
     }
     let Ok(meta) = fs::metadata(path) else { return };
     let mode = meta.permissions().mode();
-    if mode & UPDATE_MASK == 0
+    if (mode | umask) & UPDATE_MASK == 0
         && let Err(e) = fs::set_permissions(
             path,
             Permissions::from_mode(mode | UPDATE_MASK),

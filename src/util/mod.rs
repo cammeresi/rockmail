@@ -7,8 +7,6 @@ use nix::sys::signal::{Signal, kill};
 use nix::sys::stat::{self, Mode};
 use nix::unistd::Pid;
 
-use crate::variables::DEF_UMASK;
-
 mod error;
 pub mod signals;
 
@@ -32,9 +30,18 @@ pub const EX_CANTCREAT: u8 = 73;
 /// Input file not found.
 pub const EX_NOINPUT: u8 = 66;
 
-/// Set the default umask to 077, matching procmail's INIT_UMASK.
-pub fn init_umask() {
-    stat::umask(Mode::from_bits_truncate(DEF_UMASK));
+/// In test builds, locks a mutex and panics if another test set a
+/// different umask. In release builds, just calls the syscall.
+pub fn set_umask(new: u32) {
+    #[cfg(test)]
+    {
+        use std::sync::Mutex;
+
+        static UMASK: Mutex<u32> = Mutex::new(crate::variables::DEF_UMASK);
+        let old = UMASK.lock().unwrap();
+        assert_eq!(*old, new, "umask conflict: 0o{:03o} → 0o{new:03o}", *old);
+    }
+    stat::umask(Mode::from_bits_truncate(new));
 }
 
 /// Convert a `u8` exit code to an `ExitCode`.

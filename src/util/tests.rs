@@ -3,6 +3,12 @@ use std::process::{Command, Stdio};
 use super::*;
 
 #[test]
+#[should_panic(expected = "umask conflict")]
+fn umask_conflict() {
+    set_umask(0o022);
+}
+
+#[test]
 fn wait_timeout_normal_exit() {
     let mut child = Command::new("true").spawn().unwrap();
     let status =

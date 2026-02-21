@@ -298,7 +298,7 @@ fn umask_override() {
     let (_, code) = run(d, &["-f", "sender@test", &rc], UMASK_MSG);
     assert_eq!(code, 0);
     let mode = fs::metadata(&mbox).unwrap().mode() & 0o777;
-    assert_eq!(mode, 0o644, "expected 0644, got {mode:03o}");
+    assert_eq!(mode, 0o645, "expected 0645, got {mode:03o}");
 }
 
 #[test]

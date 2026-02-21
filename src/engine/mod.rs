@@ -10,7 +10,6 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use nix::sys::stat::{self, Mode};
 use nix::unistd::dup2;
 use regex::RegexBuilder;
 
@@ -27,13 +26,13 @@ use crate::re::{Matcher, expand_macros};
 use crate::rfc2047;
 use crate::util::wait_timeout;
 use crate::variables::{
-    BacktickFn, DEF_LINEBUF, DEV_NULL, Environment, HOST, LINEBUF, LOCKEXT,
-    LOCKSLEEP, LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, SENDMAIL, SENDMAILFLAGS,
-    SHELL, SHELLFLAGS, SubstCtx, SubstFn, VAR_EXITCODE, VAR_HOST,
-    VAR_INCLUDERC, VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE, VAR_LOG,
-    VAR_LOGFILE, VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW, VAR_SHIFT,
-    VAR_SWITCHRC, VAR_TRAP, VAR_UMASK, VAR_VERBOSE, is_builtin, subst_limited,
-    subst_quoted, value_as_int, value_is_true,
+    BacktickFn, DEF_LINEBUF, DEF_UMASK, DEV_NULL, Environment, HOST, LINEBUF,
+    LOCKEXT, LOCKSLEEP, LOCKTIMEOUT, LOGABSTRACT, MIN_LINEBUF, SENDMAIL,
+    SENDMAILFLAGS, SHELL, SHELLFLAGS, SubstCtx, SubstFn, VAR_EXITCODE,
+    VAR_HOST, VAR_INCLUDERC, VAR_LASTFOLDER, VAR_LINEBUF, VAR_LOCKFILE,
+    VAR_LOG, VAR_LOGFILE, VAR_MAILDIR, VAR_MATCH, VAR_PROCMAIL_OVERFLOW,
+    VAR_SHIFT, VAR_SWITCHRC, VAR_TRAP, VAR_UMASK, VAR_VERBOSE, is_builtin,
+    subst_limited, subst_quoted, value_as_int, value_is_true,
 };
 
 #[cfg(test)]
@@ -284,6 +283,8 @@ pub struct Engine {
     abort: bool,
     /// Current rcfile name for dry-run output.
     rcfile: String,
+    /// Current process umask, mirroring the OS value.
+    umask: u32,
 }
 
 impl Engine {
@@ -302,12 +303,18 @@ impl Engine {
             globlock: None,
             abort: false,
             rcfile: String::new(),
+            umask: DEF_UMASK,
         }
     }
 
     /// Whether EXITCODE was explicitly assigned in an rcfile.
     pub fn exit_was_set(&self) -> bool {
         self.exit_was_set
+    }
+
+    /// Current process umask value.
+    pub fn umask(&self) -> u32 {
+        self.umask
     }
 
     /// Borrow the maildir unique-name generator.
@@ -357,7 +364,8 @@ impl Engine {
             }
             VAR_UMASK => {
                 if let Ok(m) = u32::from_str_radix(value, 8) {
-                    stat::umask(Mode::from_bits_truncate(m));
+                    crate::util::set_umask(m);
+                    self.umask = m;
                 }
             }
             VAR_MAILDIR => {
@@ -915,7 +923,7 @@ impl Engine {
                 &mut self.namer,
             ) {
                 Ok(p) => {
-                    delivery::update_perms(Path::new(dir));
+                    delivery::update_perms(Path::new(dir), self.umask);
                     folder.push(' ');
                     folder.push_str(&p);
                 }
@@ -957,7 +965,7 @@ impl Engine {
             Err(e) => return Err(e.into()),
         };
 
-        delivery::update_perms(Path::new(path));
+        delivery::update_perms(Path::new(path), self.umask);
 
         let mut folder = result.path.clone();
         self.deliver_secondaries(&paths[1..], &result.path, ft, &mut folder);

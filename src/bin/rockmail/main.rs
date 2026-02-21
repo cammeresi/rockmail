@@ -12,12 +12,10 @@ use clap::Parser;
 use miette::MietteHandlerOpts;
 use nix::unistd::{ROOT, Uid, User};
 use rockmail::config::{self, is_var_name};
-use rockmail::delivery::{DeliveryOpts, FolderType};
+use rockmail::delivery::{self, DeliveryOpts, FolderType};
 use rockmail::engine::{Engine, Outcome};
 use rockmail::mail::Message;
-use rockmail::util::{
-    EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, init_umask, signals,
-};
+use rockmail::util::{EX_CANTCREAT, EX_TEMPFAIL, EX_USAGE, set_umask, signals};
 use rockmail::variables::*;
 
 #[cfg(test)]
@@ -272,6 +270,7 @@ fn deliver_default(
     let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
     let mut last_err: Option<Box<dyn Error>> = None;
 
+    let umask = engine.umask();
     for name in [VAR_DEFAULT, VAR_ORGMAIL] {
         let path = engine.get_var(name).unwrap_or("").to_owned();
         if !path.is_empty() {
@@ -283,7 +282,10 @@ fn deliver_default(
                 DeliveryOpts::default(),
                 engine.namer(),
             ) {
-                Ok(r) => return Ok(r.path),
+                Ok(r) => {
+                    delivery::update_perms(Path::new(stripped), umask);
+                    return Ok(r.path);
+                }
                 Err(e) => last_err = Some(e.into()),
             }
         }
@@ -455,7 +457,7 @@ fn main() -> ExitCode {
     miette::set_hook(Box::new(move |_| Box::new(opts.clone().build()))).ok();
 
     signals::setup();
-    init_umask();
+    set_umask(DEF_UMASK);
 
     let fail_code = if args.tempfail {
         EX_TEMPFAIL
