@@ -457,12 +457,12 @@ WANT=one
 matched
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
-    // Procmail's metaparse has two paths: when shell metacharacters are
-    // present it copies the condition text verbatim (preserving leading
-    // whitespace after '?'), otherwise readparse strips it.  Matching
-    // this exactly would require detecting shell metacharacters at parse
-    // time or deferring whitespace stripping to eval time, neither of
-    // which is worth the complexity for a cosmetic log difference.
+    // no_log: procmail's metaparse has two paths: when shell metacharacters
+    // are present it copies the condition text verbatim (preserving leading
+    // whitespace after '?'), otherwise readparse strips it.  Matching this
+    // exactly would require detecting shell metacharacters at parse time or
+    // deferring whitespace stripping to eval time, neither of which is worth
+    // the complexity for a cosmetic log difference.
     GoldTest::new(rc, msgs).no_log().run();
 }
 
@@ -855,6 +855,8 @@ LOGFILE=log
 | echo child_stderr >&2
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    // no_log: rcfile sets its own LOGFILE=log; inject_verbose would add a
+    // conflicting LOGFILE=log line. Post-hook checks stderr content in the log.
     GoldTest::new(rc, msgs)
         .no_log()
         .post(|g| {
@@ -1478,6 +1480,8 @@ LOG=hello
 LOG=world
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    // no_log: rcfile sets LOGFILE=$MAILDIR/log; inject_verbose would add a
+    // conflicting LOGFILE=log line. Post-hook compares raw log content.
     GoldTest::new(rc, msgs)
         .no_log()
         .post(|g| {
@@ -1499,6 +1503,8 @@ fn log_multiline_quote() {
               LOG=\"\n\
               \"\n";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    // no_log: rcfile sets LOGFILE=$MAILDIR/log; inject_verbose would add a
+    // conflicting LOGFILE=log line. Post-hook compares raw log content.
     GoldTest::new(rc, msgs)
         .no_log()
         .post(|g| {
@@ -1585,7 +1591,7 @@ MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT
 DELIVERED=yes
 ";
-    GoldTest::new(rc, MSGS).no_log().run();
+    GoldTest::new(rc, MSGS).run();
 }
 
 #[test]
@@ -1599,7 +1605,7 @@ inbox
 
 DELIVERED=yes
 ";
-    GoldTest::new(rc, MSGS).no_log().run();
+    GoldTest::new(rc, MSGS).run();
 }
 
 #[test]
@@ -1609,6 +1615,8 @@ MAILDIR=$MAILDIR
 DEFAULT=
 ORGMAIL=$MAILDIR/backup
 ";
+    // no_log: ORGMAIL resolves to an absolute path containing the temp dir,
+    // which differs between the rockmail and procmail runs.
     GoldTest::new(rc, MSGS).no_log().run();
 }
 
@@ -1617,7 +1625,6 @@ fn umask_mbox() {
     let rc = "MAILDIR=$MAILDIR\nDEFAULT=$DEFAULT\nUMASK=022\n";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
     GoldTest::new(rc, msgs)
-        .no_log()
         .post(|g| {
             let r = fs::metadata(g.rust_dir.path().join("maildir/default"))
                 .unwrap()
@@ -1648,7 +1655,6 @@ loose
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: test\n\nBody\n"];
     GoldTest::new(rc, msgs)
-        .no_log()
         .post(|g| {
             for name in ["tight", "loose"] {
                 let r = fs::metadata(
@@ -1750,6 +1756,8 @@ short_matched
     );
     let msg = format!("From: a@host\nSubject: {a100}\n\nBody\n");
     let msgs: &[&[u8]] = &[msg.as_bytes()];
+    // no_log: rcfile sets LOGFILE=$MAILDIR/log and uses LOG= to write to it;
+    // post-hook strips the program-name prefix and compares raw log content.
     GoldTest::new(&rc, msgs)
         .no_log()
         .post(|g| {
@@ -1799,7 +1807,6 @@ LOCKFILE=
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
     GoldTest::new(rc, msgs)
-        .no_log()
         .post(|g| {
             let r =
                 fs::read_to_string(g.rust_dir.path().join("maildir/status"))
@@ -1823,7 +1830,7 @@ HOST=no.such.host.invalid
 matched
 ";
     let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
-    GoldTest::new(rc, msgs).no_log().run();
+    GoldTest::new(rc, msgs).run();
 }
 
 #[test]
@@ -1847,7 +1854,6 @@ inbox
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
     GoldTest::new(rc, msgs)
-        .no_log()
         .post(|g| {
             let r =
                 fs::read_to_string(g.rust_dir.path().join("maildir/status"))
@@ -1871,6 +1877,9 @@ MSGPREFIX=m.
 inbox
 ";
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    // no_log: custom MSGPREFIX changes the filename prefix from `msg.` to
+    // `m.`, so normalize_folder's dir_re doesn't match and the unique ID
+    // leaks through, causing a spurious diff.
     GoldTest::new(rc, msgs)
         .no_log()
         .pre(|d| fs::create_dir(d.join("inbox")).unwrap())
