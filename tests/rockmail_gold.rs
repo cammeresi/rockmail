@@ -1750,7 +1750,7 @@ short_matched
     );
     let msg = format!("From: a@host\nSubject: {a100}\n\nBody\n");
     let msgs: &[&[u8]] = &[msg.as_bytes()];
-    GoldTest::new(&rc, &msgs)
+    GoldTest::new(&rc, msgs)
         .no_log()
         .post(|g| {
             let strip = |s: &str| -> String {
@@ -1824,4 +1824,73 @@ matched
 ";
     let msgs: &[&[u8]] = &[b"From: user@host\nSubject: Test\n\nBody\n"];
     GoldTest::new(rc, msgs).no_log().run();
+}
+
+#[test]
+fn lockext_custom() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOCKEXT=.lk
+LOCKFILE=$MAILDIR/global.lk
+
+:0 wc
+| test -f $MAILDIR/global.lk && echo locked >> $MAILDIR/status
+
+LOCKFILE=
+
+:0 wc
+| test ! -f $MAILDIR/global.lk && echo released >> $MAILDIR/status
+
+:0:
+inbox
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .post(|g| {
+            let r =
+                fs::read_to_string(g.rust_dir.path().join("maildir/status"))
+                    .unwrap();
+            let p =
+                fs::read_to_string(g.proc_dir.path().join("maildir/status"))
+                    .unwrap();
+            assert_eq!(r, p, "LOCKEXT behavior differs");
+        })
+        .run();
+}
+
+#[test]
+fn msgprefix_custom() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+MSGPREFIX=m.
+
+:0
+inbox
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs)
+        .no_log()
+        .pre(|d| fs::create_dir(d.join("inbox")).unwrap())
+        .post(|g| {
+            let check = |dir: &Path| {
+                let entries: Vec<_> = fs::read_dir(dir.join("maildir/inbox"))
+                    .unwrap()
+                    .map(|e| {
+                        e.unwrap().file_name().to_string_lossy().into_owned()
+                    })
+                    .collect();
+                assert_eq!(entries.len(), 1, "expected one file in inbox");
+                assert!(
+                    entries[0].starts_with("m."),
+                    "expected prefix m. but got {:?}",
+                    entries[0],
+                );
+            };
+            check(g.rust_dir.path());
+            check(g.proc_dir.path());
+        })
+        .run();
 }
