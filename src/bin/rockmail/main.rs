@@ -398,10 +398,6 @@ fn run(
         }
     }
 
-    if !delivered && engine.get_var(VAR_DELIVERED).is_some_and(value_is_true) {
-        delivered = true;
-    }
-
     if !delivered && engine.dryrun() {
         for name in [VAR_DEFAULT, VAR_ORGMAIL] {
             let path = engine.get_var(name).unwrap_or("").to_owned();

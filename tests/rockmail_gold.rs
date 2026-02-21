@@ -1576,3 +1576,27 @@ matched
     let msgs: &[&[u8]] = &[b"From: a@host\nSubject: any\n\nBody\n"];
     GoldTest::new(rc, msgs).run();
 }
+
+#[test]
+fn delivered_yes_still_delivers_default() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+DELIVERED=yes
+";
+    GoldTest::new(rc, MSGS).no_log().run();
+}
+
+#[test]
+fn delivered_after_recipe_no_double() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+inbox
+
+DELIVERED=yes
+";
+    GoldTest::new(rc, MSGS).no_log().run();
+}
