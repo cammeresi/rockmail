@@ -1728,3 +1728,51 @@ has_match
     let msgs: &[&[u8]] = &[b"From: alice@host\nSubject: test\n\nBody\n"];
     GoldTest::new(rc, msgs).run();
 }
+
+#[test]
+fn linebuf_overflow() {
+    let a100 = "a".repeat(100);
+    let rc = format!(
+        "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+LOGFILE=$MAILDIR/log
+LINEBUF=10
+V={a100}
+
+DUMMY=$V$V
+LOG=$PROCMAIL_OVERFLOW
+
+:0
+* $ ^Subject:.*$V
+short_matched
+"
+    );
+    let msg = format!("From: a@host\nSubject: {a100}\n\nBody\n");
+    let msgs: &[&[u8]] = &[msg.as_bytes()];
+    GoldTest::new(&rc, &msgs)
+        .no_log()
+        .post(|g| {
+            let strip = |s: &str| -> String {
+                s.lines()
+                    .map(|l| {
+                        l.strip_prefix("procmail: ")
+                            .or_else(|| {
+                                l.strip_prefix(concat!(
+                                    env!("CARGO_PKG_NAME"),
+                                    ": "
+                                ))
+                            })
+                            .unwrap_or(l)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let r = fs::read_to_string(g.rust_dir.path().join("maildir/log"))
+                .unwrap();
+            let p = fs::read_to_string(g.proc_dir.path().join("maildir/log"))
+                .unwrap();
+            assert_eq!(strip(&r), strip(&p), "log content differs");
+        })
+        .run();
+}

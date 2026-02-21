@@ -38,6 +38,14 @@ use crate::variables::{
 #[cfg(test)]
 mod tests;
 
+/// Log with program-name prefix, matching procmail's `nlog()`.
+macro_rules! warning {
+    ($($arg:tt)*) => {
+        eprint!("{}: ", env!("CARGO_PKG_NAME"));
+        eprintln!($($arg)*);
+    };
+}
+
 const MAX_INCLUDE_DEPTH: usize = 32;
 const MAX32: f64 = i32::MAX as f64;
 const MIN32: f64 = i32::MIN as f64;
@@ -482,6 +490,7 @@ impl Engine {
 
         let (res, overflow) = f(env, ctx, s, limit, runner);
         if overflow {
+            warning!("Exceeded LINEBUF");
             self.env.set(VAR_PROCMAIL_OVERFLOW, "yes");
         }
         res
