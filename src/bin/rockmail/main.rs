@@ -270,23 +270,26 @@ fn deliver_default(
     engine: &mut Engine, msg: &Message,
 ) -> Result<String, Box<dyn Error>> {
     let sender = msg.envelope_sender().unwrap_or("MAILER-DAEMON");
+    let mut last_err: Option<Box<dyn Error>> = None;
 
     for name in [VAR_DEFAULT, VAR_ORGMAIL] {
         let path = engine.get_var(name).unwrap_or("").to_owned();
         if !path.is_empty() {
             let (ft, stripped) = FolderType::parse(&path);
-            let r = ft.deliver(
+            match ft.deliver(
                 Path::new(stripped),
                 msg,
                 sender,
                 DeliveryOpts::default(),
                 engine.namer(),
-            )?;
-            return Ok(r.path);
+            ) {
+                Ok(r) => return Ok(r.path),
+                Err(e) => last_err = Some(e.into()),
+            }
         }
     }
 
-    Err("No delivery destination".into())
+    Err(last_err.unwrap_or_else(|| "No delivery destination".into()))
 }
 
 /// Check for EXITCODE variable override.

@@ -1600,3 +1600,13 @@ DELIVERED=yes
 ";
     GoldTest::new(rc, MSGS).no_log().run();
 }
+
+#[test]
+fn orgmail_fallback() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=
+ORGMAIL=$MAILDIR/backup
+";
+    GoldTest::new(rc, MSGS).no_log().run();
+}
