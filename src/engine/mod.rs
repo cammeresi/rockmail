@@ -23,7 +23,7 @@ use crate::delivery::{self, DeliveryError, DeliveryOpts, FolderType, Namer};
 use crate::field::{Field, FieldList};
 use crate::locking::FileLock;
 use crate::mail::Message;
-use crate::re::Matcher;
+use crate::re::{Matcher, expand_macros};
 use crate::rfc2047;
 use crate::util::wait_timeout;
 use crate::variables::{
@@ -113,6 +113,9 @@ struct ConditionResult {
     score: f64,
     /// Whether this was a weighted (scoring) condition.
     scored: bool,
+    /// For score logging: the condition label (e.g. `"^pat"`).
+    label: String,
+    negate: bool,
 }
 
 impl ConditionResult {
@@ -121,14 +124,18 @@ impl ConditionResult {
             matched,
             score: 0.0,
             scored: false,
+            label: String::new(),
+            negate: false,
         }
     }
 
-    fn scored(score: f64) -> Self {
+    fn scored(score: f64, label: String, negate: bool) -> Self {
         Self {
             matched: true,
             score,
             scored: true,
+            label,
+            negate,
         }
     }
 }
@@ -606,21 +613,21 @@ impl Engine {
         };
         let matched = matched ^ negate;
 
-        if self.verbose {
-            let sym = match op {
-                Ordering::Less => '<',
-                Ordering::Greater => '>',
-                Ordering::Equal => '=',
-            };
-            eprintln!(
-                "{} on {}{}",
-                if matched { "Match" } else { "No match" },
-                sym,
-                bytes
-            );
-        }
+        let sym = match op {
+            Ordering::Less => '<',
+            Ordering::Greater => '>',
+            Ordering::Equal => '=',
+        };
+        let label = format!("\"{sym} {bytes}\"");
 
         let Some(wt) = weight else {
+            if self.verbose {
+                let neg = if negate { " !" } else { "" };
+                eprintln!(
+                    "{} on{neg} {label}",
+                    if matched { "Match" } else { "No match" },
+                );
+            }
             return Ok(ConditionResult::simple(matched));
         };
 
@@ -639,7 +646,7 @@ impl Engine {
         } else {
             wt.w * (size as f64 / bytes as f64).powf(wt.x)
         };
-        Ok(ConditionResult::scored(score))
+        Ok(ConditionResult::scored(score, label, negate))
     }
 
     fn eval_shell(
@@ -651,11 +658,16 @@ impl Engine {
         self.ctx.last_exit = exit;
         let ok = (exit == 0) ^ negate;
 
-        if self.verbose {
-            eprintln!("{} on ?{}", if ok { "Match" } else { "No match" }, cmd);
-        }
+        let label = format!("\"{cmd}\"");
 
         let Some(wt) = weight else {
+            if self.verbose {
+                let neg = if negate { " !" } else { "" };
+                eprintln!(
+                    "{} on{neg} {label}",
+                    if ok { "Match" } else { "No match" },
+                );
+            }
             return Ok(ConditionResult::simple(ok));
         };
 
@@ -673,7 +685,7 @@ impl Engine {
         } else {
             score += if exit != 0 { wt.x } else { wt.w };
         }
-        Ok(ConditionResult::scored(score))
+        Ok(ConditionResult::scored(score, label, negate))
     }
 
     /// Match a pattern against text, handling MATCH capture and weighting.
@@ -696,10 +708,10 @@ impl Engine {
         let Some(wt) = weight else {
             let matched = result.matched ^ negate;
             if self.verbose {
+                let neg = if negate { " !" } else { "" };
                 eprintln!(
-                    "{} on {}",
+                    "{} on{neg} {label}",
                     if matched { "Match" } else { "No match" },
-                    label
                 );
             }
             return Ok(ConditionResult::simple(matched));
@@ -711,11 +723,7 @@ impl Engine {
             score_regex(&matcher, text, wt)
         };
 
-        if self.verbose {
-            eprintln!("Score {} on {}", score, label);
-        }
-
-        Ok(ConditionResult::scored(score))
+        Ok(ConditionResult::scored(score, label.to_string(), negate))
     }
 
     fn eval_regex(
@@ -723,7 +731,7 @@ impl Engine {
         recipe: &Recipe, msg: &Message, decoded: &str,
     ) -> EngineResult<ConditionResult> {
         let text = Self::grep_text(msg, &recipe.flags, decoded);
-        let label = format!("\"{}\"", pattern);
+        let label = format!("\"{}\"", expand_macros(pattern));
         self.eval_pattern(
             &text,
             pattern,
@@ -739,7 +747,7 @@ impl Engine {
         recipe: &Recipe, msg: &Message, decoded: &str,
     ) -> EngineResult<ConditionResult> {
         let text = self.get_variable_text(name, msg, decoded).into_owned();
-        let label = format!("{} ?? {}", name, pattern);
+        let label = format!("\"{}\"", pattern);
         self.eval_pattern(
             &text,
             pattern,
@@ -817,6 +825,13 @@ impl Engine {
             if r.scored {
                 score += r.score;
                 has_score = true;
+                if self.verbose {
+                    let neg = if r.negate { " !" } else { "" };
+                    eprintln!(
+                        "Score: {:>7} {:>7}{neg} {}",
+                        r.score as i64, score as i64, r.label,
+                    );
+                }
             }
         }
 
@@ -1025,11 +1040,30 @@ impl Engine {
     }
 
     /// Forward to addresses.
+    /// Build the full forward command line matching procmail's buf format:
+    /// `sendmail [flags] addr1 addr2 ...`
+    fn forward_line(&self, addrs: &[String]) -> String {
+        let sendmail = self.env.get_or_default(&SENDMAIL);
+        let flags = self.env.get_or_default(&SENDMAILFLAGS);
+        let mut line = sendmail.to_string();
+        for f in flags.split_whitespace() {
+            line.push(' ');
+            line.push_str(f);
+        }
+        for a in addrs {
+            line.push(' ');
+            line.push_str(a);
+        }
+        line
+    }
+
     fn forward(
         &mut self, recipe: &Recipe, msg: &Message, addrs: &[String],
     ) -> EngineResult<Outcome> {
+        // procmail sets LASTFOLDER to the full command line (pipes.c:208)
+        let dest = self.forward_line(addrs);
+
         if self.dryrun {
-            let dest = addrs.join(" ");
             self.set_var(VAR_LASTFOLDER, &dest);
             self.ctx.lastfolder = dest.clone();
             return Ok(Outcome::Delivered(dest));
@@ -1065,7 +1099,6 @@ impl Engine {
             return Err(DeliveryError::PipeExit(self.ctx.last_exit).into());
         }
 
-        let dest = addrs.join(" ");
         self.set_var(VAR_LASTFOLDER, &dest);
         self.ctx.lastfolder = dest.clone();
 

@@ -85,7 +85,7 @@ pub struct MatchResult<'a> {
     pub capture: Option<&'a str>,
 }
 
-fn expand_macros(pat: &str) -> String {
+pub fn expand_macros(pat: &str) -> String {
     // Longest key first so ^FROM_DAEMON matches before ^FROM_MAILER, etc.
     const MACROS: [(&str, &str); 4] = [
         (FROMD_KEY, FROMD_SUBSTITUTE),

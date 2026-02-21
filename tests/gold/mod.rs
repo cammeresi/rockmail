@@ -7,7 +7,10 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::{fs, panic, process};
 
-use crate::common::{Gold, bin_dir, diff_dirs, procmail, rockmail, run, setup};
+use crate::common::{
+    Gold, bin_dir, diff_dirs, normalize_verbose_log, procmail, rockmail, run,
+    setup,
+};
 
 pub const MSGS: &[&[u8]] = &[
     b"From: a@host\nSubject: one\n\nBody one\n",
@@ -65,12 +68,29 @@ fn preserve_failure(g: &Gold, rc: &str, inputs: &[&[u8]]) -> PathBuf {
     dir
 }
 
+/// Insert `VERBOSE=on` and `LOGFILE=log` into an rcfile after the
+/// `MAILDIR=` line so both implementations produce comparable logs.
+fn inject_verbose(dir: &Path) {
+    let p = dir.join("rcfile");
+    let rc = fs::read_to_string(&p).unwrap();
+    let mut out = String::new();
+    for line in rc.lines() {
+        out += line;
+        out += "\n";
+        if line.starts_with("MAILDIR=") {
+            out += "VERBOSE=on\nLOGFILE=log\n";
+        }
+    }
+    fs::write(&p, &out).unwrap();
+}
+
 #[allow(clippy::type_complexity)]
 pub struct GoldTest<'a> {
     rc: &'a str,
     inputs: &'a [&'a [u8]],
     args: Vec<&'a str>,
     sender: &'a str,
+    log: bool,
     cmp: Option<Box<dyn Fn(&Path, &Path) + 'a>>,
     pre: Option<Box<dyn Fn(&Path) + 'a>>,
     post: Option<Box<dyn FnOnce(&Gold) + 'a>>,
@@ -83,6 +103,7 @@ impl<'a> GoldTest<'a> {
             inputs,
             args: Vec::new(),
             sender: "sender@test",
+            log: true,
             cmp: Some(Box::new(|a, b| diff_dirs(a, b).unwrap())),
             pre: None,
             post: None,
@@ -101,6 +122,12 @@ impl<'a> GoldTest<'a> {
 
     pub fn no_cmp(mut self) -> Self {
         self.cmp = None;
+        self.log = false;
+        self
+    }
+
+    pub fn no_log(mut self) -> Self {
+        self.log = false;
         self
     }
 
@@ -120,6 +147,10 @@ impl<'a> GoldTest<'a> {
         let g = Gold::new();
         setup(g.rust_dir.path(), self.rc, Some(bin_dir()));
         setup(g.proc_dir.path(), self.rc, None);
+        if self.log {
+            inject_verbose(g.rust_dir.path());
+            inject_verbose(g.proc_dir.path());
+        }
         if let Some(ref pre) = self.pre {
             pre(&g.rust_dir.path().join("maildir"));
             pre(&g.proc_dir.path().join("maildir"));
@@ -156,6 +187,13 @@ impl<'a> GoldTest<'a> {
                 &g.rust_dir.path().join("maildir"),
                 &g.proc_dir.path().join("maildir"),
             );
+        }
+        if self.log {
+            let r = g.rust_dir.path().join("maildir/log");
+            let p = g.proc_dir.path().join("maildir/log");
+            let rl = normalize_verbose_log(&fs::read(&r).unwrap_or_default());
+            let pl = normalize_verbose_log(&fs::read(&p).unwrap_or_default());
+            assert_eq!(rl, pl, "verbose logs differ");
         }
         if let Some(post) = self.post {
             post(g);

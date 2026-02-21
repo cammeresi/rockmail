@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+use regex::Regex;
 use tempfile::TempDir;
 
 use rockmail::delivery::FolderType;
@@ -102,7 +103,7 @@ pub fn setup(dir: &Path, tmpl: &str, path_prefix: Option<&str>) {
     fs::create_dir(&maildir).unwrap();
     let mut rc = tmpl
         .replace("$MAILDIR", maildir.to_str().unwrap())
-        .replace("$DEFAULT", maildir.join("default").to_str().unwrap());
+        .replace("$DEFAULT", "default");
     if let Some(prefix) = path_prefix {
         rc = format!("PATH={prefix}:$PATH\n{rc}");
     }
@@ -201,6 +202,62 @@ pub fn normalize_from_line(data: &[u8]) -> Vec<u8> {
         .into_owned()
 }
 
+fn log_regexes() -> &'static (Regex, Regex, Regex) {
+    static RE: OnceLock<(Regex, Regex, Regex)> = OnceLock::new();
+    RE.get_or_init(|| {
+        (
+            Regex::new(
+                r"^From (\S+)\s+\w{3} \w{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$",
+            )
+            .unwrap(),
+            // maildir: dir/new/unique_id
+            Regex::new(r"(\S+/new/)\S+").unwrap(),
+            // dir delivery: dir/msg.unique_id
+            Regex::new(r"(\S+/msg\.)\S+").unwrap(),
+        )
+    })
+}
+
+fn normalize_folder(name: &str) -> String {
+    let (_, maildir_re, dir_re) = log_regexes();
+    if maildir_re.is_match(name) {
+        maildir_re.replace(name, "${1}ID").into_owned()
+    } else if dir_re.is_match(name) {
+        dir_re.replace(name, "${1}ID").into_owned()
+    } else {
+        name.to_string()
+    }
+}
+
+/// Extract comparable verbose log lines from a LOGFILE.
+///
+/// Keeps Match/No match/Score lines and the logabstract block (From_,
+/// Subject, Folder).  Strips the `procmail: ` prefix and normalizes
+/// From_ timestamps.
+pub fn normalize_verbose_log(data: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(data);
+    let (from_re, _, _) = log_regexes();
+    text.lines()
+        .filter_map(|line| {
+            let line = line.strip_prefix("procmail: ").unwrap_or(line);
+            if line.starts_with("Match ")
+                || line.starts_with("No match ")
+                || line.starts_with("Score:")
+                || line.starts_with(" Subject:")
+            {
+                Some(line.to_string())
+            } else if let Some(f) = line.strip_prefix("  Folder: ") {
+                let name = f.split('\t').next().unwrap_or(f);
+                Some(format!("  Folder: {}", normalize_folder(name)))
+            } else if from_re.is_match(line) {
+                Some(from_re.replace(line, "From $1 TIMESTAMP").into_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 pub fn normalize_message_id(data: &[u8]) -> Vec<u8> {
     let re = regex::bytes::Regex::new(r"Message-ID: <[^>]+>").unwrap();
     re.replace_all(data, b"Message-ID: <GENERATED>".as_slice())
@@ -213,8 +270,9 @@ fn walk(base: &Path, dir: &Path, map: &mut BTreeMap<String, Vec<u8>>) {
         let p = e.path();
         if p.is_dir() {
             walk(base, &p, map);
-        } else if p.extension().is_none_or(|x| x != "profraw") {
-            // skip llvm-cov artifacts
+        } else if p.extension().is_none_or(|x| x != "profraw")
+            && p.file_name().is_none_or(|x| x != "log")
+        {
             let rel = p.strip_prefix(base).unwrap();
             map.insert(
                 rel.to_string_lossy().into_owned(),
@@ -347,8 +405,7 @@ impl RcBuilder {
             "pending conditions without folder()"
         );
         let suffix = self.suffix;
-        let mut rc =
-            format!("MAILDIR=$MAILDIR\nDEFAULT=$DEFAULT{suffix}\nLOG=log\n");
+        let mut rc = format!("MAILDIR=$MAILDIR\nDEFAULT=$DEFAULT{suffix}\n");
         if !self.rules.is_empty() {
             rc += "\n";
             rc += &self.rules.join("\n\n");
