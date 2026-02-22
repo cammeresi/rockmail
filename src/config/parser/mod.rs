@@ -270,6 +270,13 @@ impl<'a> Parser<'a> {
             return None;
         }
         let rhs = line[pos + 2..].trim();
+        let rhs = if (rhs.starts_with('"') && rhs.ends_with('"'))
+            || (rhs.starts_with('\'') && rhs.ends_with('\''))
+        {
+            &rhs[1..rhs.len() - 1]
+        } else {
+            rhs
+        };
         let mut chars = rhs.chars();
         if chars.next()? != 's' {
             return None;

@@ -813,6 +813,24 @@ fn subst_empty_replace() {
 }
 
 #[test]
+fn subst_quoted() {
+    for input in [r#"X =~ "s/a/b/g""#, "X =~ 's/a/b/g'"] {
+        let items = parse_rc(input).unwrap();
+        assert_eq!(
+            items[0],
+            Item::Subst {
+                name: "X".into(),
+                pattern: "a".into(),
+                replace: "b".into(),
+                global: true,
+                case_insensitive: false,
+                line: 1,
+            },
+        );
+    }
+}
+
+#[test]
 fn header_op_delete_insert() {
     let items = parse_rc(":0\n@I Subject: hello").unwrap();
     assert_eq!(

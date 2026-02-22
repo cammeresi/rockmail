@@ -17,14 +17,20 @@ invoking a shell.
 
 ```
 VAR =~ s/pattern/replacement/flags
+VAR =~ "s/pattern/replacement/flags"
+VAR =~ 's/pattern/replacement/flags'
 ```
 
+- **Quoting** — the regex may optionally be wrapped in single or double quotes.
 - **Delimiter** — any non-alphanumeric character (e.g. `/`, `|`, `#`).
 - **Pattern** — Rust `regex` crate syntax.
 - **Replacement** — `$1`, `$2`, etc. for capture groups.
 - **Flags** — `g` (global), `i` (case-insensitive).
 
 `$VAR` references in pattern and replacement are expanded before use.
+
+If you have been doing regex replacement by piping to `sed`, you may need
+to adjust your escaping since there's no shell involved with this operator.
 
 ### Examples
 
