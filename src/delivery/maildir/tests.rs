@@ -1,5 +1,7 @@
 use std::fs::{self, Permissions};
+use std::io;
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 
 use tempfile::tempdir;
 
@@ -159,4 +161,77 @@ fn retry_exhaustion() {
     // Restore so tempdir cleanup works
     fs::set_permissions(maildir.join("new"), Permissions::from_mode(0o755))
         .unwrap();
+}
+
+fn unwrap_io(e: DeliveryError) -> (io::ErrorKind, PathBuf, &'static str) {
+    let DeliveryError::Io { source, path, op } = e else {
+        panic!("expected Io, got {e:?}");
+    };
+    (source.kind(), path, op)
+}
+
+#[test]
+#[should_panic(expected = "expected Io")]
+fn unwrap_io_panics_on_non_io() {
+    unwrap_io(DeliveryError::UniqueFile);
+}
+
+#[test]
+fn collision_retries_with_new_name() {
+    let dir = tempdir().unwrap();
+    let maildir = dir.path().join("Maildir");
+    ensure_dirs(&maildir).unwrap();
+
+    // Get the filename that a fresh Namer would produce right now.
+    let name = Namer::new().filename().unwrap();
+
+    // Pre-create that file in new/ so the first hard_link hits EEXIST.
+    fs::write(maildir.join("new").join(&name), b"").unwrap();
+
+    // A fresh Namer in the same second produces the same first name,
+    // hits EEXIST, then retries with serial=1 and succeeds.
+    let m = msg("Subject: Test\n\nBody\n");
+    let stderr = engine::dup_stderr();
+    let r = deliver(
+        &mut Namer::new(),
+        &maildir,
+        &m,
+        DeliveryOpts::default(),
+        &stderr,
+    )
+    .unwrap();
+
+    assert!(!r.path.ends_with(&name));
+    assert!(r.path.contains("/new/"));
+    assert_eq!(fs::read_dir(maildir.join("new")).unwrap().count(), 2);
+    assert_eq!(fs::read_dir(maildir.join("tmp")).unwrap().count(), 0);
+}
+
+#[test]
+fn link_unique_creates_file() {
+    let dir = tempdir().unwrap();
+    let maildir = dir.path().join("Maildir");
+    let src = dir.path().join("src.txt");
+    fs::write(&src, b"hello").unwrap();
+
+    let mut namer = Namer::new();
+    let dest = link_unique(&mut namer, &maildir, &src).unwrap();
+
+    assert!(dest.contains("/new/"));
+    assert_eq!(fs::read_to_string(&dest).unwrap(), "hello");
+    assert!(src.exists());
+}
+
+#[test]
+fn link_unique_missing_source() {
+    let dir = tempdir().unwrap();
+    let maildir = dir.path().join("Maildir");
+    let missing = dir.path().join("no_such_file");
+
+    let mut namer = Namer::new();
+    let (kind, _, op) =
+        unwrap_io(link_unique(&mut namer, &maildir, &missing).unwrap_err());
+
+    assert_eq!(kind, io::ErrorKind::NotFound);
+    assert_eq!(op, "link");
 }
