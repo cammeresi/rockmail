@@ -123,3 +123,112 @@ fn multi_folder() {
         ]),
     );
 }
+
+#[test]
+fn multi_folder_mixed() {
+    assert_eq!(
+        Action::parse_line("/var/mail/spam Maildir/"),
+        Action::Folder(vec![
+            PathBuf::from("/var/mail/spam"),
+            PathBuf::from("Maildir/"),
+        ]),
+    );
+}
+
+#[test]
+fn dupecheck() {
+    assert_eq!(
+        Action::parse_line("@D 8192 .cache"),
+        Action::DupeCheck {
+            maxlen: "8192".into(),
+            cache: ".cache".into(),
+        },
+    );
+}
+
+#[test]
+fn dupecheck_extra_whitespace() {
+    assert_eq!(
+        Action::parse_line("@D  8192   .cache"),
+        Action::DupeCheck {
+            maxlen: "8192".into(),
+            cache: ".cache".into(),
+        },
+    );
+}
+
+#[test]
+fn dupecheck_no_cache_becomes_folder() {
+    assert_eq!(
+        Action::parse_line("@D"),
+        Action::Folder(vec![PathBuf::from("@D")]),
+    );
+}
+
+#[test]
+fn header_op_delete_insert() {
+    assert_eq!(
+        Action::parse_line("@I Subject: hello"),
+        Action::HeaderOp(HeaderOp::DeleteInsert {
+            field: "Subject".into(),
+            value: "hello".into(),
+        }),
+    );
+}
+
+#[test]
+fn header_op_rename_insert() {
+    assert_eq!(
+        Action::parse_line("@i Subject: hello"),
+        Action::HeaderOp(HeaderOp::RenameInsert {
+            field: "Subject".into(),
+            value: "hello".into(),
+        }),
+    );
+}
+
+#[test]
+fn header_op_add_if_not() {
+    assert_eq!(
+        Action::parse_line("@a Lines: 42"),
+        Action::HeaderOp(HeaderOp::AddIfNot {
+            field: "Lines".into(),
+            value: "42".into(),
+        }),
+    );
+}
+
+#[test]
+fn header_op_add_always() {
+    assert_eq!(
+        Action::parse_line("@A X-Tag: spam"),
+        Action::HeaderOp(HeaderOp::AddAlways {
+            field: "X-Tag".into(),
+            value: "spam".into(),
+        }),
+    );
+}
+
+#[test]
+fn header_op_empty_field() {
+    assert_eq!(
+        Action::parse_line("@I : value"),
+        Action::Folder(vec![
+            PathBuf::from("@I"),
+            PathBuf::from(":"),
+            PathBuf::from("value"),
+        ]),
+    );
+}
+
+#[test]
+fn header_op_unknown_op() {
+    assert_eq!(
+        Action::parse_line("@Z Foo: bar"),
+        Action::Folder(vec![
+            PathBuf::from("@Z"),
+            PathBuf::from("Foo:"),
+            PathBuf::from("bar"),
+        ]),
+    );
+}
