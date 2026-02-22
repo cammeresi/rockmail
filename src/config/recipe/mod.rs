@@ -136,7 +136,9 @@ impl Recipe {
             Action::Pipe {
                 capture: Some(_), ..
             } => false,
-            Action::Nested(_) | Action::DupeCheck { .. } => false,
+            Action::Nested(_)
+            | Action::DupeCheck { .. }
+            | Action::HeaderOp(_) => false,
         }
     }
 }
@@ -174,6 +176,27 @@ impl HeaderOp {
             | Self::AddAlways { value, .. } => value,
         }
     }
+
+    /// Parse `@X Header: value` into a `HeaderOp`.
+    pub fn parse(s: &str) -> Option<Self> {
+        let rest = s.strip_prefix('@')?;
+        let mut chars = rest.chars();
+        let op = chars.next()?;
+        let rest = chars.as_str().trim_start();
+        let colon = rest.find(':')?;
+        let field = rest[..colon].trim().to_string();
+        if field.is_empty() {
+            return None;
+        }
+        let value = rest[colon + 1..].trim().to_string();
+        match op {
+            'I' => Some(Self::DeleteInsert { field, value }),
+            'i' => Some(Self::RenameInsert { field, value }),
+            'a' => Some(Self::AddIfNot { field, value }),
+            'A' => Some(Self::AddAlways { field, value }),
+            _ => None,
+        }
+    }
 }
 
 /// An rcfile item: variable assignment, recipe, or include directive.
@@ -191,10 +214,6 @@ pub enum Item {
         replace: String,
         global: bool,
         case_insensitive: bool,
-        line: usize,
-    },
-    HeaderOp {
-        op: HeaderOp,
         line: usize,
     },
     Recipe {

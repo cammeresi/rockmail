@@ -145,6 +145,9 @@ fn fmt_action(a: &Action, depth: usize) -> String {
         Action::DupeCheck { maxlen, cache } => {
             format!("@D {maxlen} {cache}")
         }
+        Action::HeaderOp(op) => {
+            format!("{op:?}")
+        }
     }
 }
 
@@ -209,9 +212,6 @@ fn fmt_item_str(item: &Item, num: usize, depth: usize) -> String {
             out.push_str(&format!(
                 "{ind}{num:3}. [SUBST] {name} =~ s/{pattern}/{replace}/{f}\n"
             ));
-        }
-        Item::HeaderOp { op, .. } => {
-            out.push_str(&format!("{ind}{num:3}. [HEADEROP] {op:?}\n"));
         }
         Item::Include { path, .. } => {
             out.push_str(&format!("{ind}{num:3}. [INCLUDERC] {path:?}\n"));

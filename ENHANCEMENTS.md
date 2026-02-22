@@ -40,9 +40,13 @@ NAME =~ s|/|_|g
 Modify headers on the in-flight message without forking formail or sed.
 The operation letter mirrors formail's flags.
 
+Header ops are recipe actions: they appear as the action line of a `:0`
+recipe, so they can use conditions, chain flags, lockfiles, etc.
+
 ### Syntax
 
 ```
+:0
 @X Header: value
 ```
 
@@ -60,9 +64,17 @@ The value undergoes `$VAR` expansion but never touches a shell.
 ### Examples
 
 ```
+:0
 @I Subject: $SUBJECT
+
+:0
 @a Lines: $LINES
+
+:0
 @A X-Processed: yes
+
+:0
+* ^From:.*list@
 @i Subject: [list] $SUBJECT
 ```
 

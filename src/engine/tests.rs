@@ -105,6 +105,13 @@ fn regex_recipe(pattern: &str, folder: &str) -> Item {
     }
 }
 
+fn header_op_recipe(op: HeaderOp) -> Item {
+    Item::Recipe {
+        recipe: Recipe::new(Flags::new(), None, vec![], Action::HeaderOp(op)),
+        line: 0,
+    }
+}
+
 fn shell_recipe(cmd: &str, folder: &str) -> Item {
     Item::Recipe {
         recipe: Recipe {
@@ -1125,13 +1132,10 @@ fn subst_no_match() {
 #[test]
 fn header_op_delete_insert() {
     let mut t = Test::with_msg("Subject: old\nX-Foo: bar\n\nbody");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::DeleteInsert {
-            field: "Subject".into(),
-            value: "new".into(),
-        },
-        line: 0,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::DeleteInsert {
+        field: "Subject".into(),
+        value: "new".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
 }
@@ -1139,13 +1143,10 @@ fn header_op_delete_insert() {
 #[test]
 fn header_op_add_if_not_absent() {
     let mut t = Test::with_msg("Subject: test\n\nbody");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::AddIfNot {
-            field: "Lines".into(),
-            value: "5".into(),
-        },
-        line: 0,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::AddIfNot {
+        field: "Lines".into(),
+        value: "5".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("Lines").as_deref(), Some("5"));
 }
@@ -1153,13 +1154,10 @@ fn header_op_add_if_not_absent() {
 #[test]
 fn header_op_add_if_not_present() {
     let mut t = Test::with_msg("Subject: test\nLines: 10\n\nbody");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::AddIfNot {
-            field: "Lines".into(),
-            value: "5".into(),
-        },
-        line: 0,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::AddIfNot {
+        field: "Lines".into(),
+        value: "5".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("Lines").as_deref(), Some("10"));
 }
@@ -1167,43 +1165,31 @@ fn header_op_add_if_not_present() {
 #[test]
 fn header_op_rename_insert() {
     let mut t = Test::with_msg("Subject: old\n\nbody");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::RenameInsert {
-            field: "Subject".into(),
-            value: "new".into(),
-        },
-        line: 0,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::RenameInsert {
+        field: "Subject".into(),
+        value: "new".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
     assert_eq!(t.msg.get_header("Old-Subject").as_deref(), Some("old"));
 }
 
 #[test]
-fn header_ops_batched() {
+fn header_ops_as_recipes() {
     let mut t = Test::with_msg("Subject: old\nX-Foo: bar\n\nbody");
     let items = vec![
-        Item::HeaderOp {
-            op: HeaderOp::DeleteInsert {
-                field: "Subject".into(),
-                value: "new".into(),
-            },
-            line: 0,
-        },
-        Item::HeaderOp {
-            op: HeaderOp::AddAlways {
-                field: "X-Tag".into(),
-                value: "yes".into(),
-            },
-            line: 0,
-        },
-        Item::HeaderOp {
-            op: HeaderOp::AddIfNot {
-                field: "X-Foo".into(),
-                value: "ignored".into(),
-            },
-            line: 0,
-        },
+        header_op_recipe(HeaderOp::DeleteInsert {
+            field: "Subject".into(),
+            value: "new".into(),
+        }),
+        header_op_recipe(HeaderOp::AddAlways {
+            field: "X-Tag".into(),
+            value: "yes".into(),
+        }),
+        header_op_recipe(HeaderOp::AddIfNot {
+            field: "X-Foo".into(),
+            value: "ignored".into(),
+        }),
     ];
     t.process(&items);
     assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
@@ -1214,13 +1200,10 @@ fn header_ops_batched() {
 #[test]
 fn header_op_add_always() {
     let mut t = Test::with_msg("Subject: test\n\nbody");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::AddAlways {
-            field: "X-Tag".into(),
-            value: "first".into(),
-        },
-        line: 0,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::AddAlways {
+        field: "X-Tag".into(),
+        value: "first".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("X-Tag").as_deref(), Some("first"));
 }
@@ -1228,13 +1211,10 @@ fn header_op_add_always() {
 #[test]
 fn header_op_add_always_duplicate() {
     let mut t = Test::with_msg("X-Tag: existing\n\nbody");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::AddAlways {
-            field: "X-Tag".into(),
-            value: "second".into(),
-        },
-        line: 0,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::AddAlways {
+        field: "X-Tag".into(),
+        value: "second".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("X-Tag").as_deref(), Some("existing"));
     let hdr = t.msg.header();
@@ -1801,13 +1781,10 @@ fn dryrun_log_header_delete_insert() {
     let mut t = Test::with_msg("Subject: old\n\nbody");
     t.engine.set_dryrun(true);
     t.engine.set_rcfile("test.rc");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::DeleteInsert {
-            field: "Subject".into(),
-            value: "new".into(),
-        },
-        line: 5,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::DeleteInsert {
+        field: "Subject".into(),
+        value: "new".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
 }
@@ -1817,13 +1794,10 @@ fn dryrun_log_header_rename_insert() {
     let mut t = Test::with_msg("Subject: old\n\nbody");
     t.engine.set_dryrun(true);
     t.engine.set_rcfile("test.rc");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::RenameInsert {
-            field: "Subject".into(),
-            value: "new".into(),
-        },
-        line: 10,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::RenameInsert {
+        field: "Subject".into(),
+        value: "new".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("Subject").as_deref(), Some("new"));
     assert_eq!(t.msg.get_header("Old-Subject").as_deref(), Some("old"));
@@ -1834,13 +1808,10 @@ fn dryrun_log_header_add_if_not() {
     let mut t = Test::with_msg("Subject: test\n\nbody");
     t.engine.set_dryrun(true);
     t.engine.set_rcfile("test.rc");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::AddIfNot {
-            field: "X-New".into(),
-            value: "added".into(),
-        },
-        line: 3,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::AddIfNot {
+        field: "X-New".into(),
+        value: "added".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("X-New").as_deref(), Some("added"));
 }
@@ -1850,13 +1821,10 @@ fn dryrun_log_header_add_always() {
     let mut t = Test::with_msg("X-Tag: first\n\nbody");
     t.engine.set_dryrun(true);
     t.engine.set_rcfile("test.rc");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::AddAlways {
-            field: "X-Tag".into(),
-            value: "second".into(),
-        },
-        line: 7,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::AddAlways {
+        field: "X-Tag".into(),
+        value: "second".into(),
+    })];
     t.process(&items);
     let hdr = t.msg.header();
     let raw = str::from_utf8(&hdr).unwrap();
@@ -1869,13 +1837,10 @@ fn dryrun_log_header_expands_vars() {
     t.engine.set_dryrun(true);
     t.engine.set_rcfile("test.rc");
     t.engine.set_var("WHO", "alice");
-    let items = vec![Item::HeaderOp {
-        op: HeaderOp::DeleteInsert {
-            field: "X-By".into(),
-            value: "$WHO".into(),
-        },
-        line: 1,
-    }];
+    let items = vec![header_op_recipe(HeaderOp::DeleteInsert {
+        field: "X-By".into(),
+        value: "$WHO".into(),
+    })];
     t.process(&items);
     assert_eq!(t.msg.get_header("X-By").as_deref(), Some("alice"));
 }

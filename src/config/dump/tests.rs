@@ -275,13 +275,13 @@ fn item_subst() {
 }
 
 #[test]
-fn item_headerop() {
+fn action_headerop() {
     let op = HeaderOp::DeleteInsert {
         field: "X-Tag".into(),
         value: "yes".into(),
     };
-    let s = fmt_item_str(&Item::HeaderOp { op, line: 1 }, 1, 0);
-    assert!(s.contains("HEADEROP"));
+    let s = fmt_action(&Action::HeaderOp(op), 0);
+    assert!(s.contains("DeleteInsert"));
 }
 
 #[test]

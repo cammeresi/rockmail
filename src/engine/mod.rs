@@ -1249,6 +1249,15 @@ impl Engine {
                 self.handle_dupecheck(maxlen, cache, line, msg);
                 Ok(Outcome::Default)
             }
+            Action::HeaderOp(op) => {
+                if self.dryrun {
+                    self.log_header_op(op, line);
+                }
+                let value = self.expand(op.value(), None);
+                let value = rfc2047::encode(&value, rfc2047::Enc::Q);
+                apply_op_to_fields(op, &value, msg.fields_mut());
+                Ok(Outcome::Default)
+            }
         }
     }
 
@@ -1412,15 +1421,6 @@ impl Engine {
         }
     }
 
-    /// Apply `@X Header: value` manipulation on the in-flight message.
-    fn apply_header_ops(&mut self, ops: &[&HeaderOp], msg: &mut Message) {
-        for op in ops {
-            let value = self.expand(op.value(), None);
-            let value = rfc2047::encode(&value, rfc2047::Enc::Q);
-            apply_op_to_fields(op, &value, msg.fields_mut());
-        }
-    }
-
     fn process_assign(
         &mut self, name: &str, value: &str, line: usize, msg: &Message,
     ) {
@@ -1454,25 +1454,6 @@ impl Engine {
         }
     }
 
-    fn process_header_ops(
-        &mut self, items: &[Item], start: usize, msg: &mut Message,
-    ) -> usize {
-        let mut i = start;
-        let mut ops = Vec::new();
-        while i < items.len() {
-            let Item::HeaderOp { op, line } = &items[i] else {
-                break;
-            };
-            if self.dryrun {
-                self.log_header_op(op, *line);
-            }
-            ops.push(op);
-            i += 1;
-        }
-        self.apply_header_ops(&ops, msg);
-        i
-    }
-
     fn process_items(
         &mut self, items: &[Item], msg: &mut Message, state: &mut State,
     ) -> EngineResult<Outcome> {
@@ -1502,10 +1483,6 @@ impl Engine {
                         *case_insensitive,
                         *line,
                     );
-                }
-                Item::HeaderOp { .. } => {
-                    i = self.process_header_ops(items, i, msg);
-                    continue;
                 }
                 Item::Recipe { recipe, line } => {
                     let o = self.eval_recipe(recipe, *line, msg, state)?;
@@ -1564,7 +1541,9 @@ impl Engine {
                     addrs.iter().map(|a| self.expand(a, None)).collect();
                 format!("forward: {}", expanded.join(" "))
             }
-            Action::Nested(_) | Action::DupeCheck { .. } => return,
+            Action::Nested(_)
+            | Action::DupeCheck { .. }
+            | Action::HeaderOp(_) => return,
         };
         self.drylog(line, &msg);
     }

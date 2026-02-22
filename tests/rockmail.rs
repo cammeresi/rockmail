@@ -471,7 +471,9 @@ fn header_op_add_always() {
 MAILDIR=$DIR
 DEFAULT=$DIR/inbox
 
+:0
 @A X-Tag: first
+:0
 @A X-Tag: second
 ",
     );
@@ -479,9 +481,19 @@ DEFAULT=$DIR/inbox
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
     let content = fs::read_to_string(&mbox).unwrap();
-    assert!(content.contains("X-Tag: existing"), "original header lost");
-    assert!(content.contains("X-Tag: first"), "first @A not added");
-    assert!(content.contains("X-Tag: second"), "second @A not added");
+    let lines: Vec<_> = content.lines().collect();
+    assert!(
+        lines.contains(&"X-Tag: existing"),
+        "original header lost: {content:?}"
+    );
+    assert!(
+        lines.contains(&"X-Tag: first"),
+        "first @A not added: {content:?}"
+    );
+    assert!(
+        lines.contains(&"X-Tag: second"),
+        "second @A not added: {content:?}"
+    );
 }
 
 #[test]
@@ -633,6 +645,7 @@ fn header_op_delete_insert() {
 MAILDIR=$DIR
 DEFAULT=$DIR/inbox
 
+:0
 @I Subject: replaced
 ",
     );
@@ -640,10 +653,14 @@ DEFAULT=$DIR/inbox
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
     let content = fs::read_to_string(&mbox).unwrap();
-    assert!(content.contains("Subject: replaced"), "new subject missing");
+    let lines: Vec<_> = content.lines().collect();
     assert!(
-        !content.contains("Subject: original"),
-        "old subject remains"
+        lines.contains(&"Subject: replaced"),
+        "new subject missing: {content:?}"
+    );
+    assert!(
+        !lines.contains(&"Subject: original"),
+        "old subject remains: {content:?}"
     );
 }
 
@@ -658,6 +675,7 @@ fn header_op_rename_insert() {
 MAILDIR=$DIR
 DEFAULT=$DIR/inbox
 
+:0
 @i Subject: new subject
 ",
     );
@@ -665,13 +683,14 @@ DEFAULT=$DIR/inbox
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
     let content = fs::read_to_string(&mbox).unwrap();
+    let lines: Vec<_> = content.lines().collect();
     assert!(
-        content.contains("Subject: new subject"),
-        "new subject missing"
+        lines.contains(&"Subject: new subject"),
+        "new subject missing: {content:?}"
     );
     assert!(
-        content.contains("Old-Subject: original"),
-        "old subject not renamed"
+        lines.contains(&"Old-Subject: original"),
+        "old subject not renamed: {content:?}"
     );
 }
 
@@ -686,7 +705,9 @@ fn header_op_add_if_not() {
 MAILDIR=$DIR
 DEFAULT=$DIR/inbox
 
+:0
 @a X-New: added
+:0
 @a Subject: ignored
 ",
     );
@@ -694,14 +715,18 @@ DEFAULT=$DIR/inbox
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
     let content = fs::read_to_string(&mbox).unwrap();
-    assert!(content.contains("X-New: added"), "absent header not added");
+    let lines: Vec<_> = content.lines().collect();
     assert!(
-        content.contains("Subject: existing"),
-        "original subject lost"
+        lines.contains(&"X-New: added"),
+        "absent header not added: {content:?}"
     );
     assert!(
-        !content.contains("Subject: ignored"),
-        "@a should not add when present"
+        lines.contains(&"Subject: existing"),
+        "original subject lost: {content:?}"
+    );
+    assert!(
+        !lines.contains(&"Subject: ignored"),
+        "@a should not add when present: {content:?}"
     );
 }
 
@@ -716,6 +741,7 @@ fn header_op_variable_expansion() {
 MAILDIR=$DIR
 DEFAULT=$DIR/inbox
 
+:0
 @A X-Folder: $MAILDIR
 ",
     );
@@ -723,9 +749,10 @@ DEFAULT=$DIR/inbox
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
     let content = fs::read_to_string(&mbox).unwrap();
+    let lines: Vec<_> = content.lines().collect();
     let expected = format!("X-Folder: {}", d.to_str().unwrap());
     assert!(
-        content.contains(&expected),
+        lines.contains(&expected.as_str()),
         "variable not expanded: {content:?}"
     );
 }
@@ -737,7 +764,7 @@ fn header_op_rfc2047() {
     let mbox = d.join("inbox");
     let rc = write_rc(
         d,
-        "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n@A X-Tag: caf\u{e9}\n",
+        "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n:0\n@A X-Tag: caf\u{e9}\n",
     );
     let input = b"From: user@host\nSubject: test\n\nBody\n";
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
@@ -754,8 +781,10 @@ fn header_op_not_rfc2047() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
     let mbox = d.join("inbox");
-    let rc =
-        write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n@A X-Tag: cafe\n");
+    let rc = write_rc(
+        d,
+        "MAILDIR=$DIR\nDEFAULT=$DIR/inbox\n\n:0\n@A X-Tag: cafe\n",
+    );
     let input = b"From: user@host\nSubject: test\n\nBody\n";
     let (_, code) = run(d, &["-f", "sender@test", &rc], input);
     assert_eq!(code, 0);
@@ -990,6 +1019,37 @@ fn from_override_with_o() {
     assert!(
         content.starts_with("From override@test"),
         "with -o, From_ should be overridden: {content:?}"
+    );
+}
+
+#[test]
+fn filter_with_header_op_action() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let mbox = d.join("inbox");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+:0
+* ^Subject: original
+@i Subject: replaced
+",
+    );
+    let input = b"From: user@host\nSubject: original\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(&mbox).unwrap();
+    let lines: Vec<_> = content.lines().collect();
+    assert!(
+        lines.contains(&"Subject: replaced"),
+        "inserted subject missing: {content:?}"
+    );
+    assert!(
+        lines.contains(&"Old-Subject: original"),
+        "original not renamed: {content:?}"
     );
 }
 

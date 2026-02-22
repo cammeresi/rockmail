@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::{Item, is_var_name};
+use super::{HeaderOp, Item, is_var_name};
 
 #[cfg(test)]
 mod tests;
@@ -28,6 +28,8 @@ pub enum Action {
         /// Path to the cache file.
         cache: String,
     },
+    /// Header manipulation (`@i`/`@I`/`@a`/`@A`).
+    HeaderOp(HeaderOp),
 }
 
 impl Action {
@@ -74,6 +76,10 @@ impl Action {
                 maxlen: maxlen.trim().into(),
                 cache: cache.trim().into(),
             };
+        }
+
+        if let Some(op) = HeaderOp::parse(s) {
+            return Action::HeaderOp(op);
         }
 
         // Otherwise it's folder path(s) (nested blocks handled at parser level)

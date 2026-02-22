@@ -814,31 +814,25 @@ fn subst_empty_replace() {
 
 #[test]
 fn header_op_delete_insert() {
-    let items = parse_rc("@I Subject: hello").unwrap();
+    let items = parse_rc(":0\n@I Subject: hello").unwrap();
     assert_eq!(
-        items[0],
-        Item::HeaderOp {
-            op: HeaderOp::DeleteInsert {
-                field: "Subject".into(),
-                value: "hello".into(),
-            },
-            line: 1,
-        },
+        recipe(&items[0]).action,
+        Action::HeaderOp(HeaderOp::DeleteInsert {
+            field: "Subject".into(),
+            value: "hello".into(),
+        }),
     );
 }
 
 #[test]
 fn header_op_add_if_not() {
-    let items = parse_rc("@a Lines: 42").unwrap();
+    let items = parse_rc(":0\n@a Lines: 42").unwrap();
     assert_eq!(
-        items[0],
-        Item::HeaderOp {
-            op: HeaderOp::AddIfNot {
-                field: "Lines".into(),
-                value: "42".into(),
-            },
-            line: 1,
-        },
+        recipe(&items[0]).action,
+        Action::HeaderOp(HeaderOp::AddIfNot {
+            field: "Lines".into(),
+            value: "42".into(),
+        }),
     );
 }
 
@@ -856,16 +850,14 @@ fn dupecheck() {
 
 #[test]
 fn header_op_in_block() {
-    let items = parse_rc(":0\n{\n@I Subject: test\n}").unwrap();
+    let items = parse_rc(":0\n{\n:0\n@I Subject: test\n}").unwrap();
+    let inner = nested(&items[0]);
     assert_eq!(
-        recipe(&items[0]).action,
-        Action::Nested(vec![Item::HeaderOp {
-            op: HeaderOp::DeleteInsert {
-                field: "Subject".into(),
-                value: "test".into(),
-            },
-            line: 3,
-        }]),
+        recipe(&inner[0]).action,
+        Action::HeaderOp(HeaderOp::DeleteInsert {
+            field: "Subject".into(),
+            value: "test".into(),
+        }),
     );
 }
 

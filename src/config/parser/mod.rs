@@ -5,7 +5,7 @@ use std::str::Lines;
 use miette::{NamedSource, Report, SourceOffset};
 use thiserror::Error;
 
-use super::{Action, Condition, Flags, HeaderOp, Item, Recipe, is_var_name};
+use super::{Action, Condition, Flags, Item, Recipe, is_var_name};
 pub use warnings::ParseWarning;
 
 #[cfg(test)]
@@ -295,29 +295,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse `@X Header: value`.
-    fn parse_header_op(line: &str, line_num: usize) -> Option<Item> {
-        let rest = line.strip_prefix('@')?;
-        let mut chars = rest.chars();
-        let op = chars.next()?;
-        let rest = chars.as_str().trim_start();
-
-        let colon = rest.find(':')?;
-        let field = rest[..colon].trim().to_string();
-        if field.is_empty() {
-            return None;
-        }
-        let value = rest[colon + 1..].trim().to_string();
-        let op = match op {
-            'I' => HeaderOp::DeleteInsert { field, value },
-            'i' => HeaderOp::RenameInsert { field, value },
-            'a' => HeaderOp::AddIfNot { field, value },
-            'A' => HeaderOp::AddAlways { field, value },
-            _ => return None,
-        };
-        Some(Item::HeaderOp { op, line: line_num })
-    }
-
     fn parse_assignment(&self, line: &str, line_num: usize) -> Option<Item> {
         if let Some(eq) = line.find('=') {
             let name = line[..eq].trim();
@@ -531,12 +508,6 @@ impl<'a> Parser<'a> {
             let off = self.cur_offset();
             self.advance();
             let full = self.collect_continuation(trimmed);
-
-            if full.starts_with('@')
-                && let Some(item) = Self::parse_header_op(&full, ln)
-            {
-                return Ok(Some(item));
-            }
 
             if let Some(item) = Self::parse_subst(&full, ln) {
                 return Ok(Some(item));
