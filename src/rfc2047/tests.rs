@@ -165,6 +165,90 @@ fn hex_val_invalid() {
     assert_eq!(hex_val(b':'), None);
 }
 
+#[test]
+fn encode_b_exact() {
+    assert_eq!(encode("café", Enc::B), "=?UTF-8?B?Y2Fmw6k=?=");
+}
+
+#[test]
+fn encode_q_exact() {
+    assert_eq!(encode("café", Enc::Q), "=?UTF-8?Q?caf=C3=A9?=");
+}
+
+#[test]
+fn encode_b_mixed() {
+    assert_eq!(
+        encode("hello café world", Enc::B),
+        "=?UTF-8?B?aGVsbG8gY2Fmw6kgd29ybGQ=?=",
+    );
+}
+
+#[test]
+fn encode_q_mixed() {
+    assert_eq!(
+        encode("hello café world", Enc::Q),
+        "=?UTF-8?Q?hello_caf=C3=A9_world?=",
+    );
+}
+
+#[test]
+fn encode_q_at_limit() {
+    // 57 'a' + 'é' fills exactly 75 chars: 10 prefix + 57 + 6 (=C3=A9) + 2 suffix
+    let input = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé";
+    let encoded = encode(input, Enc::Q);
+    assert_eq!(encoded.len(), MAX_WORD);
+    assert!(!encoded.contains("\r\n"));
+}
+
+#[test]
+fn encode_q_over_limit() {
+    // 58 'a' + 'é': the é forces a fold
+    let input = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé";
+    let encoded = encode(input, Enc::Q);
+    let words: Vec<_> = encoded.split("\r\n ").collect();
+    assert_eq!(words.len(), 2);
+    assert_eq!(
+        words[0],
+        "=?UTF-8?Q?aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?=",
+    );
+    assert_eq!(words[1], "=?UTF-8?Q?=C3=A9?=");
+}
+
+#[test]
+fn encode_q_multi_word() {
+    // 25 'é': 10 per word (60 Q chars each) + 5 in last word
+    let input = "é".repeat(25);
+    let encoded = encode(&input, Enc::Q);
+    let words: Vec<_> = encoded.split("\r\n ").collect();
+    assert_eq!(words.len(), 3);
+    let e = "=C3=A9";
+    assert_eq!(words[0], format!("=?UTF-8?Q?{0}?=", e.repeat(10)));
+    assert_eq!(words[1], format!("=?UTF-8?Q?{0}?=", e.repeat(10)));
+    assert_eq!(words[2], format!("=?UTF-8?Q?{0}?=", e.repeat(5)));
+}
+
+#[test]
+fn encode_b_multi_word() {
+    // 45 'é' = 90 bytes, split into 44+44+2 byte chunks
+    let input = "é".repeat(45);
+    let encoded = encode(&input, Enc::B);
+    let words: Vec<_> = encoded.split("\r\n ").collect();
+    assert_eq!(words.len(), 3);
+    // 22 é's (44 bytes) each for the first two words
+    let chunk = "é".repeat(22);
+    let b64 = STANDARD.encode(chunk.as_bytes());
+    assert_eq!(words[0], format!("=?UTF-8?B?{b64}?="));
+    assert_eq!(words[1], format!("=?UTF-8?B?{b64}?="));
+    // Last word: 1 é (2 bytes)
+    assert_eq!(words[2], "=?UTF-8?B?w6k=?=");
+}
+
+#[test]
+fn encode_emoji() {
+    assert_eq!(encode("🎉", Enc::Q), "=?UTF-8?Q?=F0=9F=8E=89?=");
+    assert_eq!(encode("🎉", Enc::B), "=?UTF-8?B?8J+OiQ==?=");
+}
+
 proptest! {
     #[test]
     fn encode_b_roundtrip_prop(s in "\\PC{1,200}") {
