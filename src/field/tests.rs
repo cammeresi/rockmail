@@ -312,3 +312,63 @@ fn unfold_to_bytes_skips_from_line() {
     assert!(out.starts_with(b"From user@host"));
     assert!(!out.windows(7).any(|w| w == b"line1\n\t"));
 }
+
+#[test]
+fn remove_all_multiple() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"Received: a\n".to_vec()).unwrap());
+    list.push(Field::new(b"Subject: x\n".to_vec()).unwrap());
+    list.push(Field::new(b"Received: b\n".to_vec()).unwrap());
+    list.push(Field::new(b"From: user\n".to_vec()).unwrap());
+    list.push(Field::new(b"Received: c\n".to_vec()).unwrap());
+    list.remove_all(b"Received");
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].name(), b"Subject");
+    assert_eq!(list[1].name(), b"From");
+    check_byte_len(&list);
+}
+
+#[test]
+fn insert_ordering() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"From: a\n".to_vec()).unwrap());
+    list.push(Field::new(b"Subject: b\n".to_vec()).unwrap());
+    list.push(Field::new(b"To: c\n".to_vec()).unwrap());
+    list.insert(1, Field::new(b"Date: d\n".to_vec()).unwrap());
+    assert_eq!(list.len(), 4);
+    assert_eq!(list[0].name(), b"From");
+    assert_eq!(list[1].name(), b"Date");
+    assert_eq!(list[2].name(), b"Subject");
+    assert_eq!(list[3].name(), b"To");
+    check_byte_len(&list);
+}
+
+#[test]
+fn push_with_continuation() {
+    let mut list = FieldList::new();
+    list.push(Field::new(b"Subject: a\n\tb\n".to_vec()).unwrap());
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].as_bytes(), b"Subject: a\n\tb\n");
+    assert_eq!(list[0].name(), b"Subject");
+    check_byte_len(&list);
+}
+
+#[test]
+fn parse_bytes_folded() {
+    let input = b"Subject: line1\n\tcontinued\nFrom: user\n";
+    let fields = parse_bytes(input);
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].as_bytes(), b"Subject: line1\n\tcontinued\n");
+    assert_eq!(fields[1].name(), b"From");
+    check_byte_len(&fields);
+}
+
+#[test]
+fn parse_bytes_multiple_continuations() {
+    let input = b"Subject: a\n\tb\n c\nFrom: user\n";
+    let fields = parse_bytes(input);
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].as_bytes(), b"Subject: a\n\tb\n c\n");
+    assert_eq!(fields[1].name(), b"From");
+    check_byte_len(&fields);
+}
