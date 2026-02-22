@@ -1,5 +1,8 @@
 # ROCKMAIL — Rust Only Collator and Keeper of MAIL
 
+[![CI](https://github.com/cammeresi/rockmail/workflows/Rust/badge.svg)](https://github.com/cammeresi/rockmail/actions)
+[![codecov](https://codecov.io/gh/cammeresi/rockmail/branch/master/graph/badge.svg)](https://codecov.io/gh/cammeresi/rockmail)
+
 ## About
 
 Rockmail is a translation of [Procmail][procmail] into Rust.  Procmail is
@@ -79,8 +82,9 @@ differences.
 
 ## Testing and source code statistics
 
-Test coverage exceeds 97% as of 2026-02-21.  Most of the coverage gaps are
-in error situations that are difficult to test in automation.
+Test coverage exceeds 97% as of 2026-02-21 as measured by `cargo
+llvm-cov`.  Most of the coverage gaps are in error situations that are
+difficult to test in automation.
 
 On 2026-02-21, the following interesting statistics were observed:
 

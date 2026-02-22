@@ -1,0 +1,67 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: EmbarkStudios/cargo-deny-action@v2
+      with:
+        command-arguments: -A duplicate
+
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: rustfmt
+    - name: rustfmt check
+      uses: actions-rust-lang/rustfmt@v1
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clippy check
+        run: cargo clippy --all-targets --all-features
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install procmail
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends procmail
+    - name: Install nextest
+      uses: taiki-e/install-action@nextest
+    - name: Run tests
+      run: cargo nextest run
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install procmail
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends procmail
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+    - name: Generate coverage
+      run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@v4
+      with:
+        files: lcov.info
+        fail_ci_if_error: true
+        token: ${{ secrets.CODECOV_TOKEN }}
