@@ -13,11 +13,10 @@ The goal is a near-100% backward-compatible, drop-in, "rock solid"
 replacement for Procmail.  Most existing `.procmailrc` files should work
 without modification.  A small number of features are deliberately not
 implemented and a small number of differences exist.  They are documented
-in `COMPATIBILITY.md`.
+in [`COMPATIBILITY.md`][compat].
 
-Some extensions beyond Procmail are also available; see `ENHANCEMENTS.md`.
-
-[procmail]: https://en.wikipedia.org/wiki/Procmail
+Some extensions beyond Procmail are also available; see
+[`ENHANCEMENTS.md`][enhance].
 
 ## Implementation
 
@@ -78,7 +77,7 @@ Notable extensions:
 - **Pretty-printed errors** — parse errors are rendered with source context
   and color via the `miette` crate if running in a terminal.
 
-See `COMPATIBILITY.md` for the full list of intentional behavioral
+See [`COMPATIBILITY.md`][compat] for the full list of intentional behavioral
 differences.
 
 ## Testing and source code statistics
@@ -151,5 +150,9 @@ filesystems only, instead of Procmail's NFS-oriented algorithm.
 
 ## Author
 
-Sidney Cammeresi <sac@cheesecake.org>
+Sidney Cammeresi<br>
+<sac@cheesecake.org>
 
+[procmail]: https://en.wikipedia.org/wiki/Procmail
+[compat]: COMPATIBILITY.md
+[enhance]: ENHANCEMENTS.md
