@@ -148,6 +148,12 @@ is infected by GPL restrictions and may be used only under GPL restrictions.
 This module is an alternative locking implementation designed for local
 filesystems only, instead of Procmail's NFS-oriented algorithm.
 
+## Miscellaneous
+
+Total token consumption from the beginning to a reasonable level of
+completeness at commit 75cdcaa0 was approximately 1.28 billion tokens,
+which would have cost $740 at API prices.
+
 ## Author
 
 Sidney Cammeresi<br>
