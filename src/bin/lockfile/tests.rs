@@ -1,3 +1,4 @@
+use std::fs;
 use std::process::Command;
 
 use filetime::{FileTime, set_file_mtime};
@@ -81,7 +82,7 @@ fn force_unlock_missing() {
 fn force_unlock_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let d = tmp.path().join("dir.lock");
-    std::fs::create_dir(&d).unwrap();
+    fs::create_dir(&d).unwrap();
     assert!(!try_force_unlock(&d, 1, 0));
 }
 
@@ -89,7 +90,7 @@ fn force_unlock_dir() {
 fn force_unlock_large() {
     let tmp = tempfile::tempdir().unwrap();
     let p = tmp.path().join("big.lock");
-    std::fs::write(&p, vec![0u8; (MAX_LOCK_SIZE + 1) as usize]).unwrap();
+    fs::write(&p, vec![0u8; (MAX_LOCK_SIZE + 1) as usize]).unwrap();
     assert!(!try_force_unlock(&p, 1, 0));
 }
 

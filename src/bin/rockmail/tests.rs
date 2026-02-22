@@ -1,3 +1,4 @@
+use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
@@ -75,7 +76,7 @@ fn engine_with_home(home: &str) -> Engine {
 fn find_rcfile_explicit() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = tmp.path().join("test.rc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
@@ -87,7 +88,7 @@ fn find_rcfile_explicit() {
 fn find_rcfile_default_procmailrc() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = tmp.path().join(".procmailrc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let result = find_rcfile(&[], &engine).unwrap();
@@ -116,7 +117,7 @@ fn deliver_default_to_mbox() {
     );
     deliver_default(&mut engine, &msg).unwrap();
 
-    let content = std::fs::read_to_string(&mbox).unwrap();
+    let content = fs::read_to_string(&mbox).unwrap();
     assert!(content.contains("Subject: Test"));
     assert!(content.contains("Body"));
 }
@@ -125,9 +126,8 @@ fn deliver_default_to_mbox() {
 fn security_rejects_world_writable() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = tmp.path().join("test.rc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
-    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o666))
-        .unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o666)).unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
@@ -140,9 +140,8 @@ fn security_rejects_world_writable() {
 fn security_rejects_group_writable_default() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = tmp.path().join(".procmailrc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
-    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o664))
-        .unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o664)).unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let result = find_rcfile(&[], &engine);
@@ -154,9 +153,8 @@ fn security_rejects_group_writable_default() {
 fn security_allows_group_writable_explicit() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = tmp.path().join("test.rc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
-    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o664))
-        .unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o664)).unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
@@ -168,9 +166,8 @@ fn security_allows_group_writable_explicit() {
 fn security_accepts_safe_permissions() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = tmp.path().join("test.rc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
-    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
-        .unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o600)).unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
@@ -183,14 +180,12 @@ fn security_accepts_safe_permissions() {
 fn dir_security_rejects_world_writable() {
     let tmp = tempfile::tempdir().unwrap();
     let subdir = tmp.path().join("unsafe");
-    std::fs::create_dir(&subdir).unwrap();
-    std::fs::set_permissions(&subdir, std::fs::Permissions::from_mode(0o777))
-        .unwrap();
+    fs::create_dir(&subdir).unwrap();
+    fs::set_permissions(&subdir, fs::Permissions::from_mode(0o777)).unwrap();
 
     let rc = subdir.join("test.rc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
-    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
-        .unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o600)).unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];
@@ -203,14 +198,12 @@ fn dir_security_rejects_world_writable() {
 fn dir_security_allows_sticky_world_writable() {
     let tmp = tempfile::tempdir().unwrap();
     let subdir = tmp.path().join("sticky");
-    std::fs::create_dir(&subdir).unwrap();
-    std::fs::set_permissions(&subdir, std::fs::Permissions::from_mode(0o1777))
-        .unwrap();
+    fs::create_dir(&subdir).unwrap();
+    fs::set_permissions(&subdir, fs::Permissions::from_mode(0o1777)).unwrap();
 
     let rc = subdir.join("test.rc");
-    std::fs::write(&rc, ":0\n/dev/null\n").unwrap();
-    std::fs::set_permissions(&rc, std::fs::Permissions::from_mode(0o600))
-        .unwrap();
+    fs::write(&rc, ":0\n/dev/null\n").unwrap();
+    fs::set_permissions(&rc, fs::Permissions::from_mode(0o600)).unwrap();
 
     let engine = engine_with_home(&tmp.path().to_string_lossy());
     let files = vec![rc.to_string_lossy().into()];

@@ -1,5 +1,7 @@
-use super::*;
 use std::io::Cursor;
+use std::str;
+
+use super::*;
 
 #[test]
 fn digits_zero() {
@@ -638,7 +640,7 @@ fn sample_totals() -> BTreeMap<String, Stats> {
 }
 
 fn output(buf: &[u8]) -> &str {
-    std::str::from_utf8(buf).unwrap()
+    str::from_utf8(buf).unwrap()
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use std::fs::{self, File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -99,7 +100,7 @@ impl FileLock {
             .truncate(false)
             .open(path)
             .map_err(|e| match e.kind() {
-                std::io::ErrorKind::NotFound => LockError::Unavailable,
+                io::ErrorKind::NotFound => LockError::Unavailable,
                 _ => map_io_err(e),
             })?;
         let _lock = Flock::lock(file, arg).map_err(|_| LockError::Exists)?;
