@@ -1903,3 +1903,118 @@ inbox
         })
         .run();
 }
+
+#[test]
+fn succ_flag_chain() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 c
+first/
+
+:0 a
+second/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn chain_flag() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 c
+* ^Subject:.*Test
+first/
+
+:0 A
+second/
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: Test\n\nBody\n",
+        b"From: b@host\nSubject: Other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn else_flag() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* ^Subject:.*NOMATCH
+first/
+
+:0 E
+second/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn error_flag() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 w
+| /bin/false
+
+:0 e
+errhandler/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn case_sensitive_flag() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 D
+* ^Subject:.*test
+matched/
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: TEST\n\nBody\n",
+        b"From: b@host\nSubject: test\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn ignore_flag() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 ic
+/nonexistent/deeply/nested/path
+
+:0
+fallback/
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody\n"];
+    GoldTest::new(rc, msgs).run();
+}
+
+#[test]
+fn raw_flag_mbox() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0 r
+raw_out
+";
+    let msgs: &[&[u8]] = &[b"From: a@host\nSubject: Test\n\nBody"];
+    GoldTest::new(rc, msgs).run();
+}

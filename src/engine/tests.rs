@@ -2148,6 +2148,185 @@ fn logfile_invalid_path_warns() {
 }
 
 #[test]
+fn succ_flag_skips_when_prev_cond_false() {
+    let mut t = Test::new();
+    let mut flags = Flags::new();
+    flags.succ = true;
+
+    let items = vec![
+        regex_recipe("X-NotPresent:", &t.maildir("first")),
+        Item::Recipe {
+            recipe: Recipe {
+                flags,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("second"),
+                )]),
+            },
+            line: 0,
+        },
+    ];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn succ_flag_skips_when_action_failed() {
+    let mut t = Test::new();
+    let mut wf = Flags::new();
+    wf.wait = true;
+
+    let mut succ = Flags::new();
+    succ.succ = true;
+
+    let items = vec![
+        Item::Recipe {
+            recipe: Recipe {
+                flags: wf,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Pipe {
+                    cmd: "false".into(),
+                    capture: None,
+                },
+            },
+            line: 0,
+        },
+        Item::Recipe {
+            recipe: Recipe {
+                flags: succ,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("second"),
+                )]),
+            },
+            line: 0,
+        },
+    ];
+    assert_eq!(t.process(&items), Outcome::Default);
+}
+
+#[test]
+fn succ_flag_runs_on_success() {
+    let mut t = Test::new();
+    let mut copy = Flags::new();
+    copy.copy = true;
+
+    let mut succ = Flags::new();
+    succ.succ = true;
+
+    let items = vec![
+        Item::Recipe {
+            recipe: Recipe {
+                flags: copy,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("first"))]),
+            },
+            line: 0,
+        },
+        Item::Recipe {
+            recipe: Recipe {
+                flags: succ,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("second"),
+                )]),
+            },
+            line: 0,
+        },
+    ];
+    let p = delivered(t.process(&items));
+    assert!(p.contains("second"));
+}
+
+#[test]
+fn raw_flag_skips_trailing_newline() {
+    let mut t = Test::with_msg("Subject: test\n\nBody");
+    let mut flags = Flags::new();
+    flags.raw = true;
+
+    let path = t.folder("mbox");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags,
+            lockfile: None,
+            conds: vec![],
+            action: Action::Folder(vec![path.clone()]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+    let data = fs::read(&path).unwrap();
+    assert!(
+        !data.ends_with(b"\n\n"),
+        "raw mode should not force trailing newline"
+    );
+}
+
+#[test]
+fn no_raw_forces_trailing_newline() {
+    let mut t = Test::with_msg("Subject: test\n\nBody");
+    let path = t.folder("mbox");
+    let items = vec![Item::Recipe {
+        recipe: Recipe {
+            flags: Flags::new(),
+            lockfile: None,
+            conds: vec![],
+            action: Action::Folder(vec![path.clone()]),
+        },
+        line: 0,
+    }];
+    delivered(t.process(&items));
+    let data = fs::read(&path).unwrap();
+    assert!(
+        data.ends_with(b"\n\n"),
+        "non-raw should force trailing newline"
+    );
+}
+
+#[test]
+fn chain_a_flag_runs_when_prev_matched() {
+    let mut t = Test::new();
+    let mut copy = Flags::new();
+    copy.copy = true;
+
+    let mut chain = Flags::new();
+    chain.chain = true;
+
+    let items = vec![
+        Item::Recipe {
+            recipe: Recipe {
+                flags: copy,
+                lockfile: None,
+                conds: vec![Condition::Regex {
+                    pattern: "Subject:".to_string(),
+                    negate: false,
+                    weight: None,
+                }],
+                action: Action::Folder(vec![PathBuf::from(t.maildir("first"))]),
+            },
+            line: 0,
+        },
+        Item::Recipe {
+            recipe: Recipe {
+                flags: chain,
+                lockfile: None,
+                conds: vec![],
+                action: Action::Folder(vec![PathBuf::from(
+                    t.maildir("second"),
+                )]),
+            },
+            line: 0,
+        },
+    ];
+    let p = delivered(t.process(&items));
+    assert!(p.contains("second"));
+}
+
+#[test]
 fn logfile_empty_silences() {
     let stderr = tempfile::tempfile().unwrap();
     let mut engine =
