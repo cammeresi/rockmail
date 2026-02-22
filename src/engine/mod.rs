@@ -433,12 +433,7 @@ impl Engine {
             }
             VAR_HOST => {
                 if value != self.real_host {
-                    ewarn!(
-                        self,
-                        "HOST mismatch: \"{}\" strstrstr \"{}\"",
-                        self.real_host,
-                        value,
-                    );
+                    ewarn!(self, "HOST mismatched \"{}\"", self.real_host);
                     self.abort = true;
                 }
                 self.env.set(VAR_HOST, self.real_host.clone());

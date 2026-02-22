@@ -2337,3 +2337,88 @@ fn logfile_empty_silences() {
     // Writes should succeed but go to /dev/null
     writeln!(engine.stderr(), "should vanish").unwrap();
 }
+
+#[test]
+fn maildir_chdir_failure_reverts() {
+    let cwd = std::env::current_dir().unwrap();
+    let mut stderr = tempfile::tempfile().unwrap();
+    let read = stderr.try_clone().unwrap();
+    let mut engine =
+        Engine::with_stderr(Environment::new(), SubstCtx::default(), stderr);
+
+    engine.set_var("MAILDIR", "/no/such/directory/at/all");
+
+    // MAILDIR should revert to the actual cwd, not the bad path.
+    let got = engine.get_var("MAILDIR").unwrap().to_owned();
+    assert_eq!(got, cwd.to_string_lossy());
+
+    // Warning should mention the bad path.
+    stderr = read;
+    stderr.rewind().unwrap();
+    let mut buf = String::new();
+    stderr.read_to_string(&mut buf).unwrap();
+    assert!(buf.contains("/no/such/directory"));
+}
+
+#[test]
+fn linebuf_enforces_minimum() {
+    let mut t = Test::new();
+    t.engine.set_var("LINEBUF", "1");
+    assert_eq!(t.engine.get_var("LINEBUF"), Some("128"));
+}
+
+#[test]
+fn linebuf_above_minimum_kept() {
+    let mut t = Test::new();
+    t.engine.set_var("LINEBUF", "4096");
+    assert_eq!(t.engine.get_var("LINEBUF"), Some("4096"));
+}
+
+#[test]
+fn host_mismatch_sets_abort() {
+    let mut env = Environment::new();
+    env.set("HOST", "real.host");
+    let mut engine = Engine::new(env, SubstCtx::default());
+
+    engine.set_var("HOST", "wrong.host");
+
+    assert!(engine.abort);
+    assert_eq!(engine.get_var("HOST"), Some("real.host"));
+}
+
+#[test]
+fn host_match_no_abort() {
+    let mut env = Environment::new();
+    env.set("HOST", "real.host");
+    let mut engine = Engine::new(env, SubstCtx::default());
+
+    engine.set_var("HOST", "real.host");
+
+    assert!(!engine.abort);
+}
+
+#[test]
+fn shift_clamps_to_argv_len() {
+    let ctx = SubstCtx {
+        argv: vec!["a".into(), "b".into()],
+        ..SubstCtx::default()
+    };
+    let mut engine = Engine::new(Environment::new(), ctx);
+
+    engine.set_var("SHIFT", "5");
+
+    assert!(engine.ctx.argv.is_empty());
+}
+
+#[test]
+fn shift_normal() {
+    let ctx = SubstCtx {
+        argv: vec!["a".into(), "b".into(), "c".into()],
+        ..SubstCtx::default()
+    };
+    let mut engine = Engine::new(Environment::new(), ctx);
+
+    engine.set_var("SHIFT", "1");
+
+    assert_eq!(engine.ctx.argv, vec!["b", "c"]);
+}
