@@ -101,9 +101,9 @@ If the `nfs` feature is NOT used, this program may be used under the terms
 of the included BSD license.  If `nfs` is enabled, then the compiled program
 is infected by GPL restrictions and may be used only under GPL restrictions.
 
-#### src/locking/flock.rs
+#### src/locking/flock/
 
-This file is an alternative locking implementation designed for local
+This module is an alternative locking implementation designed for local
 filesystems only, instead of procmail's NFS-oriented algorithm.
 
 ## Author

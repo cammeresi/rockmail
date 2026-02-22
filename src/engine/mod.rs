@@ -45,8 +45,7 @@ use nix::libc::STDERR_FILENO;
 /// Write a prefixed warning to the engine's stderr (`self.stderr`).
 macro_rules! ewarn {
     ($self:expr, $($arg:tt)*) => {
-        let _ = write!(&$self.stderr, "rockmail: ");
-        let _ = writeln!(&$self.stderr, $($arg)*);
+        let _ = writeln!(&$self.stderr, "rockmail: {}", format_args!($($arg)*));
     };
 }
 
@@ -305,6 +304,8 @@ pub struct Engine {
     real_host: String,
     /// Global lockfile held while LOCKFILE is set.
     globlock: Option<FileLock>,
+    /// Flock on the logfile for concurrent safety.
+    loglock: Option<FileLock>,
     /// Signal to stop processing current rcfile (HOST mismatch).
     abort: bool,
     /// Current rcfile name for dry-run output.
@@ -340,6 +341,7 @@ impl Engine {
             exit_was_set: false,
             real_host,
             globlock: None,
+            loglock: None,
             abort: false,
             rcfile: String::new(),
             umask: DEF_UMASK,
@@ -469,11 +471,14 @@ impl Engine {
             self.has_logfile = false;
             return;
         }
+
         let Ok(f) = OpenOptions::new().create(true).append(true).open(path)
         else {
             ewarn!(self, "failed to open logfile: {}", path);
             return;
         };
+
+        self.loglock = FileLock::acquire_blocking(Path::new(path)).ok();
         self.stderr = f;
         self.has_logfile = true;
     }

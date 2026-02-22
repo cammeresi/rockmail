@@ -126,6 +126,12 @@ differently or does not implement:
 In all cases, delivery failures produce `EX_CANTCREAT` (73), or
 `EX_TEMPFAIL` (75) with the `-t` flag, matching procmail.
 
+## Log file locking
+
+Rockmail acquires an exclusive lock on the log file while writing.
+Procmail does not lock the log file, so concurrent deliveries can
+interleave log output.
+
 ## Invalid regex patterns
 
 Procmail's custom regex engine is lenient with malformed patterns like
