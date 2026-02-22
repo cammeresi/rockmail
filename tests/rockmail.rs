@@ -635,6 +635,41 @@ fn dryrun_subst_global_icase() {
 }
 
 #[test]
+fn dryrun_subst_quoted() {
+    dryrun_subst("X=aaa\nX =~ \"s/a/b/g\"", "s/a/b/g -> ");
+}
+
+#[test]
+fn subst_routes_by_transformed_var() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+DEST=spam
+DEST =~ s/am/ecial/
+
+:0
+$DIR/$DEST
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(
+        d.join("special").exists(),
+        "substituted var not used for delivery"
+    );
+    assert!(
+        !d.join("spam").exists(),
+        "original value used despite subst"
+    );
+}
+
+#[test]
 fn header_op_delete_insert() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
