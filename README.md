@@ -9,10 +9,11 @@ Rockmail is a translation of [Procmail][procmail] into Rust.  Procmail is
 a Mail Delivery Agent (MDA) for filtering, sorting, and delivering mail
 on Unix systems.
 
-The goal is a near-100% backward-compatible drop-in replacement.
-Most existing `.procmailrc` files should work without modification.
-A small number of features are deliberately not implemented and a small
-number of differences exist.  They are documented in `COMPATIBILITY.md`.
+The goal is a near-100% backward-compatible, drop-in, "rock solid"
+replacement for Procmail.  Most existing `.procmailrc` files should work
+without modification.  A small number of features are deliberately not
+implemented and a small number of differences exist.  They are documented
+in `COMPATIBILITY.md`.
 
 Some extensions beyond Procmail are also available; see `ENHANCEMENTS.md`.
 
@@ -42,7 +43,7 @@ this software.  Better would be to audit it yourself!
 
 ## Installation
 
-Build it, then feed mail into it, just as you would procmail.
+Build it, then feed mail into it, just as you would Procmail.
 
 If you need further instructions, you probably should not use this
 software.
@@ -108,19 +109,19 @@ On 2026-02-21, the 933 tests that were present comprised:
 "Gold" means an integration test that compares Rockmail output to
 Procmail output (the gold standard) and ensures they are byte identical.
 
-During initial development, gold testing revealed one minor bug in procmail!
+During initial development, gold testing revealed one minor bug in Procmail!
 
 If running the tests yourself, it would be well to:
 
 - Use `cargo nextest run` instead of `cargo test`
-- Compile a custom procmail with the ssleep set to zero in `mailfold.c`
+- Compile a custom Procmail with the ssleep set to zero in `mailfold.c`
 
 These two steps speed up the tests by a factor of five.
 
 ## Licensing
 
-Most of this repository is a translation of procmail's C code into Rust.
-That translated code is a work derived from procmail, so the license for
+Most of this repository is a translation of Procmail's C code into Rust.
+That translated code is a work derived from Procmail, so the license for
 that code and the default license for code in this repository is GPLv2,
 the same as for Procmail.
 
@@ -146,7 +147,7 @@ is infected by GPL restrictions and may be used only under GPL restrictions.
 #### src/locking/flock/
 
 This module is an alternative locking implementation designed for local
-filesystems only, instead of procmail's NFS-oriented algorithm.
+filesystems only, instead of Procmail's NFS-oriented algorithm.
 
 ## Author
 
