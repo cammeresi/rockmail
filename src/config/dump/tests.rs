@@ -396,3 +396,128 @@ fn run_empty() {
     let items = run("", "empty.rc").unwrap();
     assert!(items.is_empty());
 }
+
+#[test]
+fn run_parse_error() {
+    assert!(run(":0\n", "bad.rc").is_err());
+}
+
+#[test]
+fn run_line_numbers() {
+    let rc = "\
+MAILDIR=/tmp
+VERBOSE=yes
+
+:0
+* ^From: test
+/dev/null
+
+INCLUDERC=other.rc
+";
+    let items = run(rc, "t.rc").unwrap();
+    assert_eq!(items.len(), 4);
+    let lines: Vec<_> = items
+        .iter()
+        .map(|i| match i {
+            Item::Assign { line, .. }
+            | Item::Recipe { line, .. }
+            | Item::Include { line, .. } => *line,
+            _ => panic!("unexpected item: {i:?}"),
+        })
+        .collect();
+    assert_eq!(lines, [1, 2, 4, 8]);
+}
+
+#[test]
+fn run_nested_block() {
+    let rc = "\
+:0
+* ^From: test
+{
+    :0 c
+    backup/
+
+    :0
+    | /usr/bin/filter
+}
+";
+    let items = run(rc, "t.rc").unwrap();
+    assert_eq!(items.len(), 1);
+    let Item::Recipe { recipe: r, .. } = &items[0] else {
+        panic!("expected recipe");
+    };
+    let Action::Nested(inner) = &r.action else {
+        panic!("expected nested");
+    };
+    assert_eq!(inner.len(), 2);
+}
+
+#[test]
+fn run_weighted_conditions() {
+    let rc = "\
+:0 W
+* 100^0 ^From:.*john
+* -50^1 ^Subject:.*spam
+/dev/null
+";
+    let items = run(rc, "t.rc").unwrap();
+    assert_eq!(items.len(), 1);
+    let Item::Recipe { recipe: r, .. } = &items[0] else {
+        panic!("expected recipe");
+    };
+    assert_eq!(r.conds.len(), 2);
+}
+
+#[test]
+fn run_header_ops() {
+    let rc = "\
+:0
+@I Subject: hello
+
+:0
+@a X-Tag: yes
+";
+    let items = run(rc, "t.rc").unwrap();
+    assert_eq!(items.len(), 2);
+}
+
+#[test]
+fn run_dupecheck() {
+    let rc = "\
+:0 Wh:
+@D 8192 /tmp/.cache
+";
+    let items = run(rc, "t.rc").unwrap();
+    assert_eq!(items.len(), 1);
+}
+
+#[test]
+fn run_includerc_switchrc() {
+    let rc = "\
+INCLUDERC=extra.rc
+SWITCHRC=alt.rc
+SWITCHRC
+";
+    let items = run(rc, "t.rc").unwrap();
+    assert_eq!(items.len(), 3);
+    assert!(
+        matches!(&items[0], Item::Include { path, .. } if path == "extra.rc")
+    );
+    assert!(matches!(&items[1], Item::Switch { path, .. } if path == "alt.rc"));
+    assert!(matches!(&items[2], Item::Switch { path, .. } if path.is_empty()));
+}
+
+#[test]
+fn run_subst_item() {
+    let rc = "X =~ s/old/new/gi\n";
+    let items = run(rc, "t.rc").unwrap();
+    assert_eq!(items.len(), 1);
+    assert!(matches!(
+        &items[0],
+        Item::Subst {
+            global: true,
+            case_insensitive: true,
+            ..
+        }
+    ));
+}
