@@ -236,3 +236,84 @@ fn weight_negative_exponent() {
         },
     );
 }
+
+#[test]
+fn negated_size_less() {
+    assert_eq!(
+        Condition::parse("! < 5000").unwrap(),
+        Condition::Size {
+            op: SizeOp::Less,
+            bytes: 5000,
+            negate: true,
+            weight: None,
+        },
+    );
+}
+
+#[test]
+fn negated_size_greater() {
+    assert_eq!(
+        Condition::parse("! > 2000").unwrap(),
+        Condition::Size {
+            op: SizeOp::Greater,
+            bytes: 2000,
+            negate: true,
+            weight: None,
+        },
+    );
+}
+
+#[test]
+fn weighted_variable() {
+    assert_eq!(
+        Condition::parse("100^1 SENDER ?? ^admin").unwrap(),
+        Condition::Variable {
+            name: "SENDER".into(),
+            pattern: "^admin".into(),
+            weight: Some(Weight { w: 100.0, x: 1.0 }),
+        },
+    );
+}
+
+#[test]
+fn subst_shell() {
+    assert_eq!(
+        Condition::parse("$ ? test -f /tmp/${FILE}").unwrap(),
+        Condition::Subst {
+            inner: Box::new(Condition::Shell {
+                cmd: "test -f /tmp/${FILE}".into(),
+                negate: false,
+                weight: None,
+            }),
+            negate: false,
+        },
+    );
+}
+
+#[test]
+fn subst_variable() {
+    assert_eq!(
+        Condition::parse("$ LAST ?? first").unwrap(),
+        Condition::Subst {
+            inner: Box::new(Condition::Variable {
+                name: "LAST".into(),
+                pattern: "first".into(),
+                weight: None,
+            }),
+            negate: false,
+        },
+    );
+}
+
+#[test]
+fn weighted_negated_size() {
+    assert_eq!(
+        Condition::parse("-10^1 ! > 5").unwrap(),
+        Condition::Size {
+            op: SizeOp::Greater,
+            bytes: 5,
+            negate: true,
+            weight: Some(Weight { w: -10.0, x: 1.0 }),
+        },
+    );
+}
