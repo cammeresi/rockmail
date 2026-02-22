@@ -186,13 +186,34 @@ fn arb_input() -> impl Strategy<Value = Vec<MsgSpec>> {
     proptest::collection::vec(arb_msg(), 3..=10)
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(8))]
-    #[test]
-    fn gold_proptest(rc in arb_rc(), msgs in arb_input()) {
-        let rc = build_rc(&rc);
-        let msgs: Vec<Vec<u8>> = msgs.iter().map(build_msg).collect();
-        let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-        GoldTest::new(&rc, &refs).run();
-    }
+fn run_gold(rc: RcSpec, msgs: Vec<MsgSpec>) {
+    let rc = build_rc(&rc);
+    let msgs: Vec<Vec<u8>> = msgs.iter().map(build_msg).collect();
+    let refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    GoldTest::new(&rc, &refs).run();
 }
+
+macro_rules! gold_proptest {
+    ($($name:ident),+ $(,)?) => {
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(8))]
+            $(
+                #[test]
+                fn $name(rc in arb_rc(), msgs in arb_input()) {
+                    run_gold(rc, msgs);
+                }
+            )+
+        }
+    };
+}
+
+gold_proptest!(
+    gold_proptest_0,
+    gold_proptest_1,
+    gold_proptest_2,
+    gold_proptest_3,
+    gold_proptest_4,
+    gold_proptest_5,
+    gold_proptest_6,
+    gold_proptest_7,
+);
