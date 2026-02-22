@@ -86,11 +86,11 @@ Test coverage exceeds 97% as of 2026-02-21 as measured by `cargo
 llvm-cov`.  Most of the coverage gaps are in error situations that are
 difficult to test in automation.
 
-On 2026-02-21, the following interesting statistics were observed:
+On 2026-02-22, the following interesting statistics were observed:
 
 - 12K lines of C in the original Procmail (as of version 3.24)
-- 21K lines of Rust code
-- of which 13K lines are tests (compared to zero in Procmail)
+- 22K lines of Rust code
+- of which 14K lines are tests (compared to zero in Procmail)
 - for 8K lines of net software
 
 (But remember what the original code contains, to wit:  custom memory
@@ -98,11 +98,11 @@ management, string manipulation, a regular expression engine, etc.
 Although once necessary, all of that code can now, 35 years later,
 be left behind thanks to the Rust standard library and crate ecosystem.)
 
-On 2026-02-21, the 965 tests that were present comprised:
+On 2026-02-22, the 1043 tests that were present comprised:
 
-- 801 unit tests
-- 48 integration tests
-- 112 gold tests
+- 857 unit tests
+- 56 integration tests
+- 126 gold tests
 - 4 regression tests
 
 "Gold" means an integration test that compares Rockmail output to
