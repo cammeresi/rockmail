@@ -1096,3 +1096,57 @@ fn invalid_arg_exits_usage() {
     let (_, code) = run(d, &["--bogus"], input);
     assert_eq!(code, 64, "expected EX_USAGE for invalid argument");
 }
+
+#[test]
+fn lines_header_via_scoring() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+
+:0
+* ! ^Lines:
+{
+    :0B
+    * 1^1 ^.*$
+    { }
+    LINES=$=
+
+    :0
+    @a Lines: $LINES
+}
+",
+    );
+    // Three text lines; trailing newline creates a 4th empty match.
+    let input = b"From: a@host\nSubject: test\n\nOne\nTwo\nThree\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(d.join("inbox")).unwrap();
+    assert!(
+        content.contains("Lines: 4"),
+        "expected Lines: 4: {content:?}"
+    );
+
+    // One text line + trailing empty match.
+    let input = b"From: b@host\nSubject: test\n\nSingle\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(d.join("inbox")).unwrap();
+    assert!(
+        content.contains("Lines: 2"),
+        "expected Lines: 2: {content:?}"
+    );
+
+    // Already has Lines: header — should not be modified.
+    let input = b"From: c@host\nSubject: test\nLines: 99\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let content = fs::read_to_string(d.join("inbox")).unwrap();
+    assert!(
+        content.contains("Lines: 99"),
+        "existing Lines: should be preserved: {content:?}"
+    );
+}
