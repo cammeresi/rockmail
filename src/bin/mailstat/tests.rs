@@ -904,3 +904,28 @@ fn run_terse_format() {
     assert!(!s.contains("Total"));
     assert!(!s.contains("---"));
 }
+
+#[test]
+fn acquire_locks_ok() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("log");
+    fs::write(&base, "").unwrap();
+    fs::write(base.with_added_extension("old"), "").unwrap();
+    let locks = acquire_locks(&base).unwrap();
+    assert_eq!(locks.len(), 2);
+}
+
+#[test]
+fn acquire_locks_bad_path() {
+    let r = acquire_locks(Path::new("/no/such/dir/log"));
+    assert!(r.is_err());
+}
+
+#[test]
+fn parse_rc_invalid_line() {
+    let rc =
+        parse_rc(Cursor::new("ignore foo\nbogus directive\ndate_format %H\n"));
+    assert!(rc.ignores.contains("foo"));
+    assert_eq!(rc.date_fmt.as_deref(), Some("%H"));
+    // bogus line is silently skipped (with stderr warning, but no panic)
+}

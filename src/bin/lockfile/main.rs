@@ -1,5 +1,8 @@
 #![cfg(feature = "nfs")]
 
+#[cfg(test)]
+mod tests;
+
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -69,16 +72,20 @@ fn mailbox_lock() -> Option<PathBuf> {
     Some(PathBuf::from(path))
 }
 
-fn maybe_invert(code: u8, invert: bool) -> ExitCode {
+fn invert_code(code: u8, invert: bool) -> u8 {
     if invert {
         match code {
-            EX_OK => exit(EX_CANTCREAT),
-            EX_CANTCREAT => exit(EX_OK),
-            other => exit(other),
+            EX_OK => EX_CANTCREAT,
+            EX_CANTCREAT => EX_OK,
+            other => other,
         }
     } else {
-        exit(code)
+        code
     }
+}
+
+fn maybe_invert(code: u8, invert: bool) -> ExitCode {
+    exit(invert_code(code, invert))
 }
 
 fn cleanup(acquired: &[PathBuf]) {
@@ -146,9 +153,7 @@ fn handle_exists(
         n if n > 0 => *retries -= 1,
         _ => {}
     }
-    if sleepsec > 0 {
-        sleep(Duration::from_secs(sleepsec));
-    }
+    sleep(Duration::from_secs(sleepsec));
     Ok(false)
 }
 
@@ -160,9 +165,7 @@ fn handle_nfs_error(
         eprintln!("lockfile: Retries exhausted on \"{}\"", path.display());
         return Err(EX_UNAVAILABLE);
     }
-    if sleepsec > 0 {
-        sleep(Duration::from_secs(sleepsec));
-    }
+    sleep(Duration::from_secs(sleepsec));
     Ok(())
 }
 

@@ -99,9 +99,9 @@ management, string manipulation, a regular expression engine, etc.
 Although once necessary, all of that code can now, 35 years later,
 be left behind thanks to the Rust standard library and crate ecosystem.)
 
-On 2026-02-21, the 933 tests that were present comprised:
+On 2026-02-21, the 965 tests that were present comprised:
 
-- 769 unit tests
+- 801 unit tests
 - 48 integration tests
 - 112 gold tests
 - 4 regression tests
