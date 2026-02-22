@@ -1204,10 +1204,21 @@ $DIR/matched
     fs::remove_file(d.join("matched")).unwrap();
 
     // Without -p, TESTVAR is wiped.
-    let o = run_env(d, &["-f", "sender@test", &rc], input, &[("TESTVAR", "hello")]);
+    let o = run_env(
+        d,
+        &["-f", "sender@test", &rc],
+        input,
+        &[("TESTVAR", "hello")],
+    );
     assert_eq!(o.code, 0);
-    assert!(!d.join("matched").exists(), "without -p, TESTVAR should be cleared");
-    assert!(d.join("default").exists(), "without -p, should deliver to default");
+    assert!(
+        !d.join("matched").exists(),
+        "without -p, TESTVAR should be cleared"
+    );
+    assert!(
+        d.join("default").exists(),
+        "without -p, should deliver to default"
+    );
 }
 
 #[test]
@@ -1263,5 +1274,100 @@ fn multiple_rcfiles_error() {
     assert!(
         err.contains("too many rc files"),
         "expected 'too many rc files' error: {err:?}"
+    );
+}
+
+#[test]
+fn host_mismatch_aborts() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+HOST=no.such.host.invalid
+
+:0
+matched
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(
+        !d.join("matched").exists(),
+        "recipe should not fire after HOST abort"
+    );
+    assert!(
+        !d.join("default").exists(),
+        "default delivery should be skipped"
+    );
+}
+
+#[test]
+fn delivered_yes_still_delivers_default() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+DELIVERED=yes
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(
+        d.join("default").exists(),
+        "default delivery should still happen"
+    );
+}
+
+#[test]
+fn orgmail_fallback() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/no_such_dir/nope
+ORGMAIL=$DIR/backup
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(d.join("backup").exists(), "ORGMAIL fallback should be used");
+    assert!(
+        !d.join("no_such_dir").exists(),
+        "DEFAULT dir should not be created"
+    );
+}
+
+#[test]
+fn raw_flag_mbox() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+:0 r
+$DIR/raw_out
+",
+    );
+    let input = b"From: a@host\nSubject: Test\n\nBody";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    let data = fs::read(d.join("raw_out")).unwrap();
+    assert!(
+        !data.ends_with(b"\n\n"),
+        "raw mode should not force trailing newline: {data:?}"
     );
 }

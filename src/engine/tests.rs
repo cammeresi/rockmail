@@ -2327,6 +2327,22 @@ fn chain_a_flag_runs_when_prev_matched() {
 }
 
 #[test]
+fn host_mismatch_aborts() {
+    let mut t = Test::new();
+    let inbox = t.maildir("inbox");
+    let items = vec![
+        Item::Assign {
+            name: "HOST".to_string(),
+            value: "no.such.host".to_string(),
+            line: 0,
+        },
+        regex_recipe("Subject:", &inbox),
+    ];
+    assert_eq!(t.process(&items), Outcome::Abort);
+    assert!(!t.folder("inbox").exists());
+}
+
+#[test]
 fn logfile_empty_silences() {
     let stderr = tempfile::tempfile().unwrap();
     let mut engine =
