@@ -2,9 +2,9 @@
 
 ## About
 
-Rockmail is a rewrite of [Procmail](https://en.wikipedia.org/wiki/Procmail)
-in Rust.  Procmail is a Mail Delivery Agent (MDA) for filtering, sorting,
-and delivering mail on Unix systems.
+Rockmail is a translation of [Procmail][procmail] into Rust.  Procmail is
+a Mail Delivery Agent (MDA) for filtering, sorting, and delivering mail
+on Unix systems.
 
 The goal is a near-100% backward-compatible drop-in replacement.
 Most existing `.procmailrc` files should work without modification.
@@ -13,9 +13,44 @@ number of differences exist.  They are documented in `COMPATIBILITY.md`.
 
 Some extensions beyond Procmail are also available; see `ENHANCEMENTS.md`.
 
+[procmail]: https://en.wikipedia.org/wiki/Procmail
+
+## Implementation
+
+This software has been translated from C into Rust using AI, but it is
+not "vibe coded."  The AI worked from the original C source code, and a
+human operator was present at all times and provided guidance as needed.
+All of the code has been reviewed by a human, though that does not mean
+it is correct; several defects were initially unnoticed by the human.
+
+Additionally, large parts of the code have been tested only by machine,
+not by humans in actual usage.  Sorry, but I do not use every feature that
+Procmail has, many of which I did not even know about.  Some features
+are not even documented.  I was very inclusive when porting and only
+omitted features with security problems or that I suspected had not been
+used by anyone anywhere for multiple decades.
+
+I cannot test all of that myself, but see notes on testing below to read
+how I have attempted to bridge the gap.
+
+I am not going to tell you what is tested by my personal setup and what
+is not; it is better that you pay very close attention if you install
+this software.  Better would be to audit it yourself!
+
+## Installation
+
+Build it, then feed mail into it, just as you would procmail.
+
+If you need further instructions, you probably should not use this
+software.
+
 THIS SOFTWARE HAS SEEN LIMITED PRODUCTION USE, AND IT SHOULD BE
 DEPLOYED CAREFULLY.  DO NOT SWAP IT IN AS YOUR PROCMAIL REPLACEMENT
 WITHOUT TESTING!
+
+DO NOT INSTALL THIS SOFTWARE SETUID ROOT!  Root privileges are not needed!
+Root privileges will not be dropped!  Rockmail expects that the MTA will
+setuid to the destination user before starting delivery.
 
 ## Differences from Procmail
 
@@ -44,14 +79,14 @@ differences.
 
 ## Testing and source code statistics
 
-Test coverage exceeds 96% as of 2026-02-18.  Most of the coverage gaps are
+Test coverage exceeds 97% as of 2026-02-21.  Most of the coverage gaps are
 in error situations that are difficult to test in automation.
 
-On 2026-02-19, the following interesting statistics were observed:
+On 2026-02-21, the following interesting statistics were observed:
 
 - 12K lines of C in the original Procmail (as of version 3.24)
-- 19K lines of Rust code
-- of which 11K lines are tests (compared to zero in Procmail)
+- 21K lines of Rust code
+- of which 13K lines are tests (compared to zero in Procmail)
 - for 8K lines of net software
 
 (But remember what the original code contains, to wit:  custom memory
@@ -59,15 +94,17 @@ management, string manipulation, a regular expression engine, etc.
 Although once necessary, all of that code can now, 35 years later,
 be left behind thanks to the Rust standard library and crate ecosystem.)
 
-The 860 tests that were present comprised:
+On 2026-02-21, the 933 tests that were present comprised:
 
-- 725 unit tests
-- 41 integration tests
-- 90 gold tests
+- 769 unit tests
+- 48 integration tests
+- 112 gold tests
 - 4 regression tests
 
-"Gold" means an integration test that compares Rockmail output to Procmail
-output (the gold standard) and ensures they are byte identical.
+"Gold" means an integration test that compares Rockmail output to
+Procmail output (the gold standard) and ensures they are byte identical.
+
+During initial development, gold testing revealed one minor bug in procmail!
 
 If running the tests yourself, it would be well to:
 
@@ -80,10 +117,11 @@ These two steps speed up the tests by a factor of five.
 
 Most of this repository is a translation of procmail's C code into Rust.
 That translated code is a work derived from procmail, so the license for
-that code and the default license for code in this repository is GPLv2.
+that code and the default license for code in this repository is GPLv2,
+the same as for Procmail.
 
 Some smaller parts of the code are NOT derivatives and are therefore subject
-to a license chosen by me, which is the 3-clause BSD license.
+to a license chosen by me, which is the included 3-clause BSD license.
 
 ### BSD-licensed components
 
