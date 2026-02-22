@@ -40,6 +40,33 @@ fn run_full(dir: &Path, args: &[&str], input: &[u8]) -> Output {
     }
 }
 
+fn run_env(
+    dir: &Path, args: &[&str], input: &[u8], env: &[(&str, &str)],
+) -> Output {
+    let mut cmd = Command::new(common::rockmail());
+    cmd.args(args)
+        .current_dir(dir)
+        .env("RUST_LOG", "info")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for &(k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("failed to spawn rockmail");
+    if let Err(e) = child.stdin.take().unwrap().write_all(input)
+        && e.kind() != ErrorKind::BrokenPipe
+    {
+        panic!("write stdin: {e}");
+    }
+    let out = child.wait_with_output().expect("wait");
+    Output {
+        stdout: out.stdout,
+        stderr: out.stderr,
+        code: out.status.code().unwrap_or(-1),
+    }
+}
+
 fn run(dir: &Path, args: &[&str], input: &[u8]) -> (Vec<u8>, i32) {
     let o = run_full(dir, args, input);
     (o.stderr, o.code)
@@ -1148,5 +1175,93 @@ DEFAULT=$DIR/inbox
     assert!(
         content.contains("Lines: 99"),
         "existing Lines: should be preserved: {content:?}"
+    );
+}
+
+#[test]
+fn preserve_env() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+
+:0
+* TESTVAR ?? hello
+$DIR/matched
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let args = ["-p", "-f", "sender@test", &rc];
+
+    // With -p, TESTVAR survives init_env clearing.
+    let o = run_env(d, &args, input, &[("TESTVAR", "hello")]);
+    assert_eq!(o.code, 0);
+    assert!(d.join("matched").exists(), "-p should preserve TESTVAR");
+
+    fs::remove_file(d.join("matched")).unwrap();
+
+    // Without -p, TESTVAR is wiped.
+    let o = run_env(d, &["-f", "sender@test", &rc], input, &[("TESTVAR", "hello")]);
+    assert_eq!(o.code, 0);
+    assert!(!d.join("matched").exists(), "without -p, TESTVAR should be cleared");
+    assert!(d.join("default").exists(), "without -p, should deliver to default");
+}
+
+#[test]
+fn verbose_off_with_logfile() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let log = d.join("log");
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/default
+LOGFILE=$DIR/log
+VERBOSE=off
+
+:0
+* ^Subject: Test
+inbox
+",
+    );
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    assert_eq!(code, 0);
+    assert!(log.exists(), "logfile not created");
+    let content = fs::read_to_string(&log).unwrap();
+    assert!(
+        content.contains("Folder:"),
+        "logabstract should appear with LOGFILE set: {content:?}"
+    );
+    assert!(
+        !content.contains("Match"),
+        "verbose Match line should not appear with VERBOSE=off: {content:?}"
+    );
+    assert!(
+        !content.contains("Delivered"),
+        "verbose Delivered line should not appear with VERBOSE=off: {content:?}"
+    );
+}
+
+#[test]
+fn multiple_rcfiles_error() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(d, "MAILDIR=$DIR\nDEFAULT=$DIR/default\n");
+    let rc2 = d.join("rcfile2");
+    fs::write(&rc2, "# empty\n").unwrap();
+    fs::set_permissions(&rc2, Permissions::from_mode(0o644)).unwrap();
+    let rc2 = rc2.to_str().unwrap();
+    let input = b"From: user@host\nSubject: Test\n\nBody\n";
+    let (stderr, code) = run(d, &["-f", "sender@test", &rc, rc2], input);
+    assert_eq!(code, 73, "expected EX_CANTCREAT for multiple rcfiles");
+    let err = String::from_utf8_lossy(&stderr);
+    assert!(
+        err.contains("too many rc files"),
+        "expected 'too many rc files' error: {err:?}"
     );
 }
