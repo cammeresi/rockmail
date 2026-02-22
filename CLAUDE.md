@@ -55,7 +55,7 @@ Extensions are described in `ENHANCEMENTS.md`.
 
 # Procmail Source
 
-The original C source is at `/home/sac/src/procmail/src/`.  Key files:
+The original C source is at `~/src/procmail/src/`.  Key files:
 
 - `procmail.c` — main program
 - `misc.c` — condition evaluation, weighted scoring

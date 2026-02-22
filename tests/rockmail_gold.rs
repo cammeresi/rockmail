@@ -1313,12 +1313,12 @@ MAILDIR=$MAILDIR
 DEFAULT=$DEFAULT
 
 :0
-* ^TOsac@cheesecake\\.org
+* ^TOcharles@example\\.org
 matched
 ";
     let msgs: &[&[u8]] = &[
-        b"From: x@host\nTo: alice@host\nCc: steve@coach.com,\n sac@cheesecake.org\n\nBody\n",
-        b"From: x@host\nTo: sac@cheesecake.org\n\nBody\n",
+        b"From: x@host\nTo: alice@host\nCc: steve@example.com,\n charles@example.org\n\nBody\n",
+        b"From: x@host\nTo: charles@example.org\n\nBody\n",
         b"From: x@host\nTo: bob@host\n\nBody\n",
     ];
     GoldTest::new(rc, msgs).run();
