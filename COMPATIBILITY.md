@@ -90,6 +90,8 @@ Procmail has a `NO_NFS_ATIME_HACK` guard that writes the first byte of
 an mbox, checks if `atime == mtime`, and sleeps one second if needed.
 This tricks NFS into cache invalidation so other processes see new mail.
 Rockmail does not implement this.  NFS mbox delivery is increasingly rare.
+If you need a post-delivery delay, use the `DELAY` variable (see
+`ENHANCEMENTS.md`).
 
 ## Signal handling
 

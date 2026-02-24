@@ -112,6 +112,20 @@ size in bytes; `cachefile` is the path to the circular cache.
 
 There is no sender-based (`-r`) equivalent — only Message-ID detection.
 
+## Delay Before Exit (`DELAY`)
+
+Set `DELAY` to a number of seconds (possibly fractional) to pause after
+delivery and TRAP execution, before exiting.
+
+```
+DELAY=2
+DELAY=0.5
+```
+
+This replaces procmail's hardcoded one-second sleep (which rockmail does
+not implement).  Unlike that fixed delay, `DELAY` is configurable and
+defaults to no delay at all.
+
 ## Windows Line Endings in Rcfiles
 
 Rcfiles with CRLF (`\r\n`) line endings are handled transparently.

@@ -5,6 +5,7 @@ use std::io::{ErrorKind, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 use tempfile::TempDir;
 
@@ -1388,4 +1389,24 @@ $DIR/raw_out
         !data.ends_with(b"\n\n"),
         "raw mode should not force trailing newline: {data:?}"
     );
+}
+
+#[test]
+fn delay_variable() {
+    let dir = TempDir::new().unwrap();
+    let d = dir.path();
+    let rc = write_rc(
+        d,
+        "\
+MAILDIR=$DIR
+DEFAULT=$DIR/inbox
+DELAY=0.3
+",
+    );
+    let input = b"From: a@host\nSubject: Test\n\nBody\n";
+    let t = Instant::now();
+    let (_, code) = run(d, &["-f", "sender@test", &rc], input);
+    let elapsed = t.elapsed().as_secs_f64();
+    assert_eq!(code, 0);
+    assert!(elapsed >= 0.2, "DELAY did not pause: {elapsed:.3}s");
 }

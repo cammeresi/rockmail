@@ -111,6 +111,7 @@ var!(SHIFT);
 var!(PROCMAIL_OVERFLOW);
 var!(USER_SHELL);
 var!(TZ);
+var!(DELAY);
 
 // Standalone constants (non-string types or not variable names)
 pub const DEF_LINEBUF: usize = 2048;

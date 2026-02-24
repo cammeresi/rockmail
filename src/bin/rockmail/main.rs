@@ -7,6 +7,8 @@ use std::io::{self, ErrorKind, IsTerminal, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::thread;
+use std::time::Duration;
 
 use clap::Parser;
 use miette::MietteHandlerOpts;
@@ -306,8 +308,7 @@ fn exit_code(engine: &Engine) -> Option<u8> {
     if !engine.exit_was_set() {
         return None;
     }
-    let v = engine.get_var(VAR_EXITCODE)?;
-    v.parse::<u8>().ok()
+    engine.get_var(VAR_EXITCODE)?.parse::<u8>().ok()
 }
 
 /// Build default environment.
@@ -434,6 +435,10 @@ fn run(
     }
 
     engine.run_trap(&msg);
+
+    if let Some(secs) = engine.env().get_float(&DELAY).filter(|&s| s > 0.0) {
+        thread::sleep(Duration::from_secs_f64(secs));
+    }
 
     Ok(exit_code(&engine))
 }

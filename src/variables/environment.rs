@@ -84,6 +84,14 @@ impl Environment {
         self.vars.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
+    /// Parse as f64.  Returns `None` if unset or unparseable.
+    pub fn get_float<T>(&self, v: &T) -> Option<f64>
+    where
+        T: VarName + ?Sized,
+    {
+        self.get(v).and_then(|s| s.parse().ok())
+    }
+
     /// Zero or negative means "no timeout", matching procmail's `alarm(0)`.
     pub fn timeout(&self) -> Duration {
         let secs = self.get_num(&TIMEOUT);

@@ -392,6 +392,11 @@ impl Engine {
         elog!(self, "[{}:{}] {}", self.rcfile, line, msg);
     }
 
+    /// Borrow the environment.
+    pub fn env(&self) -> &Environment {
+        &self.env
+    }
+
     /// Look up a variable by name.
     pub fn get_var(&self, name: &str) -> Option<&str> {
         self.env.get(name)
