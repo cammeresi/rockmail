@@ -2007,6 +2007,23 @@ fallback/
 }
 
 #[test]
+fn cli_assignment() {
+    let rc = "\
+MAILDIR=$MAILDIR
+DEFAULT=$DEFAULT
+
+:0
+* $ ^Subject:.*$WHO
+matched
+";
+    let msgs: &[&[u8]] = &[
+        b"From: a@host\nSubject: alice\n\nBody\n",
+        b"From: b@host\nSubject: other\n\nBody\n",
+    ];
+    GoldTest::new(rc, msgs).args(&["WHO=alice"]).run();
+}
+
+#[test]
 fn raw_flag_mbox() {
     let rc = "\
 MAILDIR=$MAILDIR

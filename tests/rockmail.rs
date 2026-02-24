@@ -1116,6 +1116,24 @@ DEFAULT=$DIR/inbox
 }
 
 #[test]
+fn version_flag() {
+    let dir = TempDir::new().unwrap();
+    let o = run_full(dir.path(), &["-v"], b"");
+    assert_eq!(o.code, 0, "expected exit 0 for -v");
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.contains("rockmail"), "expected version output: {out:?}");
+}
+
+#[test]
+fn help_flag() {
+    let dir = TempDir::new().unwrap();
+    let o = run_full(dir.path(), &["-h"], b"");
+    assert_eq!(o.code, 0, "expected exit 0 for -h");
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.contains("Usage:"), "expected help output: {out:?}");
+}
+
+#[test]
 fn invalid_arg_exits_usage() {
     let dir = TempDir::new().unwrap();
     let d = dir.path();
