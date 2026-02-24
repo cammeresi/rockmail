@@ -1,0 +1,4 @@
+#!/bin/sh
+
+cargo nextest run -E 'not test(locking) and not test(timeout) and not test(proptest)'
+
