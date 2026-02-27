@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="rocky.png" alt="Rocky and Ferris" />
+</p>
+
 # ROCKMAIL — Rust Only Collator and Keeper of MAIL
 
 [![CI](https://github.com/cammeresi/rockmail/workflows/Rust/badge.svg)](https://github.com/cammeresi/rockmail/actions)
